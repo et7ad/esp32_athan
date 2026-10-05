@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "note": "One entry per mosque key. The key is the folder name docs/athantimes/<key>/ and must also be in the Location list of firmware/athan.yaml. tz is a POSIX time-zone string (copied into every yearly file). doha_after_sunrise and iqama_after (minutes) are only used by the scripts when a source has no Doha or no iqama column.",
+  "mosques": {
+    "davis":        {"name": "Islamic Center of Davis",       "tz": "PST8PDT,M3.2.0,M11.1.0", "doha_after_sunrise": 20, "source": "Dr. Albara Ramli's Iqamah Times (albara.ramli.net/iqamah)"},
+    "sclaramca":    {"name": "MCA Santa Clara",               "tz": "PST8PDT,M3.2.0,M11.1.0", "doha_after_sunrise": 15, "source": "mcabayarea.org PDF timetable (scripts/santaclara_prayer_times_parser.py)"},
+    "sclaraalnoor": {"name": "Masjid Al-Noor, Santa Clara",   "tz": "PST8PDT,M3.2.0,M11.1.0", "doha_after_sunrise": 15, "source": "mcabayarea.org PDF timetable (scripts/santaclara_prayer_times_parser.py)"},
+    "woodland":     {"name": "Woodland Mosque",               "tz": "PST8PDT,M3.2.0,M11.1.0", "doha_after_sunrise": 15, "source": "woodlandmosque.com"},
+    "masjid15":     {"name": "Visalia, California",           "tz": "PST8PDT,M3.2.0,M11.1.0", "doha_after_sunrise": 15, "source": "IslamicFinder yearly page (scripts/parse_Islamicfinder/), see masjid15/README.md"}
+  },
+  "iqama_after_default": {"fajr": 30, "dhuhar": 10, "asr": 10, "maghrib": 10, "isha": 20}
+}

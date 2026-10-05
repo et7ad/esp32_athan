@@ -1,0 +1,1583 @@
+# =====================================================================================================================
+# Athan clock, version 3: ESP32-S3-WROOM-1-N16R8 + MAX98357A. ESPHome 2026.9 or newer.
+#
+#   Build:   esphome run firmware/athan.yaml        (first flash over USB-C: it also writes partitions.csv)
+#   Docs:    README.md (owners), DEVELOPER.md (internals), version3_planning.md (design), CLAUDE.md (agents)
+#
+# Before the first build, put the two menu tones in firmware/sounds/ (README "Building"):
+#   sounds/click.mp3   (menu click,   V2 file C3)      sounds/volume.mp3  (volume tone, V2 file C2)
+#
+# Behaviour lives here (menus, schedule, web entities). What ESPHome lacks (replaceable sounds in flash, the
+# GitHub lists, radio subscriptions, yearly prayer files, runtime time zone, the /audio page) is the custom
+# component in components/athan/.
+# =====================================================================================================================
+
+substitutions:
+  device_name: athan
+  friendly_name: Athan
+  project_version: "3.0.0"
+  # This repository's docs/ folder over HTTPS (lists, stations, yearly prayer files)
+  data_url: "https://raw.githubusercontent.com/et7ad/esp32_athan/main/docs"
+  # Firmware updates: manifest attached to the latest GitHub Release (scripts/make_release_manifest.py)
+  update_manifest: "https://github.com/et7ad/esp32_athan/releases/latest/download/manifest.json"
+
+  # Pins: version3_planning.md section 3.3
+  pin_i2s_bclk: GPIO5
+  pin_i2s_lrclk: GPIO6
+  pin_i2s_dout: GPIO7
+  pin_amp_sd: GPIO15       # MAX98357A SD_MODE through 560 kOhm: high = on (mono mix), low/floating = off
+  pin_sda: GPIO8
+  pin_scl: GPIO9
+  pin_next: GPIO10
+  pin_select: GPIO11
+  pin_relay: GPIO12
+  pin_led: GPIO13
+
+  # OLED orientation / contrast
+  oled_flip_x: "true"
+  oled_flip_y: "true"
+  oled_contrast: "1.0"
+
+  # Pre-Fajr Tawashih: minutes before Fajr, and how long the relay stays on
+  prefajr_offset_min: "25"
+  prefajr_relay_min: "15"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  project:
+    name: et7ad.esp32_athan
+    version: ${project_version}
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          // First boot: Fajr volume starts equal to the main volume.
+          if (id(fajr_volume_level) < 0) id(fajr_volume_level) = id(volume_level);
+          id(athan_core).set_location(id(selected_location_key));
+      # Wi-Fi reset: power up holding BOTH buttons. Overwrites the saved network, so setup mode starts
+      # (Bluetooth, then the hotspot).
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: ui_next
+              - binary_sensor.is_on: ui_select
+          then:
+            - logger.log: "Both buttons held at power-up: forgetting Wi-Fi"
+            - lambda: |-
+                wifi::global_wifi_component->clear_sta();
+                wifi::global_wifi_component->save_wifi_sta("doesntexist", "passwordfornonetwork");
+            - repeat:
+                count: 3
+                then:
+                  - output.turn_on: led_output
+                  - delay: 300ms
+                  - output.turn_off: led_output
+                  - delay: 300ms
+            - button.press: web_restart
+      # Button unlock: power up holding exactly ONE button.
+      - if:
+          condition:
+            lambda: 'return id(buttons_locked) && (id(ui_next).state != id(ui_select).state);'
+          then:
+            - lambda: |-
+                id(buttons_locked) = false;
+                ESP_LOGI("ui", "Buttons unlocked (one button held at power-up)");
+            - repeat:
+                count: 3
+                then:
+                  - output.turn_on: led_output
+                  - delay: 150ms
+                  - output.turn_off: led_output
+                  - delay: 150ms
+      - script.execute: apply_volume
+      - script.execute: update_display
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  partitions: partitions.csv
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+
+# Home Assistant native API (optional; the web page works without it)
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: "/A5YakHWYfXLiBWI5Z92v0FWiaMsWbCUCWD41zlLPYk="
+
+web_server:
+  version: 3
+  log: false
+  sorting_groups:
+    - id: grp_now
+      name: "Now"
+      sorting_weight: 10
+    - id: grp_athan
+      name: "Athan"
+      sorting_weight: 20
+    - id: grp_prayers
+      name: "Athan On/Off per Prayer"
+      sorting_weight: 30
+    - id: grp_sounds
+      name: "Sounds (change them at /audio)"
+      sorting_weight: 35
+    - id: grp_radio
+      name: "Radio"
+      sorting_weight: 40
+    - id: grp_stations
+      name: "Radio Stations"
+      sorting_weight: 45
+    - id: grp_location
+      name: "Location and Prayer Times"
+      sorting_weight: 50
+    - id: grp_system
+      name: "System"
+      sorting_weight: 60
+
+ota:
+  - platform: esphome
+    encryption:
+      key: "/A5YakHWYfXLiBWI5Z92v0FWiaMsWbCUCWD41zlLPYk="   # same key as the api (ESPHome's recommendation)
+  - platform: http_request
+  # The web page's firmware upload form. Also REQUIRED for the /audio page's file upload: ESPHome only routes
+  # multipart uploads to handlers when this platform is present.
+  - platform: web_server
+
+http_request:
+  verify_ssl: true
+  timeout: 20s
+
+update:
+  - platform: http_request
+    id: fw_update
+    name: "Firmware"
+    source: ${update_manifest}
+    update_interval: 6h
+    web_server:
+      sorting_group_id: grp_system
+      sorting_weight: 1
+
+# No network is compiled in: Wi-Fi is set over Bluetooth (esp32_improv) or the fallback hotspot.
+wifi:
+  ap:
+    ssid: "AthanFallbackHotspot"
+    password: "athan404"
+    ap_timeout: 3min
+  on_connect:
+    - logger.log: "Wi-Fi connected"
+    - ble.disable:
+    - script.execute: update_display
+  on_disconnect:
+    - ble.enable:
+
+captive_portal:
+
+esp32_ble:
+  use_psram: true
+  max_connections: 1
+
+# Wi-Fi setup over Bluetooth (Improv). Starts when there is no working Wi-Fi; pressing Select on the device
+# authorises the phone for a minute.
+esp32_improv:
+  id: improv_ble
+  authorizer: ui_select
+  authorized_duration: 1min
+  wifi_timeout: 15s
+  status_indicator: led_output
+  on_state:
+    - script.execute: update_display   # "BT: press Select" / "BT: allowed" (update_display guards is_ready())
+
+i2c:
+  sda: ${pin_sda}
+  scl: ${pin_scl}
+  frequency: 400kHz
+  scan: true
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Audio: media player -> resamplers -> mixer -> I2S -> MAX98357A
+# ---------------------------------------------------------------------------------------------------------------------
+i2s_audio:
+  - id: i2s_out
+    i2s_lrclk_pin: ${pin_i2s_lrclk}
+    i2s_bclk_pin: ${pin_i2s_bclk}
+
+speaker:
+  - platform: i2s_audio
+    id: i2s_speaker
+    i2s_audio_id: i2s_out
+    i2s_dout_pin: ${pin_i2s_dout}
+    dac_type: external
+    sample_rate: 48000
+    bits_per_sample: 16bit
+    channel: mono
+  - platform: mixer
+    id: audio_mixer
+    output_speaker: i2s_speaker
+    num_channels: 1
+    source_speakers:
+      - id: announce_mixer_input
+        timeout: never
+      - id: media_mixer_input
+        timeout: never
+  - platform: resampler
+    id: announce_resampler
+    output_speaker: announce_mixer_input
+  - platform: resampler
+    id: media_resampler
+    output_speaker: media_mixer_input
+
+media_player:
+  - platform: speaker
+    id: player
+    name: "Speaker"
+    task_stack_in_psram: true
+    volume_min: 0.0
+    volume_max: 1.0
+    volume_initial: 0.5
+    volume_increment: 0.1
+    # Athan, tawashih, tick and menu tones (stored MP3s)
+    announcement_pipeline:
+      speaker: announce_resampler
+      format: MP3
+      num_channels: 1
+      sample_rate: 48000
+    # Radio and previews: every codec (MP3, Opus, FLAC, WAV)
+    media_pipeline:
+      speaker: media_resampler
+      format: NONE
+      num_channels: 1
+      sample_rate: 48000
+    files:
+      - id: tone_click
+        file: sounds/click.mp3
+      - id: tone_volume
+        file: sounds/volume.mp3
+    on_play:
+      - output.turn_on: amp_enable
+      - script.stop: amp_idle_off
+    on_announcement:
+      - output.turn_on: amp_enable
+      - script.stop: amp_idle_off
+    on_idle:
+      - script.execute: amp_idle_off
+
+athan:
+  id: athan_core
+  media_player: player
+  time_id: sntp_time
+  data_url: ${data_url}
+  # Own links of radio slots 1..10 (the text entities below), used when a slot does not follow the project list
+  radio_urls: [radio_url_1, radio_url_2, radio_url_3, radio_url_4, radio_url_5,
+               radio_url_6, radio_url_7, radio_url_8, radio_url_9, radio_url_10]
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [athan]
+
+output:
+  - platform: gpio
+    id: amp_enable
+    pin: ${pin_amp_sd}
+  - platform: gpio
+    id: led_output
+    pin: ${pin_led}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Buttons. Menu state machine (ui_mode):
+#   0 normal  1 main menu  2 sound list (list_slot: 0 athan, 1 fajr, 2 tawashih, 3 tick)  3 location  4 volume
+#   5 fajr volume  6 athan on/off  7 info  8 tick window  9 tick start hour  10 tick end hour  11 radio
+#   12 install progress
+# Main menu items (index, 16 items, not persisted):
+#   0 Athan 1 Fajr Athan 2 Tawashih 3 Hourly Tick 4 Tick Window 5 Athan On/Off 6 Pre-Fajr 7 Radio 8 Location
+#   9 Volume 10 Fajr Volume 11 Clock 12 Update 13 Lock Buttons 14 Info 15 Cancel
+# ---------------------------------------------------------------------------------------------------------------------
+binary_sensor:
+  - platform: gpio
+    id: ui_next
+    name: "ui_next"
+    internal: true
+    pin:
+      number: ${pin_next}
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      then:
+        - lambda: |-
+            id(ui_last_activity) = millis();
+            const bool audio_on = id(athan_playing) || id(athan_core).slot_playing() ||
+                                  id(athan_core).radio_active() >= 0 ||
+                                  id(player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
+            if (id(buttons_locked)) {
+              id(silence_audio).execute();
+              return;
+            }
+            if (id(ui_mode) == 0) {
+              if (audio_on) {
+                id(silence_audio).execute();
+              } else {
+                id(external_relay).toggle();   // idle: Next toggles the relay, as on V2
+              }
+              id(update_display).execute();
+              return;
+            }
+            const int m = id(ui_mode);
+            if (m == 1) {
+              id(ui_menu_index) = (id(ui_menu_index) + 1) % 16;
+              if (id(ui_menu_index) == 12) id(update_check_state) = 0;
+            } else if (m == 2) {
+              const int slot = id(list_slot);
+              const int n = id(athan_core).catalog_size(slot) + (slot == 3 ? 1 : 0);   // tick list starts with "Off"
+              if (n > 0) {
+                id(list_index) = (id(list_index) + 1) % n;
+                const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
+                if (entry >= 0 && !id(athan_playing)) id(athan_core).preview_catalog(slot, entry);
+                else if (entry < 0) id(athan_core).stop_media();
+              }
+            } else if (m == 3) {
+              id(location_index) = (id(location_index) + 1) % (int) id(web_location_select).size();
+            } else if (m == 4) {
+              id(volume_level) = (id(volume_level) <= 10) ? 100 : id(volume_level) - 10;
+              id(apply_volume).execute();
+              id(play_tone_volume).execute();
+            } else if (m == 5) {
+              id(fajr_volume_level) = (id(fajr_volume_level) <= 10) ? 100 : id(fajr_volume_level) - 10;
+              id(apply_fajr_volume).execute();
+              id(play_tone_volume).execute();
+            } else if (m == 6) {
+              id(mute_index) = (id(mute_index) + 1) % 6;
+            } else if (m == 8) {
+              id(tickwin_index) = (id(tickwin_index) + 1) % 3;
+            } else if (m == 9) {
+              id(htick_start_hour) = (id(htick_start_hour) + 1) % 24;
+            } else if (m == 10) {
+              id(htick_end_hour) = (id(htick_end_hour) + 1) % 24;
+            } else if (m == 11) {
+              // next radio slot that has something to play
+              for (int k = 1; k <= 10; k++) {
+                int c = (id(radio_cursor) + k) % 10;
+                if (id(athan_core).station_available(c, id(radio_subscribed)[c])) {
+                  id(radio_cursor) = c;
+                  break;
+                }
+              }
+            }
+            id(update_display).execute();
+
+  - platform: gpio
+    id: ui_select
+    name: "ui_select"
+    internal: true
+    pin:
+      number: ${pin_select}
+      mode: INPUT_PULLUP
+      inverted: true
+    on_press:
+      then:
+        - lambda: |-
+            id(ui_last_activity) = millis();
+            const bool audio_on = id(athan_playing) || id(athan_core).slot_playing() ||
+                                  id(athan_core).radio_active() >= 0 ||
+                                  id(player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
+            if (id(buttons_locked)) {
+              id(silence_audio).execute();
+              return;
+            }
+            if (id(ui_mode) == 0) {
+              if (audio_on) {
+                id(silence_audio).execute();
+                return;
+              }
+              if (!id(sntp_time).now().is_valid() && id(improv_ble).is_active() &&
+                  !wifi::global_wifi_component->is_connected()) {
+                // Setup screen showing: this press only authorises the phone (esp32_improv authorizer), no menu.
+                id(update_display).execute();
+                return;
+              }
+              id(ui_mode) = 1;
+              id(ui_menu_index) = 0;
+              id(update_check_state) = 0;
+              id(play_tone_click).execute();
+              id(update_display).execute();
+              return;
+            }
+            const int m = id(ui_mode);
+            if (m == 1) {
+              const int item = id(ui_menu_index);
+              if (item <= 3) {
+                // sound lists: 0 athan, 1 fajr, 2 tawashih, 3 tick
+                id(list_slot) = item;
+                id(list_index) = 0;
+                id(ui_mode) = 2;
+                if (!id(athan_core).catalog_ready()) id(athan_core).fetch_catalog();
+                if (item == 1) id(apply_fajr_volume).execute();   // Fajr previews at the Fajr volume
+                id(play_tone_click).execute();
+              } else if (item == 4) {
+                id(ui_mode) = 8;
+                id(tickwin_index) = 0;
+                id(play_tone_click).execute();
+              } else if (item == 5) {
+                id(ui_mode) = 6;
+                id(mute_index) = 0;
+                id(play_tone_click).execute();
+              } else if (item == 6) {
+                id(prefajr_enabled) = !id(prefajr_enabled);   // toggles in place
+                ESP_LOGI("ui", "Pre-Fajr Tawashih %s", id(prefajr_enabled) ? "ON" : "OFF");
+                id(play_tone_click).execute();
+              } else if (item == 7) {
+                id(ui_mode) = 11;
+                id(radio_cursor) = id(radio_slot);
+              } else if (item == 8) {
+                id(ui_mode) = 3;
+                id(location_index) = 0;
+                for (int i = 0; i < (int) id(web_location_select).size(); i++) {
+                  auto k = id(web_location_select).at(i);
+                  if (k.has_value() && std::string(k.value()) == id(selected_location_key)) id(location_index) = i;
+                }
+                id(play_tone_click).execute();
+              } else if (item == 9) {
+                id(ui_mode) = 4;
+                id(play_tone_volume).execute();
+              } else if (item == 10) {
+                id(ui_mode) = 5;
+                id(apply_fajr_volume).execute();
+                id(play_tone_volume).execute();
+              } else if (item == 11) {
+                id(clock_12h) = !id(clock_12h);   // toggles in place
+                id(play_tone_click).execute();
+              } else if (item == 12) {
+                id(play_tone_click).execute();
+                if (id(update_check_state) == 2) {
+                  id(update_check_state) = 4;
+                  id(fw_update).perform(false);
+                } else if (id(update_check_state) != 3) {
+                  id(check_update).execute();
+                }
+              } else if (item == 13) {
+                id(buttons_locked) = true;
+                id(ui_mode) = 0;
+                id(play_tone_click).execute();
+              } else if (item == 14) {
+                id(ui_mode) = 7;
+                id(play_tone_click).execute();
+              } else {
+                id(ui_mode) = 0;
+                id(play_tone_click).execute();
+              }
+            } else if (m == 2) {
+              const int slot = id(list_slot);
+              const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
+              id(athan_core).stop_media();
+              if (slot == 1) id(apply_volume).execute();
+              if (slot == 3 && entry < 0) {
+                id(htick_enabled) = false;    // "Off"
+                id(ui_mode) = 0;
+              } else if (id(athan_core).catalog_size(slot) > 0) {
+                if (slot == 3) id(htick_enabled) = true;
+                id(athan_core).install_from_catalog(slot, entry);
+                id(ui_mode) = 12;             // progress screen
+              } else {
+                id(ui_mode) = 0;
+              }
+              id(play_tone_click).execute();
+            } else if (m == 3) {
+              auto k = id(web_location_select).at(id(location_index));
+              if (k.has_value()) {
+                id(selected_location_key) = std::string(k.value());
+                id(athan_core).set_location(id(selected_location_key));
+              }
+              id(ui_mode) = 0;
+              id(play_tone_click).execute();
+            } else if (m == 4) {
+              id(ui_mode) = 0;
+              id(play_tone_click).execute();
+            } else if (m == 5) {
+              id(apply_volume).execute();
+              id(ui_mode) = 0;
+              id(play_tone_click).execute();
+            } else if (m == 6) {
+              static const int prayer_of[5] = {0, 3, 4, 5, 6};   // Fajr, Dhuhr, Asr, Maghrib, Isha
+              if (id(mute_index) < 5) {
+                int p = prayer_of[id(mute_index)];
+                id(athan_enabled)[p] = !id(athan_enabled)[p];
+              } else {
+                id(ui_mode) = 0;
+              }
+              id(play_tone_click).execute();
+            } else if (m == 7 || m == 12) {
+              id(ui_mode) = 0;
+              id(play_tone_click).execute();
+            } else if (m == 8) {
+              if (id(tickwin_index) == 0) id(ui_mode) = 9;
+              else if (id(tickwin_index) == 1) id(ui_mode) = 10;
+              else id(ui_mode) = 0;
+              id(play_tone_click).execute();
+            } else if (m == 9 || m == 10) {
+              id(ui_mode) = 8;
+              id(play_tone_click).execute();
+            } else if (m == 11) {
+              // Select plays the slot (or stops it if it is the one playing) and returns to the clock.
+              const int c = id(radio_cursor);
+              if (id(athan_core).radio_active() == c) {
+                id(athan_core).radio_stop();
+              } else {
+                id(radio_slot) = c;
+                id(radio_start).execute();
+              }
+              id(ui_mode) = 0;
+            }
+            id(update_display).execute();
+
+  - platform: template
+    name: "Athan Playing"
+    id: web_athan_playing
+    icon: "mdi:volume-high"
+    lambda: return id(athan_playing);
+    web_server:
+      sorting_group_id: grp_now
+      sorting_weight: 2
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Switches. Template switches that mirror a global MUST use restore_mode: DISABLED (any other mode runs their
+# actions inside setup(), before the display exists: the V6 boot loop). The lambda reports the state.
+# ---------------------------------------------------------------------------------------------------------------------
+switch:
+  - platform: gpio
+    id: external_relay
+    name: "External Relay"
+    pin: ${pin_relay}
+    restore_mode: RESTORE_DEFAULT_OFF
+    web_server:
+      sorting_group_id: grp_system
+      sorting_weight: 5
+  - platform: template
+    name: "Fajr Athan"
+    id: web_athan_fajr
+    icon: "mdi:bell-ring"
+    restore_mode: DISABLED
+    lambda: return id(athan_enabled)[0];
+    turn_on_action: [lambda: 'id(athan_enabled)[0] = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(athan_enabled)[0] = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_prayers, sorting_weight: 1}
+  - platform: template
+    name: "Dhuhr Athan"
+    id: web_athan_dhuhr
+    icon: "mdi:bell-ring"
+    restore_mode: DISABLED
+    lambda: return id(athan_enabled)[3];
+    turn_on_action: [lambda: 'id(athan_enabled)[3] = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(athan_enabled)[3] = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_prayers, sorting_weight: 2}
+  - platform: template
+    name: "Asr Athan"
+    id: web_athan_asr
+    icon: "mdi:bell-ring"
+    restore_mode: DISABLED
+    lambda: return id(athan_enabled)[4];
+    turn_on_action: [lambda: 'id(athan_enabled)[4] = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(athan_enabled)[4] = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_prayers, sorting_weight: 3}
+  - platform: template
+    name: "Maghrib Athan"
+    id: web_athan_maghrib
+    icon: "mdi:bell-ring"
+    restore_mode: DISABLED
+    lambda: return id(athan_enabled)[5];
+    turn_on_action: [lambda: 'id(athan_enabled)[5] = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(athan_enabled)[5] = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_prayers, sorting_weight: 4}
+  - platform: template
+    name: "Isha Athan"
+    id: web_athan_isha
+    icon: "mdi:bell-ring"
+    restore_mode: DISABLED
+    lambda: return id(athan_enabled)[6];
+    turn_on_action: [lambda: 'id(athan_enabled)[6] = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(athan_enabled)[6] = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_prayers, sorting_weight: 5}
+  - platform: template
+    name: "Pre-Fajr Tawashih"
+    id: web_prefajr
+    icon: "mdi:weather-night"
+    restore_mode: DISABLED
+    lambda: return id(prefajr_enabled);
+    turn_on_action: [lambda: 'id(prefajr_enabled) = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(prefajr_enabled) = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 6}
+  - platform: template
+    name: "Hourly Tick"
+    id: web_htick_enabled
+    icon: "mdi:bell-outline"
+    restore_mode: DISABLED
+    lambda: return id(htick_enabled);
+    turn_on_action: [lambda: 'id(htick_enabled) = true;']
+    turn_off_action: [lambda: 'id(htick_enabled) = false;']
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 7}
+  - platform: template
+    name: "Buttons Locked"
+    id: web_buttons_locked
+    icon: "mdi:lock"
+    restore_mode: DISABLED
+    lambda: return id(buttons_locked);
+    turn_on_action: [lambda: 'id(buttons_locked) = true; id(ui_mode) = 0; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(buttons_locked) = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_now, sorting_weight: 5}
+  - platform: template
+    name: "12-hour Clock"
+    id: web_clock_12h
+    icon: "mdi:clock-time-four-outline"
+    restore_mode: DISABLED
+    lambda: return id(clock_12h);
+    turn_on_action: [lambda: 'id(clock_12h) = true; id(update_display).execute();']
+    turn_off_action: [lambda: 'id(clock_12h) = false; id(update_display).execute();']
+    web_server: {sorting_group_id: grp_now, sorting_weight: 6}
+  # Radio slots: ON = follow the project's station list (docs/radio/stations.json, link fetched on every play);
+  # OFF = play the slot's own link below.
+  - {platform: template, name: "Radio 1 follows project list", id: radio_sub_1, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[0];', turn_on_action: [lambda: 'id(radio_subscribed)[0] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[0] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 1}}
+  - {platform: template, name: "Radio 2 follows project list", id: radio_sub_2, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[1];', turn_on_action: [lambda: 'id(radio_subscribed)[1] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[1] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 3}}
+  - {platform: template, name: "Radio 3 follows project list", id: radio_sub_3, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[2];', turn_on_action: [lambda: 'id(radio_subscribed)[2] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[2] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 5}}
+  - {platform: template, name: "Radio 4 follows project list", id: radio_sub_4, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[3];', turn_on_action: [lambda: 'id(radio_subscribed)[3] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[3] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 7}}
+  - {platform: template, name: "Radio 5 follows project list", id: radio_sub_5, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[4];', turn_on_action: [lambda: 'id(radio_subscribed)[4] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[4] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 9}}
+  - {platform: template, name: "Radio 6 follows project list", id: radio_sub_6, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[5];', turn_on_action: [lambda: 'id(radio_subscribed)[5] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[5] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 11}}
+  - {platform: template, name: "Radio 7 follows project list", id: radio_sub_7, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[6];', turn_on_action: [lambda: 'id(radio_subscribed)[6] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[6] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 13}}
+  - {platform: template, name: "Radio 8 follows project list", id: radio_sub_8, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[7];', turn_on_action: [lambda: 'id(radio_subscribed)[7] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[7] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 15}}
+  - {platform: template, name: "Radio 9 follows project list", id: radio_sub_9, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[8];', turn_on_action: [lambda: 'id(radio_subscribed)[8] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[8] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 17}}
+  - {platform: template, name: "Radio 10 follows project list", id: radio_sub_10, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[9];', turn_on_action: [lambda: 'id(radio_subscribed)[9] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[9] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 19}}
+
+# Own links for the radio slots (used when the slot does not follow the project list). Persisted.
+text:
+  - {platform: template, name: "Radio 1 own link", id: radio_url_1, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 2}}
+  - {platform: template, name: "Radio 2 own link", id: radio_url_2, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 4}}
+  - {platform: template, name: "Radio 3 own link", id: radio_url_3, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 6}}
+  - {platform: template, name: "Radio 4 own link", id: radio_url_4, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 8}}
+  - {platform: template, name: "Radio 5 own link", id: radio_url_5, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 10}}
+  - {platform: template, name: "Radio 6 own link", id: radio_url_6, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 12}}
+  - {platform: template, name: "Radio 7 own link", id: radio_url_7, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 14}}
+  - {platform: template, name: "Radio 8 own link", id: radio_url_8, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 16}}
+  - {platform: template, name: "Radio 9 own link", id: radio_url_9, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 18}}
+  - {platform: template, name: "Radio 10 own link", id: radio_url_10, mode: text, max_length: 255, optimistic: true, restore_value: true, initial_value: "", web_server: {sorting_group_id: grp_stations, sorting_weight: 20}}
+
+select:
+  - platform: template
+    name: "Location"
+    id: web_location_select
+    icon: "mdi:map-marker"
+    # Mosque keys: folder names under docs/athantimes/ (and entries of docs/athantimes/mosques.json).
+    # The device stores the KEY, not the position, so this list may be reordered or extended freely.
+    options: ["davis", "sclaramca", "sclaraalnoor", "woodland", "masjid15"]
+    set_action:
+      - lambda: |-
+          std::string key(x.c_str(), x.size());
+          id(selected_location_key) = key;
+          id(athan_core).set_location(key);
+          id(web_location_select).publish_state(key);
+    web_server:
+      sorting_group_id: grp_location
+      sorting_weight: 1
+  - platform: template
+    name: "Radio Station"
+    id: web_radio_slot
+    icon: "mdi:radio"
+    options: ["Radio 1", "Radio 2", "Radio 3", "Radio 4", "Radio 5", "Radio 6", "Radio 7", "Radio 8", "Radio 9", "Radio 10"]
+    set_action:
+      - lambda: |-
+          auto idx = id(web_radio_slot).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(radio_slot) = (int) idx.value();
+          id(web_radio_slot).publish_state(idx.value());
+          if (id(athan_core).radio_active() >= 0) id(radio_start).execute();   // switch station if playing
+    web_server:
+      sorting_group_id: grp_radio
+      sorting_weight: 1
+
+number:
+  - platform: template
+    name: "Volume"
+    id: web_volume
+    icon: "mdi:volume-medium"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 10
+    mode: slider
+    set_action:
+      - lambda: |-
+          int v = ((int) (x + 0.5f) + 5) / 10 * 10;
+          id(volume_level) = std::max(0, std::min(100, v));
+          id(apply_volume).execute();
+          id(web_volume).publish_state(id(volume_level));
+          id(play_tone_volume).execute();
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 4}
+  - platform: template
+    name: "Fajr Volume"
+    id: web_fajr_volume
+    icon: "mdi:volume-medium"
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 10
+    mode: slider
+    set_action:
+      - lambda: |-
+          int v = ((int) (x + 0.5f) + 5) / 10 * 10;
+          id(fajr_volume_level) = std::max(0, std::min(100, v));
+          id(web_fajr_volume).publish_state(id(fajr_volume_level));
+          id(fajr_volume_feedback).execute();
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 5}
+  - platform: template
+    name: "Tick Window Start"
+    id: web_htick_start
+    icon: "mdi:clock-start"
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: slider
+    set_action:
+      - lambda: 'id(htick_start_hour) = std::max(0, std::min(23, (int) (x + 0.5f))); id(web_htick_start).publish_state(id(htick_start_hour));'
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 8}
+  - platform: template
+    name: "Tick Window End"
+    id: web_htick_end
+    icon: "mdi:clock-end"
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: slider
+    set_action:
+      - lambda: 'id(htick_end_hour) = std::max(0, std::min(23, (int) (x + 0.5f))); id(web_htick_end).publish_state(id(htick_end_hour));'
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 9}
+
+button:
+  - platform: template
+    name: "Stop Audio"
+    id: web_stop
+    icon: "mdi:volume-off"
+    on_press: [script.execute: silence_audio]
+    web_server: {sorting_group_id: grp_now, sorting_weight: 1}
+  - platform: template
+    name: "Play Radio"
+    id: web_play_radio
+    icon: "mdi:play"
+    on_press: [script.execute: radio_start]
+    web_server: {sorting_group_id: grp_radio, sorting_weight: 2}
+  - platform: template
+    name: "Stop Radio"
+    id: web_stop_radio
+    icon: "mdi:stop"
+    on_press: [lambda: 'id(athan_core).radio_stop();']
+    web_server: {sorting_group_id: grp_radio, sorting_weight: 3}
+  - platform: template
+    name: "Refresh Prayer Times"
+    id: web_refresh_times
+    icon: "mdi:refresh"
+    on_press: [lambda: 'id(athan_core).refresh_prayer_times();']
+    web_server: {sorting_group_id: grp_location, sorting_weight: 2}
+  - platform: template
+    name: "Check For Update"
+    id: web_check_update
+    icon: "mdi:update"
+    on_press: [script.execute: check_update]
+    web_server: {sorting_group_id: grp_system, sorting_weight: 2}
+  - platform: restart
+    name: "Restart"
+    id: web_restart
+    web_server: {sorting_group_id: grp_system, sorting_weight: 4}
+
+debug:
+  update_interval: 60s
+
+sensor:
+  - platform: debug
+    free:
+      name: "Free Internal Heap"
+      id: web_free_heap
+      web_server: {sorting_group_id: grp_system, sorting_weight: 8}
+    psram:
+      name: "Free PSRAM"
+      id: web_free_psram
+      web_server: {sorting_group_id: grp_system, sorting_weight: 8.5}
+
+text_sensor:
+  - {platform: template, name: "Next Prayer", id: web_next_prayer, icon: "mdi:clock-outline", update_interval: never, web_server: {sorting_group_id: grp_now, sorting_weight: 3}}
+  - {platform: template, name: "Today's Times", id: web_today_times, icon: "mdi:calendar-today", update_interval: never, web_server: {sorting_group_id: grp_now, sorting_weight: 4}}
+  - {platform: template, name: "Tick Window", id: web_htick_window, icon: "mdi:bell-outline", update_interval: never, web_server: {sorting_group_id: grp_athan, sorting_weight: 10}}
+  - {platform: template, name: "Installed Sounds", id: web_sounds, icon: "mdi:music-box-multiple", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 1}}
+  - {platform: template, name: "Sound Status", id: web_sound_status, icon: "mdi:information-outline", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 2}}
+  - {platform: template, name: "Change Sounds At", id: web_audio_page, icon: "mdi:web", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 3}}
+  - {platform: template, name: "Radio Status", id: web_radio_status, icon: "mdi:radio", update_interval: never, web_server: {sorting_group_id: grp_radio, sorting_weight: 4}}
+  - {platform: template, name: "Prayer Data", id: web_prayer_data, icon: "mdi:database-clock", update_interval: never, web_server: {sorting_group_id: grp_location, sorting_weight: 3}}
+  - platform: debug
+    reset_reason:
+      name: "Reset Reason"
+      id: web_reset_reason
+      web_server: {sorting_group_id: grp_system, sorting_weight: 9}
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: web_ip
+      web_server: {sorting_group_id: grp_system, sorting_weight: 7}
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Display (optional: a missing OLED marks itself failed and everything else runs)
+# ---------------------------------------------------------------------------------------------------------------------
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: "SSD1306 128x64"
+    address: 0x3C
+    flip_x: ${oled_flip_x}
+    flip_y: ${oled_flip_y}
+    contrast: ${oled_contrast}
+    update_interval: never     # drawn by the update_display script
+
+font:
+  - file: "gfonts://Roboto"
+    id: font1
+    size: 20
+  - file: "gfonts://Roboto"
+    id: font2
+    size: 14
+  - file: "gfonts://Roboto"
+    id: font3
+    size: 10
+    glyphs: "AMP"
+
+time:
+  - platform: sntp
+    id: sntp_time
+    # Placeholder: the mosque's own zone comes from its yearly prayer file and replaces this at runtime.
+    timezone: "PST8PDT,M3.2.0,M11.1.0"
+    on_time_sync:
+      - script.execute: update_display
+    on_time:
+      # Hourly tick at HH:00 inside the window [start, end) (start == end: all day)
+      - minutes: 0
+        seconds: 0
+        then:
+          - lambda: |-
+              int h = id(sntp_time).now().hour;
+              int s = id(htick_start_hour), e = id(htick_end_hour);
+              bool in_window = (s == e) || (s < e ? (h >= s && h < e) : (h >= s || h < e));
+              if (id(htick_enabled) && in_window && !id(athan_playing) && !id(athan_core).slot_playing())
+                id(play_tick).execute();
+      - seconds: 0
+        then:
+          - script.execute: update_display
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Globals. Persisted ones live in NVS keyed by id: adding or removing one does not disturb the others.
+# ---------------------------------------------------------------------------------------------------------------------
+globals:
+  - {id: volume_level, type: int, initial_value: "50", restore_value: true}
+  - {id: fajr_volume_level, type: int, initial_value: "-1", restore_value: true}
+  - {id: athan_enabled, type: "bool[7]", initial_value: "{true, true, true, true, true, true, true}", restore_value: true}
+  - {id: buttons_locked, type: bool, initial_value: "false", restore_value: true}
+  - {id: clock_12h, type: bool, initial_value: "false", restore_value: true}
+  - {id: htick_enabled, type: bool, initial_value: "true", restore_value: true}
+  - {id: htick_start_hour, type: int, initial_value: "0", restore_value: true}
+  - {id: htick_end_hour, type: int, initial_value: "0", restore_value: true}
+  - {id: prefajr_enabled, type: bool, initial_value: "false", restore_value: true}
+  - {id: selected_location_key, type: std::string, initial_value: '"davis"', restore_value: true, max_restore_data_length: 31}
+  - {id: radio_subscribed, type: "bool[10]", initial_value: "{true, true, true, true, true, true, true, true, true, true}", restore_value: true}
+  - {id: radio_slot, type: int, initial_value: "0", restore_value: true}
+  # not persisted
+  - {id: ui_mode, type: int, initial_value: "0"}
+  - {id: ui_menu_index, type: int, initial_value: "0"}
+  - {id: ui_last_activity, type: uint32_t, initial_value: "0"}
+  - {id: list_slot, type: int, initial_value: "0"}
+  - {id: list_index, type: int, initial_value: "0"}
+  - {id: location_index, type: int, initial_value: "0"}
+  - {id: mute_index, type: int, initial_value: "0"}
+  - {id: tickwin_index, type: int, initial_value: "0"}
+  - {id: radio_cursor, type: int, initial_value: "0"}
+  - {id: radio_resume, type: int, initial_value: "-1"}
+  - {id: athan_playing, type: bool, initial_value: "false"}
+  - {id: current_athan_prayer_index, type: int, initial_value: "0"}
+  - {id: times_loaded, type: bool, initial_value: "false"}
+  - {id: schedule_seen, type: uint32_t, initial_value: "0"}
+  - {id: prayer_hours, type: "uint8_t[7]", initial_value: "{5, 6, 7, 12, 15, 17, 18}"}
+  - {id: prayer_minutes, type: "uint8_t[7]", initial_value: "{0, 0, 0, 0, 0, 0, 0}"}
+  - {id: next_prayer_index, type: int, initial_value: "0"}
+  - {id: next_prayer_hour, type: int, initial_value: "0"}
+  - {id: next_prayer_minute, type: int, initial_value: "0"}
+  - {id: prefajr_next_hour, type: int, initial_value: "0"}
+  - {id: prefajr_next_minute, type: int, initial_value: "0"}
+  - {id: prefajr_triggered, type: bool, initial_value: "false"}
+  - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing
+
+script:
+  # ---------------- audio helpers ----------------
+  - id: apply_volume
+    mode: restart
+    then:
+      - lambda: |-
+          id(volume_level) = std::max(0, std::min(100, id(volume_level)));
+          id(player).make_call().set_volume(id(volume_level) / 100.0f).perform();
+  - id: apply_fajr_volume
+    mode: restart
+    then:
+      - lambda: |-
+          int v = id(fajr_volume_level) < 0 ? id(volume_level) : std::min(100, id(fajr_volume_level));
+          id(player).make_call().set_volume(v / 100.0f).perform();
+  - id: play_tone_click
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing();'
+          then:
+            - output.turn_on: amp_enable
+            - media_player.speaker.play_on_device_media_file:
+                id: player
+                media_file: tone_click
+                announcement: true
+  - id: play_tone_volume
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing();'
+          then:
+            - output.turn_on: amp_enable
+            - media_player.speaker.play_on_device_media_file:
+                id: player
+                media_file: tone_volume
+                announcement: true
+  # Web slider feedback: tone at the Fajr level, then back to the main volume.
+  - id: fajr_volume_feedback
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return !id(athan_playing);'
+          then:
+            - script.execute: apply_fajr_volume
+            - script.execute: play_tone_volume
+            - delay: 1500ms
+            - if:
+                condition:
+                  lambda: 'return !id(athan_playing) && id(ui_mode) != 5;'
+                then:
+                  - script.execute: apply_volume
+  # Amplifier off a few seconds after the player goes idle (no idle hiss).
+  - id: amp_idle_off
+    mode: restart
+    then:
+      - delay: 5s
+      - if:
+          condition:
+            lambda: 'return id(player).state == media_player::MEDIA_PLAYER_STATE_IDLE;'
+          then:
+            - output.turn_off: amp_enable
+
+  # Stop everything: athan, tawashih, tick, preview, radio. Buttons, the web Stop button, the lock.
+  - id: silence_audio
+    mode: restart
+    then:
+      - script.stop: make_athan
+      - script.stop: run_prefajr
+      - script.stop: play_tick
+      - lambda: |-
+          id(athan_core).stop_media();
+          id(player).make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
+          id(athan_playing) = false;
+          id(radio_resume) = -1;
+          id(led_output).turn_off();
+          if (id(ui_mode) != 5) id(apply_volume).execute();
+          id(update_display).execute();
+
+  # ---------------- radio ----------------
+  - id: radio_start
+    mode: restart
+    then:
+      - lambda: |-
+          int s = std::max(0, std::min(9, id(radio_slot)));
+          id(apply_volume).execute();
+          id(amp_enable).turn_on();
+          id(athan_core).radio_play(s, id(radio_subscribed)[s]);
+          id(update_display).execute();
+
+  # ---------------- stored sounds ----------------
+  # Athan (Fajr file at Fajr). Pauses the radio and resumes the same slot afterwards.
+  - id: make_athan
+    mode: single
+    then:
+      - lambda: |-
+          id(athan_playing) = true;
+          int r = id(athan_core).radio_active();
+          id(radio_resume) = r;
+          if (r >= 0) id(athan_core).radio_stop();
+          else id(athan_core).stop_media();   // a preview, if any
+          id(amp_enable).turn_on();
+          id(led_output).turn_on();
+      - if:
+          condition:
+            lambda: 'return id(current_athan_prayer_index) == 0;'
+          then:
+            - script.execute: apply_fajr_volume
+          else:
+            - script.execute: apply_volume
+      - delay: 100ms
+      - if:
+          condition:
+            lambda: 'return id(athan_core).play_slot(id(current_athan_prayer_index) == 0 ? 1 : 0);'
+          else:
+            # Empty slot (new device offline, or a power cut while writing): mark the time with three tones.
+            - repeat:
+                count: 3
+                then:
+                  - media_player.speaker.play_on_device_media_file:
+                      id: player
+                      media_file: tone_click
+                      announcement: true
+                  - delay: 1500ms
+      - script.execute: update_display
+      - wait_until:
+          condition:
+            lambda: 'return !id(athan_core).slot_playing() && id(player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;'
+          timeout: 7min
+      - lambda: |-
+          id(athan_playing) = false;
+          id(led_output).turn_off();
+          id(apply_volume).execute();
+          int r = id(radio_resume);
+          id(radio_resume) = -1;
+          if (r >= 0) {
+            id(radio_slot) = r;
+            id(radio_start).execute();
+          }
+          id(update_display).execute();
+
+  # Pre-Fajr Tawashih: relay on, tawashih at the Fajr volume, relay off after ${prefajr_relay_min} min.
+  - id: run_prefajr
+    mode: single
+    then:
+      - lambda: |-
+          ESP_LOGI("prefajr", "Pre-Fajr Tawashih");
+          int r = id(athan_core).radio_active();
+          id(radio_resume) = r;
+          if (r >= 0) id(athan_core).radio_stop();
+          id(amp_enable).turn_on();
+      - switch.turn_on: external_relay
+      - script.execute: apply_fajr_volume
+      - delay: 100ms
+      - lambda: |-
+          if (!id(athan_core).play_slot(2)) ESP_LOGW("prefajr", "No tawashih installed");
+      - wait_until:
+          condition:
+            lambda: 'return !id(athan_core).slot_playing() && id(player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;'
+          timeout: 7min
+      - lambda: |-
+          if (!id(athan_playing)) id(apply_volume).execute();
+          int r = id(radio_resume);
+          id(radio_resume) = -1;
+          if (r >= 0 && !id(athan_playing)) { id(radio_slot) = r; id(radio_start).execute(); }
+      - delay: !lambda 'return (uint32_t) ${prefajr_relay_min} * 60000UL - 7000UL;'
+      - switch.turn_off: external_relay
+
+  # Hourly tick: plays over the radio with the radio lowered (mixer ducking).
+  - id: play_tick
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: 'return id(athan_core).radio_active() >= 0;'
+          then:
+            - mixer_speaker.apply_ducking:
+                id: media_mixer_input
+                decibel_reduction: 20
+                duration: 0.3s
+      - lambda: |-
+          id(apply_volume).execute();
+          id(amp_enable).turn_on();
+          if (!id(athan_core).play_slot(3)) ESP_LOGW("tick", "No tick installed");
+      - wait_until:
+          condition:
+            lambda: 'return !id(athan_core).slot_playing();'
+          timeout: 70s
+      - mixer_speaker.apply_ducking:
+          id: media_mixer_input
+          decibel_reduction: 0
+          duration: 0.5s
+
+  # ---------------- firmware update (GitHub Releases) ----------------
+  - id: check_update
+    mode: single
+    then:
+      - lambda: 'id(update_check_state) = 3; id(update_display).execute();'
+      - update.check: fw_update
+      - delay: 8s
+      - lambda: |-
+          id(update_check_state) = (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) ? 2 : 1;
+          id(update_display).execute();
+
+  # ---------------- schedule ----------------
+  # Today's times from the athan component (stored yearly file, or last year's as a stand-in).
+  - id: load_today
+    mode: restart
+    then:
+      - lambda: |-
+          uint8_t h[7], m[7];
+          if (!id(athan_core).today_times(h, m)) {
+            id(times_loaded) = false;
+            return;
+          }
+          for (int i = 0; i < 7; i++) { id(prayer_hours)[i] = h[i]; id(prayer_minutes)[i] = m[i]; }
+          id(times_loaded) = true;
+          ESP_LOGI("prayer", "Today: Fajr %02d:%02d Sunrise %02d:%02d Doha %02d:%02d Dhuhr %02d:%02d Asr %02d:%02d Maghrib %02d:%02d Isha %02d:%02d%s",
+                   h[0], m[0], h[1], m[1], h[2], m[2], h[3], m[3], h[4], m[4], h[5], m[5], h[6], m[6],
+                   id(athan_core).times_standin() ? " (stand-in from last year)" : "");
+          id(compute_coming_prayer).execute();
+          id(update_display).execute();
+
+  # Next prayer at or after now (equal minute counts: used after a reload, the athan script is mode: single).
+  - id: compute_coming_prayer
+    mode: restart
+    then:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          if (!now.is_valid() || !id(times_loaded)) return;
+          int cur = now.hour * 60 + now.minute;
+          int idx = 0;   // all passed -> tomorrow's Fajr
+          for (int i = 0; i < 7; i++) {
+            if (id(prayer_hours)[i] * 60 + id(prayer_minutes)[i] >= cur) { idx = i; break; }
+          }
+          id(next_prayer_index) = idx;
+          id(next_prayer_hour) = id(prayer_hours)[idx];
+          id(next_prayer_minute) = id(prayer_minutes)[idx];
+          if (idx == 0) {
+            int t = id(next_prayer_hour) * 60 + id(next_prayer_minute) - ${prefajr_offset_min};
+            if (t < 0) t += 1440;
+            id(prefajr_next_hour) = t / 60;
+            id(prefajr_next_minute) = t % 60;
+            id(prefajr_triggered) = false;
+          }
+
+  # After a prayer time is reached: the next one strictly later.
+  - id: jump_to_next_prayer
+    mode: restart
+    then:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          if (!now.is_valid() || !id(times_loaded)) return;
+          int cur = now.hour * 60 + now.minute;
+          int idx = 0;
+          for (int i = 0; i < 7; i++) {
+            if (id(prayer_hours)[i] * 60 + id(prayer_minutes)[i] > cur) { idx = i; break; }
+          }
+          id(next_prayer_index) = idx;
+          id(next_prayer_hour) = id(prayer_hours)[idx];
+          id(next_prayer_minute) = id(prayer_minutes)[idx];
+          if (idx == 0) {
+            int t = id(next_prayer_hour) * 60 + id(next_prayer_minute) - ${prefajr_offset_min};
+            if (t < 0) t += 1440;
+            id(prefajr_next_hour) = t / 60;
+            id(prefajr_next_minute) = t % 60;
+            id(prefajr_triggered) = false;
+          }
+
+  # ---------------- web / Home Assistant entities (publish on change) ----------------
+  - id: sync_web_state
+    mode: restart
+    then:
+      - lambda: |-
+          char buf[220];
+          auto pub = [](text_sensor::TextSensor *t, const std::string &s) { if (t->state != s) t->publish_state(s); };
+          {
+            auto loc = id(selected_location_key);
+            if (id(web_location_select).current_option() != loc) {
+              for (size_t i = 0; i < id(web_location_select).size(); i++)
+                if (std::string(id(web_location_select).at(i).value()) == loc) id(web_location_select).publish_state(loc);
+            }
+          }
+          {
+            std::string r = "Radio " + std::to_string(id(radio_slot) + 1);
+            if (id(web_radio_slot).current_option() != r) id(web_radio_slot).publish_state(r);
+          }
+          if (!id(web_volume).has_state() || (int) id(web_volume).state != id(volume_level)) id(web_volume).publish_state(id(volume_level));
+          if (id(fajr_volume_level) >= 0 && (!id(web_fajr_volume).has_state() || (int) id(web_fajr_volume).state != id(fajr_volume_level))) id(web_fajr_volume).publish_state(id(fajr_volume_level));
+          if (!id(web_htick_start).has_state() || (int) id(web_htick_start).state != id(htick_start_hour)) id(web_htick_start).publish_state(id(htick_start_hour));
+          if (!id(web_htick_end).has_state() || (int) id(web_htick_end).state != id(htick_end_hour)) id(web_htick_end).publish_state(id(htick_end_hour));
+          auto fmt_time = [&](char *out, size_t n, int h, int m) {
+            if (id(clock_12h)) {
+              int h12 = h % 12; if (h12 == 0) h12 = 12;
+              snprintf(out, n, "%d:%02d %s", h12, m, (h < 12) ? "AM" : "PM");
+            } else {
+              snprintf(out, n, "%02d:%02d", h, m);
+            }
+          };
+          char t1[12], t2[12];
+          {
+            int s = id(htick_start_hour), e = id(htick_end_hour);
+            if (!id(htick_enabled)) snprintf(buf, sizeof(buf), "tick off");
+            else if (s == e) snprintf(buf, sizeof(buf), "all day");
+            else { fmt_time(t1, sizeof(t1), s, 0); fmt_time(t2, sizeof(t2), e, 0); snprintf(buf, sizeof(buf), "%s to %s (%d h)", t1, t2, (e - s + 24) % 24); }
+            pub(id(web_htick_window), buf);
+          }
+          static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
+          auto now = id(sntp_time).now();
+          if (now.is_valid() && id(times_loaded)) {
+            int npi = id(next_prayer_index);
+            int total = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
+            if (total < 0) total += 1440;
+            bool muted = (npi != 1 && npi != 2) && !id(athan_enabled)[npi];
+            fmt_time(t1, sizeof(t1), id(next_prayer_hour), id(next_prayer_minute));
+            snprintf(buf, sizeof(buf), "%s %s (in %dh %02dm)%s%s", names[npi], t1, total / 60, total % 60,
+                     muted ? " [athan off]" : "", id(athan_core).times_standin() ? " [estimated]" : "");
+            pub(id(web_next_prayer), buf);
+            int pos = 0;
+            for (int i = 0; i < 7 && pos < (int) sizeof(buf) - 1; i++) {
+              fmt_time(t1, sizeof(t1), id(prayer_hours)[i], id(prayer_minutes)[i]);
+              pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%s %s", i ? ", " : "", names[i], t1);
+            }
+            pub(id(web_today_times), buf);
+          } else {
+            pub(id(web_next_prayer), "waiting for the clock and prayer data");
+            pub(id(web_today_times), "not loaded yet");
+          }
+          {
+            static const char *slot_names[4] = {"Athan", "Fajr", "Tawashih", "Tick"};
+            std::string s;
+            for (int i = 0; i < 4; i++) {
+              std::string l = id(athan_core).slot_label(i);
+              s += std::string(i ? "; " : "") + slot_names[i] + ": " + (l.empty() ? "none" : l);
+            }
+            pub(id(web_sounds), s);
+          }
+          pub(id(web_sound_status), id(athan_core).sound_status());
+          pub(id(web_radio_status), id(athan_core).radio_status());
+          pub(id(web_prayer_data), id(athan_core).prayer_status());
+          {
+            auto ips = network::get_ip_addresses();
+            char ip[48] = "";
+            if (ips[0].is_set()) ips[0].str_to(ip);
+            pub(id(web_audio_page), std::string("http://") + (ip[0] ? ip : "athan.local") + "/audio");
+          }
+
+  # ---------------- OLED ----------------
+  - id: update_display
+    mode: restart
+    then:
+      - lambda: |-
+          // Never touch the OLED before its setup() allocated the buffer, or when it failed (see CLAUDE.md).
+          if (!id(oled).is_ready()) return;
+          auto &d = *id(oled);
+          d.clear();
+          auto now = id(sntp_time).now();
+          const bool wifi_ok = wifi::global_wifi_component->is_connected();
+
+          // Menu timeout: 60 s without a press returns to the clock.
+          if (id(ui_mode) != 0 && millis() - id(ui_last_activity) >= 60000) {
+            if (id(ui_mode) == 2) { id(athan_core).stop_media(); if (id(list_slot) == 1) id(apply_volume).execute(); }
+            if (id(ui_mode) == 5) id(apply_volume).execute();
+            id(ui_mode) = 0;
+          }
+
+          static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
+          static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+
+          auto time_width = [&](int h, int m) -> int {
+            char b[8]; int x1, y1, w = 0, w2 = 0, hh;
+            if (id(clock_12h)) {
+              int h12 = h % 12; if (h12 == 0) h12 = 12;
+              snprintf(b, sizeof(b), "%d:%02d", h12, m);
+              d.get_text_bounds(0, 0, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+              d.get_text_bounds(0, 0, (h < 12) ? "AM" : "PM", id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &w2, &hh);
+              return w + 1 + w2;
+            }
+            snprintf(b, sizeof(b), "%02d:%02d", h, m);
+            d.get_text_bounds(0, 0, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+            return w;
+          };
+          auto draw_time = [&](int x, int y, int h, int m) -> int {
+            char b[8]; int x1, y1, w, hh;
+            if (id(clock_12h)) {
+              int h12 = h % 12; if (h12 == 0) h12 = 12;
+              snprintf(b, sizeof(b), "%d:%02d", h12, m);
+              d.print(x, y, id(font1), b);
+              d.get_text_bounds(x, y, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+              x += w + 1;
+              const char *ap = (h < 12) ? "AM" : "PM";
+              d.print(x, y + 9, id(font3), ap);
+              d.get_text_bounds(x, y, ap, id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+              return x + w;
+            }
+            snprintf(b, sizeof(b), "%02d:%02d", h, m);
+            d.print(x, y, id(font1), b);
+            d.get_text_bounds(x, y, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+            return x + w;
+          };
+          auto draw_lock = [&](int x, int y) { d.circle(x + 3, y + 2, 2); d.filled_rectangle(x, y + 4, 7, 5); };
+          auto draw_speaker = [&](int x, int y) {
+            d.filled_rectangle(x, y + 5, 4, 6);
+            d.filled_triangle(x + 4, y + 5, x + 9, y + 1, x + 9, y + 15);
+            d.filled_triangle(x + 4, y + 10, x + 9, y + 15, x + 4, y + 5);
+            d.line(x + 12, y + 5, x + 12, y + 10);
+            d.line(x + 15, y + 3, x + 15, y + 12);
+            d.line(x + 18, y + 1, x + 18, y + 14);
+          };
+          auto draw_nowifi = [&]() { d.circle(116, 52, 10); d.print(107, 41, id(font1), "W"); d.line(105, 43, 125, 63); };
+          char line[48];
+
+          if (id(ui_mode) != 0) {
+            const int m = id(ui_mode);
+            if (m == 1) {
+              static const char *items[16] = {"Athan", "Fajr Athan", "Tawashih", "Hourly Tick", "Tick Window",
+                "Athan On/Off", "Pre-Fajr", "Radio", "Location", "Volume", "Fajr Volume", "Clock", "Update",
+                "Lock Buttons", "Info", "Cancel"};
+              d.print(0, 0, id(font1), "Menu:");
+              const int i = id(ui_menu_index);
+              if (i == 11) snprintf(line, sizeof(line), "Clock: %s", id(clock_12h) ? "12h" : "24h");
+              else snprintf(line, sizeof(line), "%s", items[i]);
+              d.print(0, 22, id(font1), line);
+              if (i == 6) d.print(0, 44, id(font1), id(prefajr_enabled) ? "ON" : "OFF");
+              if (i == 12) {
+                const char *v = "${project_version}";
+                switch (id(update_check_state)) {
+                  case 3: snprintf(line, sizeof(line), "V%s checking..", v); break;
+                  case 1: snprintf(line, sizeof(line), "V%s up to date", v); break;
+                  case 2: snprintf(line, sizeof(line), "-> %s ?", id(fw_update).update_info.latest_version.c_str()); break;
+                  case 4: snprintf(line, sizeof(line), "installing.."); break;
+                  default: snprintf(line, sizeof(line), "V%s", v); break;
+                }
+                d.print(0, 46, id(font2), line);
+              }
+            } else if (m == 2) {
+              static const char *titles[4] = {"Athan:", "Fajr Athan:", "Tawashih:", "Hourly Tick:"};
+              const int slot = id(list_slot);
+              d.print(0, 0, id(font1), titles[slot]);
+              if (!id(athan_core).catalog_ready()) {
+                d.print(0, 24, id(font2), wifi_ok ? "Loading list..." : "No internet");
+              } else {
+                const int n = id(athan_core).catalog_size(slot);
+                const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
+                if (entry < 0) {
+                  d.print(0, 22, id(font1), "Off");
+                } else {
+                  std::string name = id(athan_core).catalog_name(slot, entry);
+                  d.print(0, 22, id(font1), name.c_str());
+                  bool installed = (name == id(athan_core).slot_label(slot));
+                  snprintf(line, sizeof(line), "%d / %d%s", entry + 1, n, installed ? "  (installed)" : "");
+                  d.print(0, 46, id(font2), line);
+                }
+              }
+            } else if (m == 3) {
+              d.print(0, 0, id(font1), "Location:");
+              auto k = id(web_location_select).at(id(location_index));
+              d.print(0, 22, id(font1), k.has_value() ? std::string(k.value()).c_str() : "?");
+            } else if (m == 4) {
+              d.print(0, 0, id(font1), "Volume");
+              draw_speaker(76, 2);
+              snprintf(line, sizeof(line), "%d%%", id(volume_level));
+              d.print(0, 22, id(font1), line);
+            } else if (m == 5) {
+              d.print(0, 0, id(font1), "Fajr Volume");
+              snprintf(line, sizeof(line), "%d%%", id(fajr_volume_level));
+              d.print(0, 22, id(font1), line);
+              int x1, y1, w, h2;
+              d.get_text_bounds(0, 22, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
+              draw_speaker(w + 8, 24);
+            } else if (m == 6) {
+              static const char *mnames[6] = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha", "Done"};
+              static const int prayer_of[5] = {0, 3, 4, 5, 6};
+              d.print(0, 0, id(font1), "Athan On/Off");
+              if (id(mute_index) < 5) snprintf(line, sizeof(line), "%s: %s", mnames[id(mute_index)], id(athan_enabled)[prayer_of[id(mute_index)]] ? "ON" : "OFF");
+              else snprintf(line, sizeof(line), "Done");
+              d.print(0, 22, id(font1), line);
+            } else if (m == 7) {
+              d.print(0, 0, id(font1), "Info V${project_version}");
+              auto ips = network::get_ip_addresses();
+              char ip[48] = "no wifi";
+              if (wifi_ok && ips[0].is_set()) ips[0].str_to(ip);
+              d.print(0, 26, id(font2), ip);
+              d.print(0, 46, id(font2), "athan.local");
+            } else if (m == 8 || m == 9 || m == 10) {
+              d.print(0, 0, id(font1), "Tick Window");
+              int s = id(htick_start_hour), e = id(htick_end_hour);
+              int x1, y1, w, h2;
+              if (m == 9 || (m == 8 && id(tickwin_index) == 0)) {
+                const char *lbl = (m == 9) ? "Start>" : "Start:";
+                d.print(0, 22, id(font1), lbl);
+                d.get_text_bounds(0, 22, lbl, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
+                draw_time(w + 5, 22, s, 0);
+              } else if (m == 10 || (m == 8 && id(tickwin_index) == 1)) {
+                const char *lbl = (m == 10) ? "End>" : "End:";
+                d.print(0, 22, id(font1), lbl);
+                d.get_text_bounds(0, 22, lbl, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
+                draw_time(w + 5, 22, e, 0);
+              } else {
+                d.print(0, 22, id(font1), "Done");
+              }
+              snprintf(line, sizeof(line), "Window: %dh", (s == e) ? 24 : ((e - s + 24) % 24));
+              d.print(0, 44, id(font1), line);
+            } else if (m == 11) {
+              const int c = id(radio_cursor);
+              const bool on = id(athan_core).radio_active() == c;
+              snprintf(line, sizeof(line), "Radio %d", c + 1);
+              d.print(0, 0, id(font1), line);
+              if (on) d.filled_triangle(110, 4, 110, 18, 122, 11);   // playing mark
+              std::string nm = id(radio_subscribed)[c] ? id(athan_core).station_name(c) : std::string("own link");
+              d.print(0, 24, id(font2), nm.empty() ? "(project list)" : nm.c_str());
+              d.print(0, 46, id(font2), on ? "Next: more  Sel: stop" : "Next: more  Sel: play");
+            } else if (m == 12) {
+              d.print(0, 0, id(font1), "Sound");
+              std::string st = id(athan_core).sound_status();
+              std::string a = st.substr(0, 18), b = st.size() > 18 ? st.substr(18, 18) : "";
+              d.print(0, 24, id(font2), a.c_str());
+              d.print(0, 42, id(font2), b.c_str());
+            }
+            d.display();
+            return;
+          }
+
+          // ---- normal screen ----
+          if (!now.is_valid()) {
+            if (!wifi_ok) {
+              // Setup mode (README "Wi-Fi setup"). The hotspot's name is too wide for the screen: README.
+              d.print(0, 0, id(font2), "Wi-Fi setup:");
+              const auto st = id(improv_ble).get_improv_state();
+              const char *bt = !id(improv_ble).is_active() ? "BT: starting.."
+                             : st == improv::STATE_AWAITING_AUTHORIZATION ? "BT: press Select"
+                             : st == improv::STATE_AUTHORIZED ? "BT: allowed"
+                             : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
+              d.print(0, 20, id(font2), bt);
+              d.print(0, 40, id(font2), wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
+            } else {
+              d.line(0, 11, 127, 11); d.line(0, 33, 127, 33); d.line(0, 55, 127, 55);   // waiting for the clock
+            }
+            d.display();
+            return;
+          }
+          if (id(athan_playing)) {
+            d.print(0, 0, id(font1), "Athan Time:");
+            snprintf(line, sizeof(line), "%s prayer", names[id(current_athan_prayer_index)]);
+            d.print(0, 22, id(font1), line);
+            int x1, y1, wd, hd;
+            snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
+            d.get_text_bounds(0, 44, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
+            int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
+            int x = draw_time(0, 44, now.hour, now.minute);
+            d.print(x + gap, 44, id(font1), line);
+            d.display();
+            return;
+          }
+          // Line 1: time and date
+          {
+            int x1, y1, wd, hd;
+            snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
+            d.get_text_bounds(0, 0, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
+            int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
+            int x = draw_time(0, 0, now.hour, now.minute);
+            d.print(x + gap, 0, id(font1), line);
+          }
+          if (!id(times_loaded)) {
+            d.line(0, 33, 127, 33); d.line(0, 55, 127, 55);
+            d.print(0, 24, id(font2), wifi_ok ? "Loading prayer times" : "No prayer times yet");
+            if (!wifi_ok) draw_nowifi();
+            d.display();
+            return;
+          }
+          // Line 2: next prayer and its time
+          const char *npn = names[id(next_prayer_index)];
+          {
+            int x1, y1, wn, hn;
+            d.get_text_bounds(0, 22, npn, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
+            int gap = std::max(1, std::min(5, 128 - wn - time_width(id(next_prayer_hour), id(next_prayer_minute))));
+            d.print(0, 22, id(font1), npn);
+            int xe = draw_time(wn + gap, 22, id(next_prayer_hour), id(next_prayer_minute));
+            // Stand-in mark (times from last year until this year's timetable is published): a small hollow square
+            if (id(athan_core).times_standin()) d.rectangle(std::min(xe + 2, 123), 24, 4, 4);
+          }
+          // Line 3: time remaining
+          {
+            int total = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
+            if (total < 0) total += 1440;
+            snprintf(line, sizeof(line), "Rem %02d:%02d", total / 60, total % 60);
+            d.print(0, 44, id(font1), line);
+          }
+          if (!wifi_ok) draw_nowifi();
+          if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
+          if (id(athan_core).radio_active() >= 0) d.filled_triangle(wifi_ok ? 108 : 86, 55, wifi_ok ? 108 : 86, 63, wifi_ok ? 114 : 92, 59);
+          // Muted next prayer: strike through the last two letters of its name
+          {
+            int npi = id(next_prayer_index);
+            if (npi != 1 && npi != 2 && !id(athan_enabled)[npi]) {
+              int x1, y1, wf, hf, wh, hh;
+              std::string nm(npn), head = nm.substr(0, nm.size() - 2);
+              d.get_text_bounds(0, 22, nm.c_str(), id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wf, &hf);
+              d.get_text_bounds(0, 22, head.c_str(), id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wh, &hh);
+              int sy = 22 + hf / 2 + 2;
+              d.line(wh, sy, wf - 1, sy);
+            }
+          }
+          d.display();
+
+# ---------------------------------------------------------------------------------------------------------------------
+interval:
+  # Every second: reload today's times when they change, call the athan, Pre-Fajr Tawashih.
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(athan_core).schedule_version() != id(schedule_seen)) {
+            id(schedule_seen) = id(athan_core).schedule_version();
+            id(load_today).execute();
+          }
+          auto now = id(sntp_time).now();
+          if (!now.is_valid() || !id(times_loaded)) return;
+          int cur = now.hour * 60 + now.minute;
+          int next = id(next_prayer_hour) * 60 + id(next_prayer_minute);
+          int isha = id(prayer_hours)[6] * 60 + id(prayer_minutes)[6];
+          // Reached the next prayer (after Isha the next one is tomorrow's Fajr: wait until midnight passes).
+          if (cur >= next && (id(next_prayer_index) == 6 || cur < isha)) {
+            int pi = id(next_prayer_index);
+            bool main_prayer = (pi != 1 && pi != 2);
+            if (main_prayer && id(athan_enabled)[pi]) {
+              id(current_athan_prayer_index) = pi;
+              id(make_athan).execute();
+            }
+            ESP_LOGI("prayer", "Prayer time reached: %d", pi);
+            id(jump_to_next_prayer).execute();
+            id(update_display).execute();
+          }
+          if (id(prefajr_enabled) && !id(prefajr_triggered) && id(next_prayer_index) == 0 &&
+              now.hour == id(prefajr_next_hour) && now.minute == id(prefajr_next_minute)) {
+            id(prefajr_triggered) = true;
+            id(run_prefajr).execute();
+          }
+  - interval: 1s
+    then:
+      - script.execute: sync_web_state
+  # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.
+  - interval: 10s
+    then:
+      - lambda: |-
+          static bool lost = false;
+          static uint8_t back_ticks = 0, reinits = 0;
+          bool ack = (id(oled).write(nullptr, 0) == i2c::ERROR_OK);
+          if (id(oled).is_failed()) {
+            if (ack) {
+              id(oled).reset_to_construction_state();
+              id(oled).call();
+              if (!id(oled).is_failed()) id(update_display).execute();
+            }
+            return;
+          }
+          if (!ack) { lost = true; back_ticks = 0; return; }
+          if (!lost || ++back_ticks < 2) return;
+          lost = false;
+          if (reinits >= 1) { ESP_LOGW("oled", "Display back again: restart the device to use it (athan keeps working)"); return; }
+          reinits++;
+          id(oled).setup();
+          if (!id(oled).is_failed()) id(update_display).execute();

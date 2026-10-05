@@ -1,0 +1,9 @@
+#pragma once
+#include "idf_common.h"
+#define CONFIG_HTTPD_MAX_URI_LEN 512
+#define CONFIG_HTTPD_MAX_REQ_HDR_LEN 1024
+#define CONFIG_FREERTOS_HZ 1000
+#define CONFIG_IDF_TARGET_ESP32S3 1
+#define CONFIG_SPIRAM 1
+#define CONFIG_LWIP_IPV6 0
+#define CONFIG_ESP_TASK_WDT_TIMEOUT_S 5
