@@ -2,7 +2,7 @@
   "v": 1,
   "note": "Slot k of a subscribed device plays stations[k-1]. Change a url here and every subscribed device uses the new one the next time that slot is played. Keep exactly 10 entries; an empty url makes that slot empty for subscribers. Names: plain ASCII, at most 12 characters (OLED).",
   "stations": [
-    {"name": "Quran Mix",   "url": "https://backup.qurango.net/radio/mix"},
+    {"name": "Cairo-Quran-chn",   "url": "https://stream.radiojar.com/8s5u5tpdtwzuv"},
     {"name": "Alafasi",     "url": "https://backup.qurango.net/radio/mishary_alafasi"},
     {"name": "Abdulbasit",  "url": "https://backup.qurango.net/radio/abdulbasit_abdulsamad_mojawwad"},
     {"name": "Al-Hussary",  "url": "https://backup.qurango.net/radio/mahmoud_khalil_alhussary"},
@@ -11,6 +11,6 @@
     {"name": "Al-Muaiqly",  "url": "https://backup.qurango.net/radio/maher"},
     {"name": "Al-Dosari",   "url": "https://backup.qurango.net/radio/yasser_aldosari"},
     {"name": "Al-Shuraim",  "url": "https://backup.qurango.net/radio/saud_alshuraim"},
-    {"name": "Tafseer",     "url": "https://backup.qurango.net/radio/tafseer"}
+    {"name": "Quran Mix",     "url": "https://backup.qurango.net/radio/mix"}
   ]
 }
