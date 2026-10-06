@@ -69,8 +69,47 @@
           "thermal_relief_spoke_width": 0.5
         }
       },
-      "diff_pair_dimensions": [],
-      "drc_exclusions": [],
+      "diff_pair_dimensions": [
+        {
+          "gap": 0.0,
+          "via_gap": 0.0,
+          "width": 0.0
+        }
+      ],
+      "drc_exclusions": [
+        [
+          "silk_edge_clearance|120500000|73894918|9e014101-ed99-4c29-8075-e3e9f8825ead|8961ae8b-764f-4d70-bfc9-0f81b2f4707e",
+          ""
+        ],
+        [
+          "silk_edge_clearance|120500000|85644918|9e014101-ed99-4c29-8075-e3e9f8825ead|032c8bbf-0a7b-491f-a106-8c62c88ce044",
+          ""
+        ],
+        [
+          "silk_over_copper|100002380|83407200|270a44f5-ffb4-4516-8244-f2362db81076|20075f6e-f2a8-43db-ab15-6942b33a6794",
+          ""
+        ],
+        [
+          "silk_over_copper|112311592|68421895|7263d8c3-639d-41ce-a004-a9b23492896b|dc6df9c5-a9e7-4b5a-a358-d13e9ff896ec",
+          ""
+        ],
+        [
+          "silk_over_copper|112387782|66150747|7263d8c3-639d-41ce-a004-a9b23492896b|80646bcb-92d5-4f7a-b238-048cc43db660",
+          ""
+        ],
+        [
+          "silk_over_copper|115353883|57943255|280d96fe-72e0-4ec4-9dc7-cf117ce18502|f332f910-5ec0-4c8f-90d8-2b6bb44c904f",
+          ""
+        ],
+        [
+          "silk_over_copper|88666666|71454819|8bf31695-c592-4adb-aa0d-e262688964d2|bc6ac37b-eb87-4e1d-88fd-7cca1ec49b15",
+          ""
+        ],
+        [
+          "silk_overlap|87379761|102110000|20d114df-e0e9-4e94-9717-4b4748115fb7|939106f7-bc72-448c-a263-50d2f063f608",
+          ""
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -152,7 +191,7 @@
         "min_silk_clearance": 0.0,
         "min_text_height": 0.8,
         "min_text_thickness": 0.08,
-        "min_through_hole_diameter": 0.3,
+        "min_through_hole_diameter": 0.2,
         "min_track_width": 0.2,
         "min_via_annular_width": 0.1,
         "min_via_diameter": 0.5,
@@ -203,7 +242,13 @@
           "td_width_to_size_filter_ratio": 0.9
         }
       ],
-      "track_widths": [],
+      "track_widths": [
+        0.0,
+        0.3,
+        0.4,
+        0.5,
+        1.0
+      ],
       "tuning_pattern_settings": {
         "diff_pair_defaults": {
           "corner_radius_percentage": 80,
@@ -230,7 +275,12 @@
           "spacing": 0.6
         }
       },
-      "via_dimensions": [],
+      "via_dimensions": [
+        {
+          "diameter": 0.0,
+          "drill": 0.0
+        }
+      ],
       "zones_allow_external_fillets": false
     },
     "ipc2581": {
@@ -531,7 +581,7 @@
       "netlist": "",
       "plot": "",
       "specctra_dsn": "",
-      "step": "",
+      "step": "esp32_athan.step",
       "vrml": ""
     },
     "page_layout_descr_file": ""
@@ -579,31 +629,31 @@
           "group_by": true,
           "label": "DNP",
           "name": "${DNP}",
-          "show": true
+          "show": false
         },
         {
           "group_by": true,
           "label": "Exclude from BOM",
           "name": "${EXCLUDE_FROM_BOM}",
-          "show": true
+          "show": false
         },
         {
           "group_by": true,
           "label": "Exclude from Board",
           "name": "${EXCLUDE_FROM_BOARD}",
-          "show": true
+          "show": false
         },
         {
           "group_by": true,
           "label": "Exclude from Simulation",
           "name": "${EXCLUDE_FROM_SIM}",
-          "show": true
+          "show": false
         },
         {
           "group_by": true,
           "label": "Exclude from Position Files",
           "name": "${EXCLUDE_FROM_POS_FILES}",
-          "show": true
+          "show": false
         },
         {
           "group_by": true,
@@ -616,12 +666,30 @@
           "label": "Datasheet",
           "name": "Datasheet",
           "show": true
+        },
+        {
+          "group_by": false,
+          "label": "Description",
+          "name": "Description",
+          "show": true
+        },
+        {
+          "group_by": false,
+          "label": "#",
+          "name": "${ITEM_NUMBER}",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Sim.Pins",
+          "name": "Sim.Pins",
+          "show": false
         }
       ],
       "filter_string": "",
       "group_symbols": true,
       "include_excluded_from_bom": true,
-      "name": "Default Editing",
+      "name": "",
       "sort_asc": true,
       "sort_field": "Reference"
     },
@@ -666,7 +734,7 @@
         "uuid": "6c2452ef-45b6-4fa3-afe0-a595c894c1ac"
       }
     ],
-    "used_designators": "#FLG1-2,H1-4,SW1-2,D1,#PWR1-22,C1-7,JP1,R1-11,J1-6,U1-3",
+    "used_designators": "#FLG1-2,H1-4,SW1-2,D1,#PWR1-22,C1-7,JP1-3,R1-11,J1-6,U1-3",
     "variants": []
   },
   "sheets": [
