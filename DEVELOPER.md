@@ -8,7 +8,7 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
 | Path | What |
 |---|---|
 | `firmware/athan.yaml` | All behaviour: entities, menus, schedule, OLED, scripts, intervals (ESPHome + inline C++ lambdas) |
-| `firmware/partitions.csv` | 16 MB layout: nvs, otadata, phy, app0/app1 (0x360000 each), `prayer` (0x41, 128 KB), `audio` (0x40, 0x910000) |
+| `firmware/partitions.csv` | 16 MB layout: nvs, otadata, app0/app1 (0x360000 each), `prayer` (0x41, 128 KB), `audio` (0x40, 0x910000) |
 | `firmware/components/athan/__init__.py` | Component schema: `media_player`, `time_id`, `data_url`, `radio_urls` (list of `text` ids). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
 | `athan.h/.cpp` | `AthanComponent`, the worker task, `AudioWebHandler` (the `/audio` page) |
 | `audio_slots.h/.cpp` | The four stored sounds |
@@ -216,6 +216,8 @@ them together.
 ## 10. Checks you can run without hardware
 
 `firmware/tests/run_tests.sh`:
+- `partitions.csv`: overlaps, alignment, 16 MB, the component's region sizes, and ESP-IDF's own
+  `gen_esp32part.py` when a build has downloaded it.
 - Calendar helpers.
 - The POSIX TZ parser against Python `zoneinfo`, every 30 min over 2025–2028 for PST8PDT, Cairo, Berlin and
   Riyadh (280,512 vectors).
@@ -239,6 +241,5 @@ assumptions that only hardware can confirm:
   `ANNOUNCING`.
 - `esp_http_client` redirects for `releases/latest/download` (handled by ESPHome's `update` component) and for
   raw.githubusercontent.com (no redirect normally).
-- Whether ESPHome opens the hotspot immediately on a device with no saved network.
 - Stream reconnect behaviour after a router restart.
 - The MAX98357A gain jumper and the 560 kΩ SD_MODE resistor (`max98357a_amplifier.md`).

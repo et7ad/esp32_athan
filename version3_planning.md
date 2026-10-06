@@ -30,6 +30,7 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Stand-in mark (9.2) | Shape open | A small hollow square after the next prayer's time; "[estimated]" on the web page |
 | Wi-Fi setup screen (8.1) | Text open | `Wi-Fi setup:` / `BT: press Select` (or `allowed`, `joining..`) / `Hotspot: on` or `soon`. On that screen a Select press only authorises Bluetooth |
 | Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock** |
+| USB-C (3.1, 3.4) | 16-pin with USB data; flashing and logs over the charging cable | **6-pin power-only USB-C** (owner's choice 2026-10-05, with 5.1 kΩ CC resistors). The first flash and serial logs go through J6, a populated 1×6 UART header (GND, IO0, EN, TXD0, RXD0, 3V3; jumper 1–2 = download mode) with a 3.3 V USB-serial adapter; the firmware logs on UART0. Later updates go over Wi-Fi |
 | Empty slot | Reinstall the default at the next boot | Reinstalled automatically while online, at most every 30 min per slot (a missing default is not hammered) |
 
 Main menu as built (16 items): Athan, Fajr Athan, Tawashih, Hourly Tick, Tick Window, Athan On/Off, Pre-Fajr,
@@ -207,7 +208,7 @@ Proposed partition table for 16 MB (0x1000000):
 
 | Partition | Size | Holds |
 |---|---|---|
-| bootloader, table, NVS, otadata, phy | 64 KB | as usual (NVS holds the settings and the ten radio URLs) |
+| bootloader, table, NVS, otadata | 64 KB | as usual (NVS holds the settings and the ten radio URLs) |
 | app0 / app1 | 2 × 3.54 MB (0x360000 each) | firmware, two slots for safe OTA |
 | prayer | 128 KB (0x20000) | stored prayer-time years: 8 slots of 16 KB (section 9.2) |
 | audio | 9.5 MB (0x910000) | athan, fajr, tawashih regions 0x2E0000 each (3,014,656 bytes ≥ 4 KB header + 3 MB), tick region 0x70000 (458,752 ≥ 4 KB + 0.4 MB) |
@@ -371,10 +372,11 @@ method) stays, so phones that cannot do Bluetooth setup, iPhones in particular, 
 
 ### 8.1 When setup mode starts
 
-- **New device, or after "forget Wi-Fi"** (both buttons held at power-up, as today): Bluetooth setup starts within
-  seconds, and the hotspot follows after `ap_timeout` (about 3 min). ESPHome may start the hotspot immediately when
-  no network is saved at all; check on the prototype. Either way both methods end up available, and whichever
-  finishes first wins.
+- **New device** (no network saved at all): the hotspot and Bluetooth both start immediately at boot (confirmed in
+  the ESPHome 2026.9 source, `WiFiComponent::start()`).
+- **After "forget Wi-Fi"** (both buttons held at power-up, as today): the reset saves a dummy network, so this
+  behaves like the next case: Bluetooth after `wifi_timeout` (15 s), the hotspot after `ap_timeout` (about 3 min).
+  Either way both methods end up available, and whichever finishes first wins.
 - **Saved network unreachable** (new router, changed password, or a router that is simply off): the device keeps
   retrying the saved network. Bluetooth setup starts after `wifi_timeout` (short, for example 15 s) and the hotspot
   after `ap_timeout` (about 3 min, so a brief router reboot does not open a hotspot). When the saved network comes

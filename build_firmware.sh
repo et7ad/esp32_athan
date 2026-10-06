@@ -6,14 +6,15 @@
 # (default ~/.cache/esp32_athan), so the repository stays clean.
 #
 #   ./build_firmware.sh                 build; binaries go to firmware/binaries/
-#   ./build_firmware.sh flash [PORT]    build, then flash over USB-C (first flash: also writes the partition table)
-#   ./build_firmware.sh ota [HOST]      build, then update over Wi-Fi (default: athan.local)
+#   ./build_firmware.sh flash [PORT]    build, then flash over a serial port: the J6 USB-serial adapter (jumper J6
+#                                       1–2 at power-up) or a DevKitC's USB. First flash also writes the partitions
+#   ./build_firmware.sh ota [HOST]      build, then update over Wi-Fi (default: athan.local; V3 clocks only)
 #   ./build_firmware.sh logs [PORT|HOST]  show the device's log
 #   ./build_firmware.sh check           validate firmware/athan.yaml only (fast, no compile)
 #   ./build_firmware.sh clean [all]     delete the build folder (all: also ESPHome and the toolchain)
 #
 # Without PORT, ESPHome lists the serial ports it finds and asks. On macOS the board's USB port looks like
-# /dev/cu.usbmodem1101.
+# /dev/cu.usbmodem1101. To flash binaries that are already built, without building again: ./flash_firmware.sh
 #
 # firmware/binaries/ after a build:
 #   athan-v3-<version>.factory.bin  full image for a blank board (any ESP web flasher / esptool at offset 0x0)
@@ -87,6 +88,22 @@ check_sounds() {
   fi
 }
 
+device_name() {
+  sed -n 's/^[[:space:]]*device_name:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' "$YAML" | head -1
+}
+
+# Refuse to send an image over Wi-Fi to anything but a version 3 clock. A V2 clock (ESP8266) also answers to
+# athan.local, would accept an ESP32 image (same 0xE9 first byte) and be bricked until a USB reflash. Only V3
+# serves the /audio page.
+ensure_v3_device() {
+  local host="$1" page
+  page="$(curl -fsS --max-time 10 "http://$host/audio" 2>/dev/null || true)"
+  case "$page" in
+    *"Athan sounds"*) ;;
+    *) die "$host did not answer as a version 3 clock (no /audio page), so nothing was sent. A V2 clock also answers to athan.local; use the IP address from the Info screen, or flash over USB." ;;
+  esac
+}
+
 project_version() {
   sed -n 's/^[[:space:]]*project_version:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\)"\{0,1\}.*/\1/p' "$YAML" | head -1
 }
@@ -153,9 +170,11 @@ main() {
       esphome upload "$YAML" ${2:+--device "$2"}
       ;;
     ota)
+      local host="${2:-$(device_name).local}"
       build
-      say "Updating over Wi-Fi (${2:-athan.local})"
-      esphome upload "$YAML" --device "${2:-OTA}"
+      ensure_v3_device "$host"
+      say "Updating over Wi-Fi ($host)"
+      esphome upload "$YAML" --device "$host"
       ;;
     logs)
       ensure_esphome

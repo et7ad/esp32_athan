@@ -63,11 +63,12 @@ iPhones cannot use Method 1 without the Home Assistant app, because Safari has n
 2. The setup page opens by itself. If it doesn't, open <http://192.168.4.1>.
 3. Pick your network, type the password and save. The clock restarts and joins.
 
-On a new clock the hotspot may appear right away. When a saved network has gone away, the hotspot appears after
-about 3 minutes, so a short router restart never opens it.
+On a new clock both start right away. When a saved network has gone away, Bluetooth starts after 15 seconds and
+the hotspot after about 3 minutes, so a short router restart never opens it.
 
 **Forget the saved Wi-Fi:** unplug the clock, hold **both** buttons, and plug it back in. The LED blinks three
-times, the clock restarts, and it enters setup mode.
+times, the clock restarts, and it enters setup mode (Bluetooth after 15 seconds, the hotspot after about 3
+minutes).
 
 **Your mosque:** a new clock starts with the first mosque in the list (Davis). Choose yours from the menu
 (**Location**) or on the web page. The clock downloads that mosque's year of prayer times. It also installs
@@ -227,7 +228,8 @@ the web page, the **Update** menu item, or Home Assistant. Your settings, sounds
 | ESP32-S3-WROOM-1-**N16R8** module (16 MB flash, 8 MB PSRAM), LCSC C2913202 | the board's processor |
 | MAX98357A amplifier (MAX98357AETE+T, LCSC C910544) | I2S DAC + 3 W amplifier |
 | 4 Ω 3 W speaker, SSD1306 128×64 I2C OLED, two push buttons, an LED | |
-| USB-C (data), 3.3 V LDO, passives | |
+| USB-C 6-pin (power only), 3.3 V LDO, passives | |
+| 1×6 programming header (J6) + a 3.3 V USB-serial adapter (CP2102/CH340) | first flash only |
 
 The full parts list, the pin map, and instructions for the PCB and the enclosure are in
 [HARDWARE.md](HARDWARE.md). The amplifier circuit is in [max98357a_amplifier.md](max98357a_amplifier.md).
@@ -247,11 +249,25 @@ the finished binaries in `firmware/binaries/`.
 | Command | Does |
 |---|---|
 | `./build_firmware.sh` | Build. Writes `athan-v3-<version>.factory.bin`, `athan-v3.ota.bin` and `manifest.json` to `firmware/binaries/` |
-| `./build_firmware.sh flash [PORT]` | Build and flash over USB-C. Without PORT it lists the ports (on macOS `/dev/cu.usbmodem…`) |
+| `./build_firmware.sh flash [PORT]` | Build and flash over a serial port: the V3 board's J6 adapter (`/dev/cu.usbserial…`) or a DevKitC's USB (`/dev/cu.usbmodem…`). Without PORT it lists the ports |
 | `./build_firmware.sh ota [HOST]` | Build and update over Wi-Fi (default `athan.local`) |
 | `./build_firmware.sh logs [PORT\|HOST]` | Show the device's log |
 | `./build_firmware.sh check` | Validate the yaml only (seconds, no compile) |
 | `./build_firmware.sh clean [all]` | Delete the build (`all`: also ESPHome and the toolchain) |
+
+`flash` and `ota` above always build first. When nothing changed that build is quick, but it still takes tens of
+seconds. To send binaries that already exist (your last build, or files downloaded from a GitHub Release) without
+building, use **`./flash_firmware.sh`**:
+
+| Command | Does |
+|---|---|
+| `./flash_firmware.sh ota [HOST]` | Sends `firmware/binaries/athan-v3.ota.bin` over Wi-Fi. Keeps settings, Wi-Fi, sounds and prayer times |
+| `./flash_firmware.sh usb [PORT]` | Same file over a serial port (J6 adapter or DevKitC USB), firmware only. Keeps everything. For a board that already runs V3 |
+| `./flash_firmware.sh usb-full [PORT]` | The whole `athan-v3-<version>.factory.bin` from 0x0: a blank board, or after `partitions.csv` changed. Resets settings and Wi-Fi |
+
+Add `-f FILE` to flash another file. Every file is checked to be an ESP32-S3 image of the right kind first.
+Wi-Fi updates (from both scripts) go only to a clock that serves the V3 `/audio` page. A V2 clock also answers to
+`athan.local` and an ESP32 image would brick it.
 
 1. **Put the two menu tones** in `firmware/sounds/`: `click.mp3` (the menu click) and `volume.mp3` (the volume
    tone). Any short MP3s work. The V2 SD card's `C3` and `C2` are the original ones. They are built into the
@@ -259,14 +275,20 @@ the finished binaries in `firmware/binaries/`.
 2. **Optional, recommended for your own builds:** generate your own API encryption key (`openssl rand -base64 32`)
    and put it in both `api:` and `ota:` in `firmware/athan.yaml`. You don't need Wi-Fi credentials or
    `secrets.yaml`: Wi-Fi is set up from the phone (1.1).
-3. **First flash over USB-C.** This also writes the bootloader and the partition table:
+3. **First flash through J6.** The V3 board's 6-pin USB-C carries power only, so the first flash uses a 3.3 V
+   USB-serial adapter on the J6 header (HARDWARE.md 3.2). It also writes the bootloader and the partition table:
+   1. Wire the adapter: GND → J6 pin 1, adapter RX → pin 4, adapter TX → pin 5.
+   2. Put the jumper cap on J6 pins 1–2 (IO0 to GND), then plug the board's USB-C into a charger.
+   3. Flash, choosing the adapter's port:
 
-   ```bash
-   ./build_firmware.sh flash        # or, with your own ESPHome: esphome run firmware/athan.yaml
-   ```
+      ```bash
+      ./build_firmware.sh flash        # or, with your own ESPHome: esphome run firmware/athan.yaml
+      ```
 
-   On a bare board, the ESP32-S3's built-in USB enters download mode by itself. If a bad firmware ever stops USB
-   from coming up, hold GPIO0 to GND while resetting (the recovery pads, HARDWARE.md).
+   4. Remove the jumper, then unplug and replug the USB-C.
+
+   On a DevKitC prototype, just plug in its USB port; it enters download mode by itself. Serial logs come out on
+   UART0 (J6 pins 4/5, or the DevKitC's UART port): `./build_firmware.sh logs /dev/cu.usbserial-…`.
 4. Later flashes can go over Wi-Fi (`./build_firmware.sh ota`), or the clock can update itself from GitHub
    Releases (3.4).
 
@@ -382,6 +404,7 @@ hardware/pcb/              KiCad project (to be drawn from HARDWARE.md)
 hardware/enclosure/        3D files (to be drawn from HARDWARE.md)
 images/                    photos for this README
 build_firmware.sh          build / flash / OTA / logs without Docker (2.2)
+flash_firmware.sh          flash existing binaries over Wi-Fi or USB, no build (2.2)
 README.md  HARDWARE.md  DEVELOPER.md  prayertimes_specs.md  version3_planning.md  max98357a_amplifier.md
 CLAUDE.md                  notes for AI coding agents working in this repository
 ```

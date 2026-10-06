@@ -107,6 +107,9 @@ psram:
 
 logger:
   level: DEBUG
+  # UART0 = TXD0/RXD0 on the J6 programming header. The board's 6-pin USB-C carries power only, so ESPHome's S3
+  # default (native USB) would print nowhere. On a DevKitC prototype these logs come out of its "UART" port.
+  hardware_uart: UART0
 
 # Home Assistant native API (optional; the web page works without it)
 api:

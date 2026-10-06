@@ -376,7 +376,8 @@ void AthanComponent::job_catalog_() {
     const std::string base = this->data_url_ + "/audio/";
     if (!root.isNull()) {
       for (int l = 0; l < NUM_LISTS; l++) {
-        for (JsonVariant e : root[LIST_KEYS[l]].as<JsonArray>()) {
+        JsonArray entries = root[LIST_KEYS[l]].as<JsonArray>();  // a named handle (GCC 14 -Wdangling-reference)
+        for (JsonVariant e : entries) {
           if (lists[l].size() >= MAX_ENTRIES)
             break;
           if (!e["name"].is<const char *>() || !e["url"].is<const char *>())
@@ -669,7 +670,8 @@ bool AthanComponent::parse_stations_(const uint8_t *data, size_t len) {
   if (root.isNull())
     return false;
   std::vector<NamedUrl> list;
-  for (JsonVariant e : root["stations"].as<JsonArray>()) {
+  JsonArray stations = root["stations"].as<JsonArray>();  // a named handle (GCC 14 -Wdangling-reference)
+  for (JsonVariant e : stations) {
     if (list.size() >= NUM_STATIONS)
       break;
     NamedUrl s;

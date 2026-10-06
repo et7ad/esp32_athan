@@ -51,3 +51,4 @@ SDCard_files/
 **/.pioenvs/athan/firmware.ota.bin
 firmware/binaries/
 scripts/parse_Islamicfinder/preparing/
+hardware/pcb/esp32_athan-backups/
