@@ -1,6 +1,7 @@
 #include "menu_view.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace esphome {
 namespace athan {
@@ -72,28 +73,80 @@ void play_mark(Display &d, int x, int y) { d.filled_triangle(x, y, x, y + 8, x +
 
 }  // namespace
 
+// Everything the menu screen shows, read from the row's hooks once per draw. Its fingerprint tells whether a
+// redraw would change anything (menu_changed()).
+struct Frame {
+  const char *title{""};
+  std::string above, below, text, cap, left, right;
+  int item{-1}, n{0};
+  bool in_use{false}, playing{false};
+};
+
+static Frame frame_of(Menu &menu) {
+  menu.refresh();
+  const MenuRow &row = menu.row_at(menu.row());
+  Frame fr;
+  fr.title = row.title;
+  fr.above = summary(menu, menu.row_above());
+  fr.below = summary(menu, menu.row_below());
+  fr.item = menu.item();
+  fr.n = menu.count();
+  if (fr.item < 0) {
+    fr.cap = row.caption ? row.caption(-1) : std::string();  // why there is nothing to show
+    return fr;
+  }
+  fr.text = row.label ? row.label(fr.item) : std::string();
+  fr.cap = row.caption ? row.caption(fr.item) : std::string();
+  fr.in_use = row.active && row.active() == fr.item;
+  fr.playing = row.playing && row.playing() == fr.item;
+  const int l = menu.item_left(), r = menu.item_right();
+  if (l >= 0)
+    fr.left = row.label(l);
+  if (r >= 0)
+    fr.right = row.label(r);
+  return fr;
+}
+
+static uint32_t fingerprint(const Frame &fr) {
+  uint32_t h = 2166136261u;  // FNV-1a
+  auto mix = [&h](const char *p, size_t n) {
+    for (size_t i = 0; i < n; i++)
+      h = (h ^ static_cast<uint8_t>(p[i])) * 16777619u;
+    h = (h ^ 0xFFu) * 16777619u;  // separator
+  };
+  auto str = [&mix](const std::string &s) { mix(s.data(), s.size()); };
+  mix(fr.title, std::strlen(fr.title));
+  str(fr.above);
+  str(fr.below);
+  str(fr.text);
+  str(fr.cap);
+  str(fr.left);
+  str(fr.right);
+  const int32_t nums[4] = {fr.item, fr.n, fr.in_use, fr.playing};
+  mix(reinterpret_cast<const char *>(nums), sizeof(nums));
+  return h;
+}
+
+static uint32_t drawn_fingerprint = 0;  // of the last menu screen sent to the display
+
+bool menu_changed(Menu &menu) { return menu.is_open() && fingerprint(frame_of(menu)) != drawn_fingerprint; }
+
 void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   if (!menu.is_open())
     return;
-  menu.refresh();
-  const MenuRow &row = menu.row_at(menu.row());
-  const int item = menu.item();
+  const Frame fr = frame_of(menu);
+  drawn_fingerprint = fingerprint(fr);
 
-  ghost_line(d, f.small, summary(menu, menu.row_above()), Y_ABOVE, 0, 11);
-  ghost_line(d, f.small, summary(menu, menu.row_below()), Y_BELOW, 54, 64);
-  d.print(W / 2, Y_TITLE, f.medium, TextAlign::BASELINE_CENTER, row.title);
+  ghost_line(d, f.small, fr.above, Y_ABOVE, 0, 11);
+  ghost_line(d, f.small, fr.below, Y_BELOW, 54, 64);
+  d.print(W / 2, Y_TITLE, f.medium, TextAlign::BASELINE_CENTER, fr.title);
 
-  if (item < 0) {  // nothing to show yet: say why ("Loading list...")
-    const std::string why = row.caption ? row.caption(-1) : std::string();
-    d.print(W / 2, 40, f.medium, TextAlign::BASELINE_CENTER, why.empty() ? "Empty" : why.c_str());
+  if (fr.item < 0) {  // nothing to show yet: say why ("Loading list...")
+    d.print(W / 2, 40, f.medium, TextAlign::BASELINE_CENTER, fr.cap.empty() ? "Empty" : fr.cap.c_str());
     return;
   }
 
-  const std::string text = row.label ? row.label(item) : std::string();
-  const std::string cap = row.caption ? row.caption(item) : std::string();
-  const bool in_use = row.active && row.active() == item;
-  const bool playing = row.playing && row.playing() == item;
-  const int marks = (in_use ? 9 : 0) + (playing ? 7 : 0) + (in_use && playing ? 2 : 0);
+  const int marks = (fr.in_use ? 9 : 0) + (fr.playing ? 7 : 0) + (fr.in_use && fr.playing ? 2 : 0);
 
   // The biggest font that fits: large between the side previews, medium there, medium over the whole width (no
   // side previews), small over the whole width. With a caption the large font does not fit vertically.
@@ -107,43 +160,42 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   int group = 0;  // item text plus its marks
   int tw = 0;
   for (const Fit &c : fits) {
-    if (!cap.empty() && c.font == f.large)
+    if (!fr.cap.empty() && c.font == f.large)
       continue;
     fit = c;
-    tw = width_of(d, c.font, text);
+    tw = width_of(d, c.font, fr.text);
     group = tw + (marks ? marks + 3 : 0);
     if (group <= (c.sides ? W - 2 * (SIDE + 2) : W - 2))
       break;
   }
-  const int mid = cap.empty() ? 35 : 33;  // vertical centre of the item's capitals
+  const int mid = fr.cap.empty() ? 35 : 33;  // vertical centre of the item's capitals
 
   if (fit.sides) {
-    const int l = menu.item_left(), r = menu.item_right();
     const int sb = mid + 3;  // small capitals (7 px) centred on the item
-    if (l >= 0)
-      ghost(d, f.small, SIDE - 1, sb, TextAlign::BASELINE_RIGHT, row.label(l), 0, ITEM_TOP, SIDE, ITEM_BOTTOM);
-    if (r >= 0)
-      ghost(d, f.small, W - SIDE + 1, sb, TextAlign::BASELINE_LEFT, row.label(r), W - SIDE, ITEM_TOP, W, ITEM_BOTTOM);
+    if (!fr.left.empty())
+      ghost(d, f.small, SIDE - 1, sb, TextAlign::BASELINE_RIGHT, fr.left, 0, ITEM_TOP, SIDE, ITEM_BOTTOM);
+    if (!fr.right.empty())
+      ghost(d, f.small, W - SIDE + 1, sb, TextAlign::BASELINE_LEFT, fr.right, W - SIDE, ITEM_TOP, W, ITEM_BOTTOM);
   }
 
   // The item and its marks, centred together.
   int x = std::max(1, (W - group) / 2);
-  d.print(x, mid + fit.cap_h / 2, fit.font, TextAlign::BASELINE_LEFT, text.c_str());
+  d.print(x, mid + fit.cap_h / 2, fit.font, TextAlign::BASELINE_LEFT, fr.text.c_str());
   x += tw + 3;
-  if (in_use) {
+  if (fr.in_use) {
     check_mark(d, x, mid - 4);
     x += 11;
   }
-  if (playing)
+  if (fr.playing)
     play_mark(d, x, mid - 4);
 
   // Under the item: the caption, or where the item sits in the row.
-  const int n = menu.count();
-  if (!cap.empty()) {
-    if (width_of(d, f.small, cap) <= W - 2)
-      d.print(W / 2, Y_CAPTION, f.small, TextAlign::BASELINE_CENTER, cap.c_str());
+  const int n = fr.n, item = fr.item;
+  if (!fr.cap.empty()) {
+    if (width_of(d, f.small, fr.cap) <= W - 2)
+      d.print(W / 2, Y_CAPTION, f.small, TextAlign::BASELINE_CENTER, fr.cap.c_str());
     else
-      d.print(1, Y_CAPTION, f.small, TextAlign::BASELINE_LEFT, cap.c_str());
+      d.print(1, Y_CAPTION, f.small, TextAlign::BASELINE_LEFT, fr.cap.c_str());
   } else if (n > 1 && n <= 16) {
     const int gap = 6, x0 = W / 2 - (n - 1) * gap / 2;
     for (int i = 0; i < n; i++) {

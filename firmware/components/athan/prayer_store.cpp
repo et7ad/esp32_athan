@@ -37,7 +37,7 @@ static bool parse_hhmm(const char *s, uint16_t *out) {
   return true;
 }
 
-bool parse_year_file(const uint8_t *data, size_t len, const std::string &key, int year, std::vector<uint16_t> *table,
+bool parse_year_file(const uint8_t *data, size_t len, const std::string &key, int year, PsramVector<uint16_t> *table,
                      std::string *tz, std::string *err) {
   JsonDocument doc = json::parse_json(data, len);
   JsonObject root = doc.as<JsonObject>();
@@ -125,7 +125,7 @@ bool PrayerStore::begin() {
     if (!this->valid_[s])
       continue;
     // Verify the table too.
-    std::vector<uint16_t> table(h.days * NUM_FIELDS);
+    PsramVector<uint16_t> table(h.days * NUM_FIELDS);
     if (esp_partition_read(this->part_, s * SLOT_SIZE + TABLE_OFFSET, table.data(), table.size() * 2) != ESP_OK ||
         esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(table.data()), table.size() * 2) != h.table_crc) {
       this->valid_[s] = false;
@@ -165,7 +165,7 @@ int PrayerStore::find(const std::string &key, int year) const {
   return best;
 }
 
-bool PrayerStore::load(int slot, std::vector<uint16_t> *table, std::string *tz) const {
+bool PrayerStore::load(int slot, PsramVector<uint16_t> *table, std::string *tz) const {
   Header h;
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
@@ -180,7 +180,7 @@ bool PrayerStore::load(int slot, std::vector<uint16_t> *table, std::string *tz) 
   return true;
 }
 
-bool PrayerStore::write(const std::string &key, int year, const std::string &tz, const std::vector<uint16_t> &table,
+bool PrayerStore::write(const std::string &key, int year, const std::string &tz, const PsramVector<uint16_t> &table,
                         const std::vector<std::pair<std::string, int>> &keep) {
   if (this->part_ == nullptr || table.empty() || key.size() >= 32 || tz.size() >= 64)
     return false;

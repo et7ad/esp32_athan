@@ -14,6 +14,7 @@
 #include "esphome/core/log.h"
 
 #include <esp_crt_bundle.h>
+#include <esp_event.h>
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
 #include <esp_wifi.h>
@@ -33,6 +34,39 @@ static const size_t STATIONS_MAX_BYTES = 16 * 1024;
 static const uint32_t HOUR_MS = 3600UL * 1000UL;
 
 static bool due(uint64_t now, uint64_t at) { return now >= at; }
+
+// The reason and signal of the last Wi-Fi disconnect, from ESP-IDF's event task (record_wifi_drop_() reads them).
+static std::atomic<uint8_t> s_wifi_reason{0};
+static std::atomic<int8_t> s_wifi_rssi{0};
+static void on_wifi_event(void *, esp_event_base_t base, int32_t id, void *data) {
+  if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED && data != nullptr) {
+    const auto *d = static_cast<const wifi_event_sta_disconnected_t *>(data);
+    s_wifi_reason = d->reason;
+    s_wifi_rssi = d->rssi;
+  }
+}
+
+// ESP-IDF's disconnect reasons, worded as ESPHome logs them.
+static const char *wifi_reason_text(uint8_t r) {
+  switch (r) {
+    case 2: return "authentication expired";
+    case 3: return "deauthenticated by the router";
+    case 4: return "disassociated for inactivity";
+    case 5: return "router has too many clients";
+    case 6: return "not authenticated";
+    case 7: return "not associated";
+    case 8: return "disassociated";
+    case 15: return "4-way handshake timeout";
+    case 16: return "group key update timeout";
+    case 200: return "beacon timeout";
+    case 201: return "router not found";
+    case 202: return "authentication failed";
+    case 204: return "handshake timeout";
+    case 205: return "connection failed";
+    case 206: return "router clock reset";
+    default: return "other";
+  }
+}
 
 static std::string fmt_duration(uint32_t ms) {
   char b[16];
@@ -79,12 +113,12 @@ class AudioWebHandler : public AsyncWebHandler {
     StringRef ref = request->url_to(buf);
     std::string url(ref.c_str(), ref.size());
     if (request->method() == HTTP_GET && (url == "/audio" || url == "/audio/")) {
-      std::string page = this->parent_->render_audio_page();
+      const PsramString page = this->parent_->render_audio_page();
       request->send(200, "text/html; charset=utf-8", page.c_str());
       return;
     }
     if (request->method() == HTTP_GET && url == "/audio/status") {
-      std::string bar = this->parent_->render_audio_status(std::strtoul(request->arg("g").c_str(), nullptr, 10));
+      const PsramString bar = this->parent_->render_audio_status(std::strtoul(request->arg("g").c_str(), nullptr, 10));
       request->send(200, "text/html; charset=utf-8", bar.c_str());
       return;
     }
@@ -127,7 +161,13 @@ class AudioWebHandler : public AsyncWebHandler {
 // ==============================================================================================================
 void AthanComponent::setup() {
   this->slots_.begin();
+  this->refresh_slot_view_();
   this->store_.begin();
+  // The reason of each Wi-Fi drop, for the web page (ESPHome only logs it). The wifi component, set up before this
+  // one, created the default event loop.
+  if (esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_event, nullptr,
+                                          nullptr) != ESP_OK)
+    ESP_LOGW(TAG, "Wi-Fi drop reasons will not be recorded");
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
     this->sound_status_ = "Ready";
@@ -160,23 +200,28 @@ void AthanComponent::dump_config() {
 }
 
 void AthanComponent::loop() {
-  // Actions queued by the /audio page.
-  std::deque<std::pair<WebAction, std::pair<int, int>>> actions;
-  {
-    std::lock_guard<std::mutex> lock(this->mutex_);
-    actions.swap(this->web_actions_);
-  }
-  for (auto &a : actions) {
-    switch (a.first) {
-      case WebAction::DOWNLOAD: this->download_from_catalog(a.second.first, a.second.second); break;
-      case WebAction::PREVIEW: this->request_preview(a.second.first, a.second.second, 300); break;
-      case WebAction::STOP:
-        if (this->hard_stop_cb_ && this->preview_list_ >= 0)
-          this->hard_stop_cb_();  // silent at once
-        this->stop_media();
-        break;
+  // Actions queued by the /audio page. Rare, so the flag keeps the lock and the deque (whose constructor
+  // allocates) off every other pass of the loop, which runs at least 60 times a second.
+  if (this->web_actions_pending_.exchange(false)) {
+    std::deque<std::pair<WebAction, std::pair<int, int>>> actions;
+    {
+      std::lock_guard<std::mutex> lock(this->mutex_);
+      actions.swap(this->web_actions_);
+    }
+    for (auto &a : actions) {
+      switch (a.first) {
+        case WebAction::DOWNLOAD: this->download_from_catalog(a.second.first, a.second.second); break;
+        case WebAction::PREVIEW: this->request_preview(a.second.first, a.second.second, 300); break;
+        case WebAction::STOP:
+          if (this->hard_stop_cb_ && this->preview_list_ >= 0)
+            this->hard_stop_cb_();  // silent at once
+          this->stop_media();
+          break;
+      }
     }
   }
+
+  this->net_watch_();
 
   // A requested preview starts once its delay has passed without another request (request_preview()).
   if (this->pending_preview_list_ >= 0 && static_cast<int32_t>(millis() - this->pending_preview_at_) >= 0) {
@@ -320,7 +365,7 @@ AthanComponent::HttpResult AthanComponent::http_get_(const std::string &url, siz
     if (esp_http_client_open(client, 0) != ESP_OK) {
       ESP_LOGW(TAG, "Cannot reach %s", url.c_str());
       esp_http_client_cleanup(client);
-      return HttpResult::FAILED;
+      return HttpResult::NO_CONNECTION;
     }
     content_length = esp_http_client_fetch_headers(client);
     status = esp_http_client_get_status_code(client);
@@ -453,6 +498,7 @@ void AthanComponent::job_catalog_() {
     this->catalog_pending_ = false;
     if (ok) {
       this->catalog_ready_ = true;
+      this->refresh_slot_view_();  // which entry is selected, and "Custom", depend on the list
       this->next_catalog_try_ = millis_64() + 12 * HOUR_MS;  // pick up list changes twice a day
       ESP_LOGI(TAG, "Suggested lists loaded");
     } else {
@@ -591,6 +637,7 @@ void AthanComponent::stop_media() {
   this->preview_list_ = -1;
   this->radio_token_++;
   this->radio_station_ = -1;
+  this->radio_waiting_net_ = false;
   this->stop_media_pipeline_();
   this->stop_slot_preview_();
   this->set_radio_status_("Radio off");
@@ -600,8 +647,11 @@ void AthanComponent::stop_media() {
 // ESPHome's audio pipeline gives its speaker chain the stream's format (sample rate, channels) once, when that
 // chain starts. A stream or file started while the previous one still plays or is stopping reuses the running
 // chain with the OLD format: a mono stream after a stereo one plays at double speed and pitch, a 22 kHz one after
-// 44 kHz at half. Every start therefore waits until its pipeline's first speaker has stopped (pump_starts_()),
-// and what starts is then checked against its real format (check_formats_()).
+// 44 kHz at half. Every start therefore waits until its pipeline's first speaker has stopped (pump_starts_()).
+// The decoder can also misread the first bytes of a stream (a radio station sends its stream from any byte, not
+// from a frame), and ESPHome's player reopens a failed link by itself, outside these starts. So a stream's real
+// format is read first, from its own chained frames (CHECK_STREAM, remembered per link), and whatever plays is
+// compared with it all the time (check_formats_()): a mismatch is silenced at once and restarted.
 
 bool AthanComponent::media_chain_stopped_() const {
   const auto st = this->player_->state;
@@ -619,10 +669,37 @@ void AthanComponent::start_stream_(const std::string &url) {
     return;
   this->stop_media_pipeline_();  // the stream before it, if any
   this->stream_url_ = url;
+  this->stream_id_ = AudioSlots::source_id(url);
   this->stream_pending_ = true;
   this->stream_pending_since_ = millis();
   this->stream_restarts_ = 0;
-  this->pump_starts_();  // at once when nothing plays
+  KnownFormat *f = this->find_format_(this->stream_id_);
+  if (f != nullptr)
+    f->used = millis();
+  else
+    this->check_stream_now_();  // first play of this link: its format before the player gets it
+  this->pump_starts_();  // at once when nothing plays and the format is known
+}
+
+AthanComponent::KnownFormat *AthanComponent::find_format_(uint32_t id) {
+  for (auto &f : this->formats_)
+    if (f.id == id && id != 0)
+      return &f;
+  return nullptr;
+}
+
+void AthanComponent::remember_format_(uint32_t id, uint32_t rate, uint8_t channels) {
+  KnownFormat *slot = this->find_format_(id);
+  if (slot == nullptr) {
+    slot = &this->formats_[0];
+    for (auto &f : this->formats_)
+      if (f.id == 0 || f.used < slot->used)
+        slot = &f;
+  }
+  slot->id = id;
+  slot->rate = rate;
+  slot->channels = channels;
+  slot->used = millis();
 }
 
 void AthanComponent::start_announcement_(audio::AudioFile *file) {
@@ -642,16 +719,21 @@ void AthanComponent::pump_starts_() {
   if (this->player_ == nullptr)
     return;
   if (this->stream_pending_) {
+    const uint32_t waited = millis() - this->stream_pending_since_;
+    // The link's format first (its check is usually done in under a second; a slow server still plays after 6 s
+    // and is compared when the check ends), then a stopped chain (at most 4 s).
+    const bool format_ready = this->find_format_(this->stream_id_) != nullptr || waited >= 6000;
     const bool stopped = this->media_chain_stopped_();
-    if (stopped || millis() - this->stream_pending_since_ > 4000) {
+    if (format_ready && (stopped || waited >= 4000)) {
       if (!stopped)
-        ESP_LOGW(TAG, "Media pipeline still busy after 4 s: starting the stream anyway");
+        ESP_LOGW(TAG, "Media pipeline still busy: starting the stream anyway");
+      if (this->find_format_(this->stream_id_) == nullptr)
+        ESP_LOGW(TAG, "Stream format not known yet: playing, and comparing once it is");
       this->stream_pending_ = false;
       this->media_started_ = true;
-      this->stream_token_++;
-      this->stream_true_rate_ = 0;
+      this->stream_confirmed_ = false;
+      this->fmt_next_check_ = millis() + 3 * 60 * 1000;  // the regular re-check
       this->player_->make_call().set_media_url(this->stream_url_).set_announcement(false).perform();
-      this->check_stream_now_();
     }
   }
   if (this->announce_pending_ != nullptr) {
@@ -679,11 +761,13 @@ void AthanComponent::pump_starts_() {
 }
 
 void AthanComponent::check_stream_now_() {
+  if (this->fmt_check_running_ || this->stream_url_.empty())
+    return;  // one at a time: when it ends, a stream still waiting for its format gets its own
+  this->fmt_check_running_ = true;
   Job job;
   job.type = JobType::CHECK_STREAM;
   job.url = this->stream_url_;
-  job.token = this->stream_token_;
-  this->stream_checked_at_ = millis();
+  job.token = this->stream_id_;
   this->enqueue_(std::move(job), true);
 }
 
@@ -693,7 +777,8 @@ void AthanComponent::job_check_stream_(Job &job) {
   size_t len;
   uint32_t rate = 0;
   uint8_t channels = 0;
-  if (this->http_get_(job.url, 12 * 1024, &buf, &len, -1, true) == HttpResult::OK) {
+  const HttpResult r = this->http_get_(job.url, 12 * 1024, &buf, &len, -1, true);
+  if (r == HttpResult::OK) {
     Mp3Info info = mp3_scan(buf, len);
     heap_caps_free(buf);
     if (info.ok) {
@@ -701,37 +786,59 @@ void AthanComponent::job_check_stream_(Job &job) {
       channels = info.channels;
     }
   }
-  const uint32_t token = job.token;
-  this->defer([this, token, rate, channels]() {
-    if (token != this->stream_token_ || rate == 0)
-      return;  // another stream since, or not an MP3 we can read (Opus, FLAC: their headers are reliable)
-    this->stream_true_rate_ = rate;
-    this->stream_true_channels_ = channels;
-    this->stream_check_token_ = token;
+  const bool answered = r == HttpResult::OK;  // rate 0 then: not an MP3 (Opus, FLAC)
+  const bool unreachable = r == HttpResult::NO_CONNECTION;
+  const uint32_t id = job.token;
+  this->defer([this, id, answered, unreachable, rate, channels]() {
+    this->fmt_check_running_ = false;
+    if (answered)
+      this->remember_format_(id, rate, channels);
+    else if (id == this->stream_id_)
+      this->stream_check_failed_(unreachable);
+    // A stream started meanwhile may still wait for its own format.
+    if (this->stream_pending_ && this->find_format_(this->stream_id_) == nullptr)
+      this->check_stream_now_();
   });
 }
 
 void AthanComponent::check_formats_() {
-  // Stream: the pipeline's format must be the one its own frames say, else the stream plays at the wrong speed.
-  if (this->stream_true_rate_ != 0 && this->stream_check_token_ == this->stream_token_ && !this->stream_pending_ &&
-      this->media_speaker_ != nullptr && this->media_speaker_->is_running()) {
-    const uint32_t rate = this->stream_true_rate_;
-    const uint8_t channels = this->stream_true_channels_;
-    this->stream_true_rate_ = 0;
-    const auto &info = this->media_speaker_->get_audio_stream_info();
-    if (info.get_sample_rate() == rate && info.get_channels() == channels) {
-      ESP_LOGD(TAG, "Stream format confirmed: %u Hz, %u ch", (unsigned) rate, (unsigned) channels);
-    } else if (this->stream_restarts_ < 3) {
-      this->stream_restarts_++;
-      ESP_LOGW(TAG, "Stream plays as %u Hz %u ch but is %u Hz %u ch: restarting it (%u/3)",
-               (unsigned) info.get_sample_rate(), (unsigned) info.get_channels(), (unsigned) rate,
-               (unsigned) channels, (unsigned) this->stream_restarts_);
-      this->stop_media_pipeline_();
-      this->stream_pending_ = true;
-      this->stream_pending_since_ = millis();
-    } else {
-      ESP_LOGE(TAG, "Stream still plays at the wrong format after 3 restarts: stopping it");
-      this->stop_media();
+  // Stream: whenever it sounds (after our starts and after the player's own), its format must be the one its
+  // frames say, else it plays at the wrong speed. Compared on every pass, so a wrong start is silenced at once.
+  if (!this->stream_pending_ && this->media_started_ && this->media_speaker_ != nullptr &&
+      this->media_speaker_->is_running()) {
+    const KnownFormat *f = this->find_format_(this->stream_id_);
+    if (f != nullptr && f->rate != 0) {
+      const uint32_t rate = f->rate;
+      const uint8_t channels = f->channels;
+      const auto &info = this->media_speaker_->get_audio_stream_info();
+      if (info.get_sample_rate() != rate || info.get_channels() != channels) {
+        if (this->hard_stop_cb_)
+          this->hard_stop_cb_();  // not one more moment at the wrong speed
+        if (this->stream_restarts_ < 3) {
+          this->stream_restarts_++;
+          ESP_LOGW(TAG, "Stream plays as %u Hz %u ch but is %u Hz %u ch: restarting it (%u/3)",
+                   (unsigned) info.get_sample_rate(), (unsigned) info.get_channels(), (unsigned) rate,
+                   (unsigned) channels, (unsigned) this->stream_restarts_);
+          this->stop_media_pipeline_();
+          this->stream_pending_ = true;
+          this->stream_pending_since_ = millis();
+        } else {
+          ESP_LOGE(TAG, "Stream still plays at the wrong format after 3 restarts: stopping it");
+          this->stop_media();
+        }
+        return;
+      }
+      if (!this->stream_confirmed_) {
+        this->stream_confirmed_ = true;
+        ESP_LOGD(TAG, "Stream format confirmed: %u Hz, %u ch", (unsigned) rate, (unsigned) channels);
+      }
+    }
+    // Checked again every 3 min (a station can switch format mid-stream), every 30 s while not known.
+    if (f == nullptr || f->rate != 0) {
+      if (!this->fmt_check_running_ && static_cast<int32_t>(millis() - this->fmt_next_check_) >= 0) {
+        this->fmt_next_check_ = millis() + (f == nullptr ? 30000 : 3 * 60 * 1000);
+        this->check_stream_now_();
+      }
     }
   }
   // Stored sound: compared with the format read from its own frames at boot.
@@ -947,6 +1054,7 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
       hs->refused = true;
     } else {
       this->slots_.invalidate(slot);
+      this->refresh_slot_view_();
     }
     xSemaphoreGive(hs->sem);
   });
@@ -968,6 +1076,7 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
   heap_caps_free(data);
   this->defer([this, slot, ok, label, info, source]() {
     this->slots_.reload(slot);
+    this->refresh_slot_view_();
     this->sounds_changed_++;  // the slot changed either way (new sound, or empty after a failed write)
     if (ok && this->slots_.valid(slot)) {
       this->set_sound_status_(std::string(source != 0 ? "Downloaded " : "Uploaded ") + label + " (" +
@@ -1050,9 +1159,12 @@ void AthanComponent::upload_end() {
 }
 
 void AthanComponent::web_action(WebAction action, int list, int entry) {
-  std::lock_guard<std::mutex> lock(this->mutex_);
-  if (this->web_actions_.size() < 8)
-    this->web_actions_.push_back({action, {list, entry}});
+  {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    if (this->web_actions_.size() < 8)
+      this->web_actions_.push_back({action, {list, entry}});
+  }
+  this->web_actions_pending_ = true;  // after the push: loop() never misses it
 }
 
 // ---------------- radio ----------------
@@ -1140,9 +1252,19 @@ void AthanComponent::radio_play(int station, bool subscribed) {
   this->radio_station_ = station;
   this->radio_subscribed_ = subscribed;
   this->radio_retries_ = retries;
-  this->radio_streaming_ = false;
   this->radio_started_ = millis();
   uint32_t token = ++this->radio_token_;
+  if (!network::is_connected()) {
+    // Started without network (Up pressed during a router restart): it starts when the network is back.
+    this->stream_pending_ = false;
+    this->stop_media_pipeline_();
+    if (!this->radio_waiting_net_)
+      this->radio_wait_since_ = millis();
+    this->radio_waiting_net_ = true;
+    this->set_radio_status_("Radio " + std::to_string(station + 1) + ": waiting for Wi-Fi");
+    return;
+  }
+  this->radio_waiting_net_ = false;
   if (subscribed) {
     // The station list stays in memory (fetched at boot, then every 6 h): playing, switching or reconnecting starts
     // the stream at once, with no request to GitHub. Only a device that has never loaded the list fetches it here.
@@ -1201,19 +1323,20 @@ std::string AthanComponent::station_name(int station) const {
 }
 
 void AthanComponent::radio_tick_() {
-  if (this->radio_station_ < 0 || this->player_ == nullptr)
+  if (this->radio_station_ < 0 || this->player_ == nullptr || this->radio_waiting_net_)
     return;
+  // Sound really flows: the media pipeline's first speaker runs. Not the player's state: while ESPHome's player
+  // retries a link that does not open, it stays PLAYING without a sound.
   auto st = this->player_->state;
-  if (st == media_player::MEDIA_PLAYER_STATE_PLAYING || st == media_player::MEDIA_PLAYER_STATE_ANNOUNCING ||
-      st == media_player::MEDIA_PLAYER_STATE_PAUSED) {
-    this->radio_streaming_ = true;
-    this->radio_retries_ = 0;
-    if (!this->stream_pending_ && millis() - this->stream_checked_at_ > 3 * 60 * 1000)
-      this->check_stream_now_();  // a station can switch format mid-stream (another source or program)
+  const bool sound = this->media_speaker_ != nullptr ? this->media_speaker_->is_running()
+                                                     : st == media_player::MEDIA_PLAYER_STATE_PLAYING;
+  if (sound) {
+    this->radio_retries_ = 0;  // its format is compared in check_formats_()
     return;
   }
-  // Not playing: still starting (link fetch + connect), or the stream dropped.
-  if (millis() - this->radio_started_ < 15000)
+  // No sound: still starting (link, connection, first audio take up to about 8 s), or the stream dropped or never
+  // opened.
+  if (millis() - this->radio_started_ < 20000)
     return;
   if (this->radio_retries_ < 3) {
     this->radio_retries_++;
@@ -1232,6 +1355,69 @@ void AthanComponent::radio_tick_() {
   if (this->radio_subscribed_ && !this->stations_pending_ &&
       millis_64() - this->stations_fetched_at_ > 10 * 60 * 1000ULL)
     this->next_stations_try_ = 0;
+}
+
+// Streams need the network. Without it, ESPHome's media player retries a link that does not open many times a
+// second (each try a DNS lookup or a connection attempt, plus a screenful of log) for as long as the network is
+// gone, and keeps saying PLAYING. So a stream stops the moment the network goes, and the radio starts again the
+// moment it is back: a router restart or a short Wi-Fi drop costs the time of the drop, nothing more.
+void AthanComponent::net_watch_() {
+  const bool online = network::is_connected();
+  if (online == this->online_) {
+    if (!online && this->radio_waiting_net_ && millis() - this->radio_wait_since_ > 10 * 60 * 1000UL) {
+      const int s = this->radio_station_;
+      ESP_LOGW(TAG, "No network for 10 minutes: radio off");
+      this->stop_media();
+      this->set_radio_status_("Radio " + std::to_string(s + 1) + " stopped: no Wi-Fi for 10 minutes");
+    }
+    return;
+  }
+  this->online_ = online;
+  if (!online) {
+    this->record_wifi_drop_();
+    if (this->preview_list_ >= 0 && !this->slot_preview_) {
+      this->stop_media();  // a streamed preview
+      this->set_sound_status_("Preview stopped: no Wi-Fi");
+    }
+    if (this->radio_station_ >= 0) {
+      ESP_LOGW(TAG, "Network lost: radio paused until it is back");
+      this->stream_pending_ = false;
+      this->stop_media_pipeline_();
+      this->radio_waiting_net_ = true;
+      this->radio_wait_since_ = millis();
+      this->set_radio_status_("Radio " + std::to_string(this->radio_station_ + 1) + ": waiting for Wi-Fi");
+    }
+    return;
+  }
+  if (this->radio_waiting_net_ && this->radio_station_ >= 0) {
+    ESP_LOGI(TAG, "Network back: radio again");
+    this->radio_retries_ = 0;
+    this->radio_play(this->radio_station_, this->radio_subscribed_);
+  }
+}
+
+// The format check of the current link failed. A link the player does not have yet (its first play) never gets
+// to it: the player would retry a failing link many times a second, without a format to compare it with. One the
+// player has keeps playing while sound flows (the check is tried again); if it cannot be reached at all (no
+// internet, DNS, refused) and nothing sounds, it is stopped. The radio tries again from radio_tick_ (20 s after its
+// start, 3 times).
+void AthanComponent::stream_check_failed_(bool unreachable) {
+  const bool sounding = this->media_speaker_ != nullptr && this->media_speaker_->is_running();
+  if (this->stream_pending_) {
+    this->stream_pending_ = false;
+  } else if (sounding || !unreachable) {
+    return;
+  } else {
+    this->stop_media_pipeline_();
+  }
+  if (this->preview_list_ >= 0 && !this->slot_preview_) {
+    ESP_LOGW(TAG, "Preview link not reachable: stopped");
+    this->stop_media();
+    this->set_sound_status_("Preview: the link is not reachable (no internet?)");
+  } else if (this->radio_station_ >= 0) {
+    ESP_LOGW(TAG, "Radio link not reachable: trying again");
+    this->set_radio_status_("Radio " + std::to_string(this->radio_station_ + 1) + ": not reachable, trying again");
+  }
 }
 
 // ==============================================================================================================
@@ -1369,19 +1555,24 @@ void AthanComponent::prayer_tick_(bool online) {
     this->schedule_version_++;
   }
 
-  // Status line for the web page and the OLED Info screen.
-  std::string years = this->store_.years_of(this->location_);
-  std::string status;
-  if (!this->cur_table_.empty())
-    status = this->location_ + " " + std::to_string(year) + " (stored: " + years + ")";
-  else if (this->standin_)
-    status = this->location_ + ": using " + std::to_string(year - 1) + " times until the " + std::to_string(year) +
-             " timetable is published";
-  else if (this->prayer_job_pending_)
-    status = this->location_ + ": downloading " + std::to_string(year);
-  else
-    status = this->location_ + ": no prayer times yet" + (online ? "" : " (no internet)");
-  this->set_prayer_status_(status);
+  // Status line for the web page. Rebuilt only when it can have changed: every stored year, new day, location or
+  // table load bumps schedule_version_.
+  const uint32_t status_key = this->schedule_version_ * 4 + (this->prayer_job_pending_ ? 2 : 0) + (online ? 1 : 0);
+  if (status_key != this->prayer_status_key_) {
+    this->prayer_status_key_ = status_key;
+    std::string status;
+    if (!this->cur_table_.empty())
+      status = this->location_ + " " + std::to_string(year) + " (stored: " + this->store_.years_of(this->location_) +
+               ")";
+    else if (this->standin_)
+      status = this->location_ + ": using " + std::to_string(year - 1) + " times until the " + std::to_string(year) +
+               " timetable is published";
+    else if (this->prayer_job_pending_)
+      status = this->location_ + ": downloading " + std::to_string(year);
+    else
+      status = this->location_ + ": no prayer times yet" + (online ? "" : " (no internet)");
+    this->set_prayer_status_(status);
+  }
 
   if (!online || this->prayer_job_pending_)
     return;
@@ -1417,7 +1608,7 @@ void AthanComponent::job_prayer_(Job &job) {
   if (r == HttpResult::NOT_FOUND) {
     outcome = O_NOT_PUBLISHED;
   } else if (r == HttpResult::OK) {
-    std::vector<uint16_t> table;
+    PsramVector<uint16_t> table;
     std::string tz;
     if (parse_year_file(buf, len, job.key, job.year, &table, &tz, &err)) {
       std::vector<std::pair<std::string, int>> keep = {
@@ -1471,6 +1662,56 @@ void AthanComponent::job_prayer_(Job &job) {
 }
 
 // ==============================================================================================================
+// /audio page snapshot, Wi-Fi drops
+// ==============================================================================================================
+void AthanComponent::refresh_slot_view_() {
+  // Read first, lock after: selected_entry() and has_custom() take mutex_ themselves.
+  SlotView v[NUM_SLOTS];
+  for (int s = 0; s < NUM_SLOTS; s++) {
+    v[s].valid = this->slots_.valid(s);
+    v[s].label = this->slots_.label(s);
+    v[s].duration_ms = this->slots_.duration_ms(s);
+    v[s].selected = this->selected_entry(s);
+    v[s].custom = this->has_custom(s);
+  }
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  for (int s = 0; s < NUM_SLOTS; s++)
+    this->slot_view_[s] = std::move(v[s]);
+}
+
+void AthanComponent::record_wifi_drop_() {
+  for (int i = 2; i > 0; i--)
+    this->wifi_drops_[i] = this->wifi_drops_[i - 1];
+  WifiDrop &d = this->wifi_drops_[0];
+  const ESPTime now = this->time_ != nullptr ? this->time_->now() : ESPTime{};
+  if (now.is_valid())
+    std::snprintf(d.when, sizeof(d.when), "%02d:%02d", now.hour, now.minute);
+  else
+    std::snprintf(d.when, sizeof(d.when), "--:--");
+  d.reason = s_wifi_reason.exchange(0);
+  d.rssi = s_wifi_rssi.load();
+  this->wifi_drop_count_++;
+}
+
+std::string AthanComponent::wifi_drops_text() const {
+  if (this->wifi_drop_count_ == 0)
+    return "none since start";
+  std::string s = std::to_string(this->wifi_drop_count_) + " since start: ";
+  const uint32_t shown = std::min<uint32_t>(this->wifi_drop_count_, 3);
+  for (uint32_t i = 0; i < shown; i++) {
+    const WifiDrop &d = this->wifi_drops_[i];
+    char b[96];
+    if (d.reason == 0)
+      std::snprintf(b, sizeof(b), "%s%s reason unknown", i ? "; " : "", d.when);
+    else
+      std::snprintf(b, sizeof(b), "%s%s %s (reason %u, %d dBm)", i ? "; " : "", d.when, wifi_reason_text(d.reason),
+                    (unsigned) d.reason, (int) d.rssi);
+    s += b;
+  }
+  return s;
+}
+
+// ==============================================================================================================
 // status strings
 // ==============================================================================================================
 void AthanComponent::set_sound_status_(const std::string &s) {
@@ -1505,15 +1746,19 @@ std::string AthanComponent::prayer_status() const {
 // which answers with /audio/status. Plain HTML, no JavaScript.
 static const char AUDIO_FONT[] = "font-family:-apple-system,Segoe UI,Roboto,sans-serif;";
 
-std::string AthanComponent::render_audio_page() {
+PsramString AthanComponent::render_audio_page() {
+  // Copies taken under one lock: this runs on the web server's task, the main loop changes lists and slots.
   std::vector<NamedUrl> lists[NUM_LISTS];
+  SlotView views[NUM_SLOTS];
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
     for (int l = 0; l < NUM_LISTS; l++)
       lists[l] = this->catalog_[l];
+    for (int s = 0; s < NUM_SLOTS; s++)
+      views[s] = this->slot_view_[s];
   }
   const std::string g = std::to_string(this->sounds_changed_.load());
-  std::string h;
+  PsramString h;
   h.reserve(14000);
   h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
@@ -1533,21 +1778,22 @@ std::string AthanComponent::render_audio_page() {
        "Download fetches the entry then replaces the sound on the clock. "
        "An uploaded sound shows as Custom until a download replaces it.</p>";
   for (int s = 0; s < NUM_SLOTS; s++) {
-    const int selected = this->selected_entry(s);
+    const SlotView &v = views[s];
+    const int selected = v.selected;
     h += "<h2 id=\"s" + std::to_string(s) + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>Selected: ";
-    if (this->slots_.valid(s))
-      h += "<b>" + html_escape(this->slots_.label(s)) + "</b> (" + fmt_duration(this->slots_.duration_ms(s)) + ")";
+    if (v.valid)
+      h += "<b>" + html_escape(v.label) + "</b> (" + fmt_duration(v.duration_ms) + ")";
     else
       h += "<i>none</i>";
     h += "</p>";
-    const bool custom = this->has_custom(s);
+    const bool custom = v.custom;
     if (lists[s].empty() && !custom) {
       h += "<p class=\"hint\">Suggested list not loaded yet (no internet?).</p>";
     } else {
       h += "<table>";
       if (custom) {
         // The uploaded sound, first: it can be previewed like the others, and it stays until a download replaces it.
-        h += "<tr><td>Custom: " + html_escape(this->slots_.label(s)) + "<span class=\"ok\">selected</span></td><td>";
+        h += "<tr><td>Custom: " + html_escape(v.label) + "<span class=\"ok\">selected</span></td><td>";
         h += "<form method=\"post\" target=\"st\" action=\"/audio/preview?list=" + std::to_string(s) + "&amp;entry=" +
              std::to_string(MENU_CUSTOM) + "&amp;g=" + g + "\"><button>Preview</button></form></td></tr>";
       }
@@ -1574,7 +1820,7 @@ std::string AthanComponent::render_audio_page() {
   return h;
 }
 
-std::string AthanComponent::render_audio_status(uint32_t gen) {
+PsramString AthanComponent::render_audio_status(uint32_t gen) {
   std::string status;
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
@@ -1582,7 +1828,7 @@ std::string AthanComponent::render_audio_status(uint32_t gen) {
   }
   const bool busy = this->sound_busy_.load();
   const std::string text = html_escape(status) + (busy ? " &hellip;" : "");
-  std::string h;
+  PsramString h;
   h.reserve(1500);
   h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">";
   if (busy)

@@ -161,7 +161,8 @@ grouped:
 - **Radio Stations:** the ten slots (1.6).
 - **Location and Prayer Times:** Location, Refresh Prayer Times, Prayer Data (which years are stored).
 - **System:** Firmware Version (this build, and whether GitHub has a newer one), Firmware (install updates), Check
-  For Update, Restart, External Relay, IP address, memory.
+  For Update, Restart, External Relay, IP address, **Wi-Fi Signal**, **Wi-Fi Drops** (when and why the router dropped
+  the clock, the last three), memory.
 
 The same entities show up in Home Assistant when you add the device there (ESPHome integration).
 
@@ -266,11 +267,16 @@ it opened.
 - **At prayer time** the athan pauses the radio, and the same station comes back when the athan ends. The
   Pre-Fajr Tawashih does the same. If you stop the athan yourself, the radio stays off.
 - **The hourly tick** plays over the radio while the radio is turned down for a moment.
-- **If the stream drops** (for example the router restarts), the clock reconnects up to three times, then stops
-  and shows the reason under Radio Status.
-- **Wrong speed safeguard:** after every start, and every 3 minutes while the radio plays, the clock compares the
-  format it is playing with the stream's real one and restarts the stream if they differ, so Quran never plays
-  sped up or slowed down. The same check runs for previews and for the stored sounds.
+- **If Wi-Fi drops** (the router restarts, or drops the clock for a moment), the radio pauses and starts again by
+  itself as soon as Wi-Fi is back; after 10 minutes without Wi-Fi it switches off. Pressing Up while Wi-Fi is down
+  starts the radio once it is back.
+- **If the station itself fails** (down, or no internet behind the router), the clock tries three more times about
+  20 seconds apart, then stops and shows the reason under Radio Status.
+- **Wrong speed safeguard:** before a station or preview plays for the first time, the clock reads its real format
+  from the stream itself and remembers it. Whenever it plays, the clock compares what it is playing with that
+  format, all the time, and if they differ it mutes at once and restarts the stream, so Quran never plays sped up
+  or slowed down. The first play of each station after a restart takes about half a second longer for this. The
+  stored sounds are checked the same way.
 
 #### Adding your own station
 

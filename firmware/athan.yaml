@@ -124,6 +124,19 @@ esp32:
       # TLS buffers (about 40 KB per HTTPS stream or download, more while two overlap) in PSRAM instead of the
       # scarce internal RAM, which Wi-Fi, the web server and the audio drivers need.
       CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
+      # Wi-Fi at ESP-IDF's own defaults. ESPHome's media player asks for "high performance networking" (64 receive
+      # and transmit buffers kept in PSRAM, block-ack windows of 32 frames, 64 KB TCP windows), sized for lossless
+      # music. A 128 kbps station needs none of it, and the router dropped the clock only while the radio played
+      # (2026-10-07): with the radio, Wi-Fi's buffers then compete with the audio for PSRAM. These are the values
+      # most tested with routers, in internal RAM. network: enable_high_performance: false (below) covers the TCP
+      # half; ESPHome's Wi-Fi component ignores that switch, so its half is set here. Delete these six lines and that
+      # switch to go back.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "n"
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "10"
+      CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "32"
+      CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM: "32"
+      CONFIG_ESP_WIFI_TX_BA_WIN: "6"
+      CONFIG_ESP_WIFI_RX_BA_WIN: "6"
 
 psram:
   mode: octal
@@ -203,6 +216,7 @@ wifi:
     ap_timeout: 3min
   on_connect:
     - logger.log: "Wi-Fi connected"
+    - script.stop: ble_when_offline
     - ble.disable:
     - script.execute: update_display
     # No Wi-Fi modem sleep once Bluetooth is really off: streams start faster and play steadier. ESP-IDF needs
@@ -212,11 +226,17 @@ wifi:
           lambda: 'return !esp32_ble::global_ble->is_active();'
         timeout: 15s
     - lambda: 'if (!esp32_ble::global_ble->is_active()) id(athan_core).set_wifi_low_latency(true);'
+  # Bluetooth setup only once Wi-Fi has been gone for 15 s (ble_when_offline): routers drop a client now and then
+  # and it is back within seconds, and starting Bluetooth for that costs memory and Wi-Fi airtime while it reconnects.
   on_disconnect:
-    - lambda: 'id(athan_core).set_wifi_low_latency(false);'
-    - ble.enable:
+    - script.execute: ble_when_offline
 
 captive_portal:
+
+# ESP-IDF's standard Wi-Fi and TCP settings, not ESPHome's "high performance networking" (see sdkconfig_options
+# under esp32: for the Wi-Fi half, which this switch alone does not reach).
+network:
+  enable_high_performance: false
 
 esp32_ble:
   use_psram: true
@@ -260,10 +280,13 @@ speaker:
     sample_rate: 44100
     bits_per_sample: 16bit
     channel: mono
+  # The mixer's and resamplers' task stacks (4 + 3 + 3 KB) in PSRAM, like the media player's: created at every
+  # start and freed at every stop, they would otherwise come and go in internal RAM. None of them writes flash.
   - platform: mixer
     id: audio_mixer
     output_speaker: i2s_speaker
     num_channels: 1
+    task_stack_in_psram: true
     source_speakers:
       - id: announce_mixer_input
         timeout: never
@@ -272,9 +295,11 @@ speaker:
   - platform: resampler
     id: announce_resampler
     output_speaker: announce_mixer_input
+    task_stack_in_psram: true
   - platform: resampler
     id: media_resampler
     output_speaker: media_mixer_input
+    task_stack_in_psram: true
 
 media_player:
   - platform: speaker
@@ -655,6 +680,13 @@ debug:
   update_interval: 60s
 
 sensor:
+  # The router's signal as the clock hears it. Compare it with the radio on and off: a drop while the amplifier
+  # plays points at the hardware (supply or interference), not the network.
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    id: web_wifi_signal
+    update_interval: 60s
+    web_server: {sorting_group_id: grp_system, sorting_weight: 7.4}
   - platform: debug
     free:
       name: "Free Internal Heap"
@@ -680,6 +712,8 @@ text_sensor:
   # until one check of the release manifest has succeeded.
   - {platform: template, name: "Firmware Version", id: web_fw_version, icon: "mdi:chip", update_interval: never, web_server: {sorting_group_id: grp_system, sorting_weight: 0}}
   - {platform: template, name: "Radio Status", id: web_radio_status, icon: "mdi:radio", update_interval: never, web_server: {sorting_group_id: grp_radio, sorting_weight: 4}}
+  # When and why the router dropped the clock (the last three): a fixed interval points at a router setting.
+  - {platform: template, name: "Wi-Fi Drops", id: web_wifi_drops, icon: "mdi:wifi-alert", update_interval: never, web_server: {sorting_group_id: grp_system, sorting_weight: 7.5}}
   - {platform: template, name: "Prayer Data", id: web_prayer_data, icon: "mdi:database-clock", update_interval: never, web_server: {sorting_group_id: grp_location, sorting_weight: 3}}
   - platform: debug
     reset_reason:
@@ -928,6 +962,19 @@ script:
             id(volume_pending) = false;
             id(apply_playing_volume).execute();
           }
+  # Wi-Fi gone for 15 s (esp32_improv's wifi_timeout): Bluetooth on for the Improv setup, modem sleep back on first
+  # (ESP-IDF needs it with Bluetooth). A drop that ends sooner never starts Bluetooth (wifi on_connect stops this).
+  - id: ble_when_offline
+    mode: restart
+    then:
+      - delay: 15s
+      - if:
+          condition:
+            not:
+              wifi.connected:
+          then:
+            - lambda: 'id(athan_core).set_wifi_low_latency(false);'
+            - ble.enable:
   # Amplifier off a few seconds after the player goes idle (no idle hiss).
   - id: amp_idle_off
     mode: restart
@@ -1598,8 +1645,10 @@ script:
     mode: restart
     then:
       - lambda: |-
-          char buf[220];
-          auto pub = [](text_sensor::TextSensor *t, const std::string &s) { if (t->state != s) t->publish_state(s); };
+          // Runs every second: values are formatted into buf and compared in place, so an unchanged one (nearly all
+          // of them, nearly always) costs no heap allocation. Only a change is published.
+          char buf[320];
+          auto pub = [](text_sensor::TextSensor *t, const char *s) { if (t->state != s) t->publish_state(s); };
           {
             auto loc = id(selected_location_key);
             if (id(web_location_select).current_option() != loc) {
@@ -1676,39 +1725,52 @@ script:
           }
           {
             static const char *slot_names[4] = {"Athan", "Fajr", "Tawashih", "Tick"};
-            std::string s;
-            for (int i = 0; i < 4; i++) {
-              std::string l = id(athan_core).slot_label(i);
-              s += std::string(i ? "; " : "") + slot_names[i] + ": " + (l.empty() ? "none" : l);
+            int pos = 0;
+            for (int i = 0; i < 4 && pos < (int) sizeof(buf) - 1; i++) {
+              const std::string l = id(athan_core).slot_label(i);
+              pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%s: %s", i ? "; " : "", slot_names[i],
+                              l.empty() ? "none" : l.c_str());
             }
-            pub(id(web_sounds), s);
+            pub(id(web_sounds), buf);
           }
-          pub(id(web_sound_status), id(athan_core).sound_status());
-          pub(id(web_radio_status), id(athan_core).radio_status());
-          pub(id(web_prayer_data), id(athan_core).prayer_status());
+          {
+            static uint32_t drops_seen = UINT32_MAX;   // rebuilt only after a drop
+            const uint32_t drops = id(athan_core).wifi_drop_count();
+            if (drops != drops_seen) {
+              drops_seen = drops;
+              pub(id(web_wifi_drops), id(athan_core).wifi_drops_text().c_str());
+            }
+          }
+          pub(id(web_sound_status), id(athan_core).sound_status().c_str());
+          pub(id(web_radio_status), id(athan_core).radio_status().c_str());
+          pub(id(web_prayer_data), id(athan_core).prayer_status().c_str());
           {
             auto ips = network::get_ip_addresses();
             char ip[48] = "";
             if (ips[0].is_set()) ips[0].str_to(ip);
-            pub(id(web_audio_page), std::string("http://") + (ip[0] ? ip : "athan.local") + "/audio");
+            snprintf(buf, sizeof(buf), "http://%s/audio", ip[0] ? ip : "athan.local");
+            pub(id(web_audio_page), buf);
           }
           {
             // This build's version (project_version) and what the last check of the GitHub Release said.
-            const std::string v = "${project_version}";
-            const std::string &latest = id(fw_update).update_info.latest_version;
-            std::string fw;
-            if (id(fw_update).state == update::UPDATE_STATE_INSTALLING) fw = v + " (installing " + latest + ")";
-            else if (id(fw_update).status_has_error()) fw = v + " (no release found on GitHub, or no internet)";
-            else if (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) fw = v + " (" + latest + " available)";
-            else if (id(fw_update).state == update::UPDATE_STATE_NO_UPDATE) fw = v + " (latest)";
-            else fw = v + " (not checked yet)";
-            pub(id(web_fw_version), fw);
+            const char *latest = id(fw_update).update_info.latest_version.c_str();
+            const auto st = id(fw_update).state;
+            if (st == update::UPDATE_STATE_INSTALLING) snprintf(buf, sizeof(buf), "${project_version} (installing %s)", latest);
+            else if (id(fw_update).status_has_error()) snprintf(buf, sizeof(buf), "${project_version} (no release found on GitHub, or no internet)");
+            else if (st == update::UPDATE_STATE_AVAILABLE) snprintf(buf, sizeof(buf), "${project_version} (%s available)", latest);
+            else if (st == update::UPDATE_STATE_NO_UPDATE) snprintf(buf, sizeof(buf), "${project_version} (latest)");
+            else snprintf(buf, sizeof(buf), "${project_version} (not checked yet)");
+            pub(id(web_fw_version), buf);
           }
 
   # ---------------- OLED ----------------
+  # Redraws the OLED. A draw blocks the main loop for about 23 ms (1 KB over I2C at 400 kHz), and one key press
+  # often asks for several (a stop, a pop-up, the key itself). The delay of 0 moves the draw to the next pass of the
+  # loop and mode: restart folds every request made before it into that one draw.
   - id: update_display
     mode: restart
     then:
+      - delay: 0ms
       - lambda: |-
           // Never touch the OLED before its setup() allocated the buffer, or when it failed (see CLAUDE.md).
           if (!id(oled).is_ready()) return;
@@ -1936,12 +1998,17 @@ interval:
           static int shown = -2;
           const int r = id(athan_core).radio_active();
           if (r != shown) { shown = r; id(update_display).execute(); }
-          // Menu: back to the clock after 60 s without a press; redrawn every second while open (download
-          // progress, a list that loaded, the update check).
+          // Menu: back to the clock after 60 s without a press. While open it is redrawn when what it shows has
+          // changed (download progress, a list that loaded, the update check): menu_changed() reads the same hooks
+          // as the drawing without touching the display.
           auto &menu = id(athan_core).menu();
           if (menu.is_open()) {
-            if (millis() - id(ui_last_activity) >= 60000) menu.close();
-            id(update_display).execute();
+            if (millis() - id(ui_last_activity) >= 60000) {
+              menu.close();
+              id(update_display).execute();
+            } else if (athan::menu_changed(menu)) {
+              id(update_display).execute();
+            }
           }
       - script.execute: sync_web_state
   # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.

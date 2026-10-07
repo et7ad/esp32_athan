@@ -416,8 +416,8 @@ method) stays, so phones that cannot do Bluetooth setup, iPhones in particular, 
 ESPHome warns that the Bluetooth stack together with audio components can crash a device. Mitigations:
 
 - `esp32_ble: use_psram: true` moves about 40 kB of Bluetooth buffers out of internal RAM.
-- Bluetooth runs only while the device has no Wi-Fi (`ble.enable` / `ble.disable` driven by the Wi-Fi state,
-  `wifi_timeout`) and is off in normal use.
+- Bluetooth runs only while the device has no Wi-Fi (`ble.enable` 15 s after Wi-Fi went, `ble.disable` on
+  connect) and is off in normal use.
 - Streaming needs Wi-Fi, so Bluetooth and streaming never run at the same time. What can overlap in setup mode is
   Bluetooth + hotspot + a local athan at prayer time; that combination is on the prototype checklist.
 

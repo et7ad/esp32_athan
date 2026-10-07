@@ -49,7 +49,7 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline, once that pipeline has stopped (clean start). False if the slot is empty or being rewritten (the yaml then plays three click tones) |
 | `play_tone(file)`, `stop_announcements()` | The only way the yaml starts or stops the announcement pipeline: a tone waits for the sound before it to stop; never over the athan, tawashih or tick |
 | `set_hard_stop_callback(cb)` | The yaml's `hard_mute`, called when browsing leaves a playing preview, by `stop_preview()`, and for the `/audio` page's Stop |
-| `set_wifi_low_latency(on)` | Wi-Fi modem sleep off (`on`) or back on. Only while Bluetooth is off: the yaml calls it after `ble.disable` has finished and before `ble.enable` |
+| `set_wifi_low_latency(on)` | Wi-Fi modem sleep off (`on`) or back on. Only while Bluetooth is off: the yaml calls it after `ble.disable` has finished and before `ble.enable` (`ble_when_offline`, 15 s after Wi-Fi went) |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
 | `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The selected entry is never downloaded again ("already selected"); downloading another entry first fetches it anew |
 | `selected_entry(list)` | Index of the list entry (the selected one) whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
@@ -81,8 +81,8 @@ Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`m
   `PRAYER_YEAR`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
   limit before and during the read, PSRAM buffer), JSON parsing and flash erase/write. Results come back with
   `defer()`.
-- **httpd task:** `AudioWebHandler` renders the page from copies taken under `mutex_` and queues
-  download/preview/stop in `web_actions_`. Uploads are appended into a PSRAM buffer under `mutex_`, and
+- **httpd task:** `AudioWebHandler` renders the page (a `PsramString`, about 14 KB) from copies taken under
+  `mutex_` and queues download/preview/stop in `web_actions_` (`loop()` looks only when `web_actions_pending_` is set). Uploads are appended into a PSRAM buffer under `mutex_`, and
   `upload_end()` queues `COMMIT_BUFFER`.
 - **Slot rewrite handshake:** after the file passes every check, the worker `defer`s a request to the main loop
   to `invalidate()` the slot. The main loop refuses if that slot is playing. The worker waits up to 10 s on a
@@ -156,8 +156,13 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 - **`radio_play(slot, subscribed)`:** a subscribed slot plays the link from the list in memory (or queues
   `STATION_PLAY` when no list was ever loaded), an own slot plays the slot's `text` entity (`radio_url_N`). Each play bumps `radio_token_`, so a stale answer from an older request is
   dropped.
-- **`radio_tick_()`:** when the stream stops on its own more than 15 s after starting, it reconnects up to 3 times,
-  then gives up with "station not reachable". While it plays, it queues a format check every 3 minutes.
+- **`radio_tick_()`:** sound means the media speaker runs (the player stays PLAYING while ESPHome retries a link
+  that does not open). With no sound 20 s after a start, it reconnects up to 3 times, then gives up with "station
+  not reachable". While it plays, it queues a format check every 3 minutes.
+- **`net_watch_()`** (every loop): the network gone stops a stream at once (a streamed preview ends; the radio
+  waits, "waiting for Wi-Fi") and the radio starts again when it is back, or goes off after 10 minutes.
+  `radio_play()` without network waits the same way. A format check that cannot reach the server
+  (`HttpResult::NO_CONNECTION`) stops the stream unless sound already flows (`stream_unreachable_()`).
 - **The yaml side:**
   - `make_athan` and `run_prefajr` save `radio_active()` into `radio_resume`, stop the radio, and restart that
     slot when they finish.
@@ -231,10 +236,10 @@ to 00:00–23:59.
 | `play_tick` | Tick over the ducked radio |
 | `check_update` | `update.check`, then sets `update_check_state` for the menu |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
-| `sync_web_state` (1 s interval) | Publish entities only on change |
-| `update_display` | The whole OLED |
+| `sync_web_state` (1 s interval) | Publish entities only on change; unchanged values are compared in a buffer, without allocating |
+| `update_display` | The whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each) |
 
-**Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout and its redraw while open), 10 s
+**Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 10 s
 OLED watchdog (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
 came back).
 

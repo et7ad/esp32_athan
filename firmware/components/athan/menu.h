@@ -4,13 +4,15 @@
 //
 // Rows are defined in athan.yaml (script menu_setup), each in one place: its title, its items, and what Left/Right
 // and Select do there. This class only keeps the cursor and calls those hooks, so every key takes one path and
-// nothing depends on row numbers. It has no ESPHome dependency and is unit-tested on the host
-// (tests/test_menu.cpp). menu_view.h draws it.
+// nothing depends on row numbers. It has no ESPHome dependency (psram_alloc.h is plain std:: on a computer) and is
+// unit-tested on the host (tests/test_menu.cpp). menu_view.h draws it.
 
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
+
+#include "psram_alloc.h"
 
 namespace esphome {
 namespace athan {
@@ -92,7 +94,7 @@ class Menu {
   void remember_();
   int neighbour_(int step) const;
 
-  std::vector<MenuRow> rows_;
+  PsramVector<MenuRow> rows_;  // about 5 KB of hooks: PSRAM on the device
   std::function<void()> on_close_;
   bool open_{false};
   int row_{0};

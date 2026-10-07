@@ -29,5 +29,9 @@ struct MenuFonts {
 /// Draws the open menu (nothing when it is closed). The caller clears the screen before and shows it after.
 void draw_menu(display::Display &d, Menu &menu, const MenuFonts &fonts);
 
+/// Whether the open menu would look different from what draw_menu() last drew (a download's progress, a list that
+/// loaded). Reads the same hooks, no display access: the 1 s refresh redraws (about 23 ms of I2C) only then.
+bool menu_changed(Menu &menu);
+
 }  // namespace athan
 }  // namespace esphome

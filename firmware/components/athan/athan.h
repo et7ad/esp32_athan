@@ -159,6 +159,12 @@ class AthanComponent : public Component {
   void refresh_prayer_times();
   std::string prayer_status() const;
 
+  // ---------------- Wi-Fi drops (diagnostics for the web page) ----------------
+  /// Connections lost since start. Changes whenever wifi_drops_text() does.
+  uint32_t wifi_drop_count() const { return this->wifi_drop_count_; }
+  /// "3 since start: 01:30 not authenticated (reason 6, -44 dBm); 00:50 ..." (the last three, newest first).
+  std::string wifi_drops_text() const;
+
   // ---------------- device menu ----------------
   /// The OLED menu's navigation (menu.h). Its rows are added by the yaml (script menu_setup); draw it with
   /// draw_menu() (menu_view.h). Main loop only.
@@ -170,10 +176,11 @@ class AthanComponent : public Component {
   bool upload_begin(int slot, const std::string &filename);
   void upload_data(const uint8_t *data, size_t len);
   void upload_end();
-  std::string render_audio_page();
+  /// The page (about 14 KB) and its status bar are built in PSRAM: a page view never takes internal RAM.
+  PsramString render_audio_page();
   /// The status bar of the /audio page (an iframe, so actions never reload or scroll the page). `gen` is the
   /// sounds_changed_ value the page was drawn with: when it differs, the bar offers a reload.
-  std::string render_audio_status(uint32_t gen);
+  PsramString render_audio_status(uint32_t gen);
 
  protected:
   enum class JobType : uint8_t {
@@ -186,7 +193,8 @@ class AthanComponent : public Component {
     CHECK_STREAM
   };
   enum class PrayerPurpose : uint8_t { CURRENT, PREVIOUS, NEXT };
-  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY };
+  // NO_CONNECTION: the server was not reached at all (no network, DNS, refused, TLS); FAILED: any other error.
+  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY, NO_CONNECTION };
   struct Job {
     JobType type;
     int slot{-1};
@@ -225,6 +233,7 @@ class AthanComponent : public Component {
   void load_tables_(int year);
   void apply_tz_(const std::string &tz);
   void radio_tick_();
+  void net_watch_();
   void start_stream_(const std::string &url);
   void start_announcement_(audio::AudioFile *file);
   void pump_starts_();
@@ -253,6 +262,27 @@ class AthanComponent : public Component {
   AudioSlots slots_;
   PrayerStore store_;
   Menu menu_;
+  // What the /audio page shows of each slot. The page renders on the web server's task while the main loop rewrites
+  // slots, so it reads this copy (under mutex_), which only the main loop refreshes (refresh_slot_view_()): after
+  // boot, a catalog load, and before and after every rewrite.
+  struct SlotView {
+    bool valid{false};
+    bool custom{false};
+    int selected{-1};
+    uint32_t duration_ms{0};
+    std::string label;
+  };
+  SlotView slot_view_[NUM_SLOTS];
+  void refresh_slot_view_();
+  // The last Wi-Fi drops (main loop; the reason comes from an ESP-IDF event handler).
+  struct WifiDrop {
+    char when[6];
+    uint8_t reason;
+    int8_t rssi;
+  };
+  WifiDrop wifi_drops_[3]{};  // newest first
+  uint32_t wifi_drop_count_{0};
+  void record_wifi_drop_();
   AudioWebHandler *web_handler_{nullptr};
 
   // worker task
@@ -269,6 +299,7 @@ class AthanComponent : public Component {
   std::string radio_status_;
   std::string prayer_status_;
   std::deque<std::pair<WebAction, std::pair<int, int>>> web_actions_;
+  std::atomic<bool> web_actions_pending_{false};  // loop() looks at web_actions_ only when set
   struct Upload {
     int slot{-1};
     uint8_t *buf{nullptr};
@@ -306,15 +337,27 @@ class AthanComponent : public Component {
   uint32_t pending_preview_at_{0};
 
   // Clean starts (pump_starts_()): what waits for its pipeline to stop, and the format checks after a start.
-  bool stream_pending_{false};
+  bool stream_pending_{false};      // waits for its pipeline to stop, and for its link's format if not known yet
   std::string stream_url_;          // the media pipeline's current (or pending) stream
+  uint32_t stream_id_{0};           // AudioSlots::source_id(stream_url_): the key of its known format
   uint32_t stream_pending_since_{0};
-  uint32_t stream_token_{0};        // +1 per stream start: a format check of an older stream is ignored
-  uint32_t stream_true_rate_{0};    // CHECK_STREAM result for stream_token_, 0 = none (yet)
-  uint8_t stream_true_channels_{0};
-  uint32_t stream_check_token_{0};
-  uint32_t stream_checked_at_{0};   // last check of the radio stream (re-checked every 3 min)
   uint8_t stream_restarts_{0};      // restarts for a wrong format, per stream (at most 3)
+  bool stream_confirmed_{false};    // "format confirmed" logged for this start
+  bool fmt_check_running_{false};   // a CHECK_STREAM is queued or running (one at a time)
+  uint32_t fmt_next_check_{0};      // next check of the playing stream: every 3 min, sooner while unknown
+  // Formats read by CHECK_STREAM from each link's own chained frames (radio slots, previews). A link is handed to
+  // the player only once its format is known (its first play waits for the check, at most 6 s), so the format
+  // can be compared the moment sound flows, also after the starts ESPHome's player makes on its own.
+  struct KnownFormat {
+    uint32_t id{0};
+    uint32_t rate{0};  // 0: not an MP3 (Opus, FLAC: their own headers are reliable), nothing to compare
+    uint8_t channels{0};
+    uint32_t used{0};  // millis() of the last use: the least recently used entry is replaced
+  };
+  KnownFormat formats_[24];
+  KnownFormat *find_format_(uint32_t id);
+  void remember_format_(uint32_t id, uint32_t rate, uint8_t channels);
+  void stream_check_failed_(bool unreachable);
   audio::AudioFile *announce_pending_{nullptr};
   uint32_t announce_pending_since_{0};
   bool announce_stop_sent_{false};
@@ -328,18 +371,21 @@ class AthanComponent : public Component {
   uint32_t radio_token_{0};
   uint32_t radio_started_{0};
   uint8_t radio_retries_{0};
-  bool radio_streaming_{false};
+  bool radio_waiting_net_{false};  // the radio is on but paused until the network is back (net_watch_())
+  uint32_t radio_wait_since_{0};
+  bool online_{false};             // network state net_watch_() saw last
 
   // prayer times (main loop)
   std::string location_;
   std::string loaded_key_;
   int loaded_year_{0};
-  std::vector<uint16_t> cur_table_;
-  std::vector<uint16_t> prev_table_;
+  PsramVector<uint16_t> cur_table_;  // 8.8 KB each, in PSRAM
+  PsramVector<uint16_t> prev_table_;
   TzInfo tz_{};
   bool tz_valid_{false};
   std::string tz_text_;
   bool standin_{false};
+  uint32_t prayer_status_key_{UINT32_MAX};  // what the prayer status line was built from (prayer_tick_())
   uint32_t schedule_version_{1};
   int last_doy_{-1};
   bool prayer_job_pending_{false};
