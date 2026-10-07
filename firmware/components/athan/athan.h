@@ -234,6 +234,7 @@ class AthanComponent : public Component {
   void apply_tz_(const std::string &tz);
   void radio_tick_();
   void net_watch_();
+  void tune_tx_power_();
   void start_stream_(const std::string &url);
   void start_announcement_(audio::AudioFile *file);
   void pump_starts_();
@@ -395,6 +396,7 @@ class AthanComponent : public Component {
   uint64_t next_prev_try_{0};
   uint64_t next_next_try_{0};
   uint32_t last_tick_{0};
+  uint32_t last_tx_tune_{0};  // tune_tx_power_(), every 10 s
 };
 
 }  // namespace athan

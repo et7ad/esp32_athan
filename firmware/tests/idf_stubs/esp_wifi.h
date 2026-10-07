@@ -11,3 +11,12 @@ typedef struct {
   uint8_t reason;
   int8_t rssi;
 } wifi_event_sta_disconnected_t;
+typedef struct {
+  uint8_t bssid[6];
+  uint8_t ssid[33];
+  uint8_t primary;
+  int8_t rssi;
+} wifi_ap_record_t;
+esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info);
+esp_err_t esp_wifi_set_max_tx_power(int8_t power);
+esp_err_t esp_wifi_get_max_tx_power(int8_t *power);

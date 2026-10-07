@@ -23,7 +23,8 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
 1. ESPHome setup by priority. `AthanComponent::setup()` (priority `AFTER_WIFI`) does the following:
    1. Maps the audio regions and verifies each header and data CRC (`AudioSlots::begin`).
    2. Reads the prayer slot headers (`PrayerStore::begin`).
-   3. Starts the worker task (`athan_worker`, 10 KB internal stack, priority 2).
+   3. Starts the worker task (`athan_worker`, 10 KB internal stack, priority 1: the same as ESPHome's main loop and
+      the audio pipeline's tasks, which a TLS handshake at a higher priority held off for hundreds of ms).
    4. Registers the `/audio` handler on `web_server_base`.
 2. `esphome: on_boot` (priority -100):
    1. Copies `volume_level` into `fajr_volume_level` the first time (when it is -1).
@@ -71,6 +72,7 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `times_standin()` | Today's times come from last year |
 | `refresh_prayer_times()`, `prayer_status()` | Force a fresh current-year download; status line |
 | `web_action`, `upload_begin/data/end`, `render_audio_page` | Used by `AudioWebHandler` only |
+| `wifi_drop_count()`, `wifi_drops_text()` | Wi-Fi connections lost since start, and the last three with time, ESP-IDF reason and RSSI (an `esp_event` handler on `WIFI_EVENT_STA_DISCONNECTED` keeps the reason). The web page's Wi-Fi Drops |
 
 Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`menu_view.h`) draws the open menu.
 
@@ -81,9 +83,11 @@ Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`m
   `PRAYER_YEAR`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
   limit before and during the read, PSRAM buffer), JSON parsing and flash erase/write. Results come back with
   `defer()`.
-- **httpd task:** `AudioWebHandler` renders the page (a `PsramString`, about 14 KB) from copies taken under
-  `mutex_` and queues download/preview/stop in `web_actions_` (`loop()` looks only when `web_actions_pending_` is set). Uploads are appended into a PSRAM buffer under `mutex_`, and
-  `upload_end()` queues `COMMIT_BUFFER`.
+- **httpd task:** `AudioWebHandler` renders the page (a `PsramString`, about 14 KB) from copies taken under one
+  `mutex_` lock: the catalog and `slot_view_`, a snapshot of each slot (name, length, selected entry, Custom) that
+  only the main loop refreshes (`refresh_slot_view_()`: boot, catalog load, before and after a rewrite). It queues
+  download/preview/stop in `web_actions_` (`loop()` looks only when `web_actions_pending_` is set). Uploads are
+  appended into a PSRAM buffer under `mutex_`, and `upload_end()` queues `COMMIT_BUFFER`.
 - **Slot rewrite handshake:** after the file passes every check, the worker `defer`s a request to the main loop
   to `invalidate()` the slot. The main loop refuses if that slot is playing. The worker waits up to 10 s on a
   semaphore owned by a `shared_ptr<Handshake>`, so a late answer can't touch a dead stack frame. Then it writes,
@@ -123,9 +127,16 @@ channel count are kept for the format check after each start (boot log: `… Hz,
 - Stored sounds: about 300 ms after the start, the announcement resampler's `get_audio_stream_info()` must match
   the slot's scanned rate and channels; one restart otherwise.
 - Streams (MP3 only): `CHECK_STREAM` reads the first 12 KB with `http_get_(…, truncate)` and `mp3_scan()`s them
-  (the first position where frames chain, so a stream joined mid-frame is fine). Once the media resampler runs,
-  its format must match; up to 3 restarts per stream, then the stream stops with an error. The radio is checked
-  again every 3 minutes (a station can switch format between programs).
+  (the first position where frames chain, so a stream joined mid-frame is fine). The result is kept per link
+  (`formats_`, 24 entries, keyed by `AudioSlots::source_id(url)`). A link is handed to the player only once its
+  format is known: its first play waits for the check (at most 6 s, then it plays and is compared when the check
+  ends); later plays, reconnects included, start at once. A check that fails for a link the player does not have
+  yet keeps it from the player (`stream_check_failed_()`: the radio tries again, a preview stops).
+- Whenever the media resampler runs, on every pass of the loop, its format must match the link's: that covers our
+  starts and the ones ESPHome's player makes on its own (it reopens a failed link outside our starts, which is how
+  most likely why a reconnect after a Wi-Fi drop once played too fast). A mismatch is silenced at once (`hard_stop_cb_`) and
+  restarted cleanly, up to 3 times per stream, then the stream stops with an error. The playing stream is checked
+  again every 3 minutes (a station can switch format between programs), every 30 s while its format is unknown.
 
 **Download** (`DOWNLOAD_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as

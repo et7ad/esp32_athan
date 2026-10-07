@@ -175,8 +175,10 @@ void AthanComponent::setup() {
     this->prayer_status_ = "Waiting for the clock";
   }
   this->wake_ = xSemaphoreCreateCounting(64, 0);
-  // 10 KB of internal RAM: an HTTPS handshake needs about 8. Low priority: audio and Wi-Fi come first.
-  if (xTaskCreate(AthanComponent::worker_entry_, "athan_worker", 10240, this, 2, &this->worker_) != pdPASS) {
+  // 10 KB of internal RAM: an HTTPS handshake needs about 8. Priority 1, like ESPHome's main loop and the audio
+  // pipeline's tasks, so they share the CPU: at 2 a TLS handshake (hundreds of ms of maths) held the main loop
+  // and the audio decoding off for its whole length (a 606 ms stall in the log on 2026-10-07).
+  if (xTaskCreate(AthanComponent::worker_entry_, "athan_worker", 10240, this, 1, &this->worker_) != pdPASS) {
     ESP_LOGE(TAG, "Could not start the worker task");
     this->mark_failed();
     return;
@@ -283,6 +285,10 @@ void AthanComponent::loop() {
   }
   this->prayer_tick_(online);
   this->radio_tick_();
+  if (online && now - this->last_tx_tune_ >= 10000) {
+    this->last_tx_tune_ = now;
+    this->tune_tx_power_();
+  }
 }
 
 // ==============================================================================================================
@@ -1394,6 +1400,27 @@ void AthanComponent::net_watch_() {
     this->radio_retries_ = 0;
     this->radio_play(this->radio_station_, this->radio_subscribed_);
   }
+}
+
+// Transmit power by distance. Right next to the router (heard stronger than -40 dBm) the clock at full power
+// (20 dBm) reaches the router at about the strongest signal 802.11 receivers are specified for (-20 dBm): its
+// frames can arrive garbled, and a router that misses enough of them drops the clock ("Not Authenticated", seen at
+// -23 dBm on 2026-10-07, mostly while a station started: two TLS handshakes and a burst of acknowledgments). 13 dBm
+// is plenty that close; below -50 dBm the full 20 dBm comes back (the gap keeps it from switching back and forth).
+// Re-applied every 10 s, as a restarted Wi-Fi driver forgets it.
+void AthanComponent::tune_tx_power_() {
+  wifi_ap_record_t ap{};
+  int8_t current = 0;
+  if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK || esp_wifi_get_max_tx_power(&current) != ESP_OK)
+    return;
+  static const int8_t LOW_POWER = 52, FULL_POWER = 80;  // units of 0.25 dBm: 13 dBm and 20 dBm
+  const bool low_now = current <= LOW_POWER;
+  const bool low = low_now ? ap.rssi >= -50 : ap.rssi > -40;
+  const int8_t want = low ? LOW_POWER : FULL_POWER;
+  if (want == current)
+    return;
+  if (esp_wifi_set_max_tx_power(want) == ESP_OK)
+    ESP_LOGI(TAG, "Wi-Fi transmit power %d dBm (router heard at %d dBm)", want / 4, (int) ap.rssi);
 }
 
 // The format check of the current link failed. A link the player does not have yet (its first play) never gets
