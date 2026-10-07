@@ -748,7 +748,15 @@ font:
     size: 14
   - file: "gfonts://Roboto"
     id: font3
-    size: 10   # AM/PM, the radio slot number next to the play mark, the menu's faded previews and captions
+    size: 10
+    glyphs: "AMP0123456789"   # AM/PM, and the radio slot number next to the play mark
+  # Small text of the menu (the previews of the neighbours, the captions) and the volume pop-up's label. A pixel font
+  # at its native 8 px: every stroke sits on whole pixels, so it is crisp on the one-colour OLED, where Roboto
+  # scaled to 10 px came out ragged.
+  - file: "gfonts://Tiny5"
+    id: font4
+    size: 8
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°"
 
 time:
   - platform: sntp
@@ -1782,7 +1790,7 @@ script:
           // The menu draws itself (components/athan/menu_view.h).
           auto &menu = id(athan_core).menu();
           if (menu.is_open()) {
-            athan::draw_menu(d, menu, {id(font1), id(font2), id(font3)});
+            athan::draw_menu(d, menu, {id(font1), id(font2), id(font4)});
             d.display();
             return;
           }
@@ -1851,7 +1859,7 @@ script:
               return;
             }
             const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
-            d.print(64, 22, id(font3), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
+            d.print(64, 22, id(font4), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
             snprintf(line, sizeof(line), "%d%%", pct);
             d.print(64, 41, id(font1), display::TextAlign::BASELINE_CENTER, line);
             d.rectangle(22, 45, 84, 4);

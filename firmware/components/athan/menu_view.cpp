@@ -14,7 +14,8 @@ namespace {
 // Layout, top to bottom (y of text baselines):
 //   row above 8 | title 22 | item centred on y 35 (33 with a caption) | dots 50 or caption 52 | row below 62
 const int W = 128;
-const int SIDE = 22;  // width of the faded item previews at the left and right edges
+const int SIDE = 22;      // width of the item previews at the left and right edges
+const int SMALL_CAP = 5;  // capital height of the small (pixel) font
 const int Y_ABOVE = 8, Y_TITLE = 22, Y_DOTS = 50, Y_CAPTION = 52, Y_BELOW = 62;
 const int ITEM_TOP = 26, ITEM_BOTTOM = 48;  // band of the item and its side previews
 
@@ -24,24 +25,17 @@ int width_of(Display &d, display::BaseFont *f, const std::string &s) {
   return w;
 }
 
-// Clears one pixel in four (even x on even y) in [x0, x1) x [y0, y1): text there looks dimmer on a one-colour
-// OLED and stays readable at 10 px (a 50 % checkerboard made it noise).
-void fade(Display &d, int x0, int y0, int x1, int y1) {
-  for (int y = y0 + (y0 & 1); y < y1; y += 2)
-    for (int x = x0 + (x0 & 1); x < x1; x += 2)
-      d.draw_pixel_at(x, y, display::COLOR_OFF);
-}
-
-// Faded text, clipped to [x0, x1) x [y0, y1). Drawn before the sharp parts, which never reach into that box.
+// A preview: small text clipped to [x0, x1) x [y0, y1), so a long neighbour shows only its near end. Not dithered:
+// the OLED has one colour, so "faded" means clearing pixels, which breaks a pixel font's one-pixel strokes into dots
+// (and made scaled-down Roboto unreadable). The previews stand apart by the small pixel font and their place.
 void ghost(Display &d, display::BaseFont *f, int x, int y, TextAlign align, const std::string &s, int x0, int y0,
            int x1, int y1) {
   d.start_clipping(x0, y0, x1, y1);
   d.print(x, y, f, align, s.c_str());
-  fade(d, x0, y0, x1, y1);
   d.end_clipping();
 }
 
-// A faded line across the screen (the rows above and below): centred, or from the left edge when too long.
+// A preview line across the screen (the rows above and below): centred, or from the left edge when too long.
 void ghost_line(Display &d, display::BaseFont *f, const std::string &s, int baseline, int y0, int y1) {
   if (width_of(d, f, s) <= W - 4)
     ghost(d, f, W / 2, baseline, TextAlign::BASELINE_CENTER, s, 0, y0, W, y1);
@@ -171,7 +165,7 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   const int mid = fr.cap.empty() ? 35 : 33;  // vertical centre of the item's capitals
 
   if (fit.sides) {
-    const int sb = mid + 3;  // small capitals (7 px) centred on the item
+    const int sb = mid + SMALL_CAP / 2;  // small capitals centred on the item
     if (!fr.left.empty())
       ghost(d, f.small, SIDE - 1, sb, TextAlign::BASELINE_RIGHT, fr.left, 0, ITEM_TOP, SIDE, ITEM_BOTTOM);
     if (!fr.right.empty())

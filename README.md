@@ -119,12 +119,12 @@ Stopping the athan also cancels the radio's automatic resume.
 
 **The menu** is two wheels. **Up/Down** move between the menu's rows; the row's name is at the top, and each row is
 live as soon as you reach it: no "open" step. **Left/Right** move through that row's choices. Around the item in the
-middle you see faded previews of what is next: the choices to the left and right, the rows above and below with
+middle you see small previews of what is next: the choices to the left and right, the rows above and below with
 their current setting. A **check mark** marks what is in use, a **play mark** the radio station playing. Dots under
 the item show where you are in the row.
 
 **Select** takes the choice shown. Where nothing needs taking (the choice already in use, a volume, the tick
-hours, Info) it closes the menu. Up from the first row or Down from the last also returns to the clock (the faded
+hours, Info) it closes the menu. Up from the first row or Down from the last also returns to the clock (the small
 preview there says **Home**), and so does 60 seconds without a press.
 
 | Row | Left/Right | Select |
