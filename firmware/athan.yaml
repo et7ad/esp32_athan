@@ -1481,24 +1481,22 @@ script:
           }
 
           // ---- normal screen ----
-          if (!now.is_valid()) {
-            if (!wifi_ok) {
-              // Setup mode (README "Wi-Fi setup"). The hotspot's name is too wide for the screen: README.
-              d.print(0, 0, id(font2), "Wi-Fi setup:");
-              const auto st = id(improv_ble).get_improv_state();
-              const char *bt = !id(improv_ble).is_active() ? "BT: starting.."
-                             : st == improv::STATE_AWAITING_AUTHORIZATION ? "BT: press Select"
-                             : st == improv::STATE_AUTHORIZED ? "BT: allowed"
-                             : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
-              d.print(0, 20, id(font2), bt);
-              d.print(0, 40, id(font2), wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
-            } else {
-              d.line(0, 11, 127, 11); d.line(0, 33, 127, 33); d.line(0, 55, 127, 55);   // waiting for the clock
-            }
+          const bool time_ok = now.is_valid();
+          // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (README "Wi-Fi setup").
+          // The hotspot's name is too wide for the screen; it is in the README.
+          if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
+            d.print(0, 0, id(font2), "Wi-Fi setup:");
+            const auto st = id(improv_ble).get_improv_state();
+            const char *bt = !id(improv_ble).is_active() ? "BT: starting.."
+                           : st == improv::STATE_AWAITING_AUTHORIZATION ? "BT: press Select"
+                           : st == improv::STATE_AUTHORIZED ? "BT: allowed"
+                           : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
+            d.print(0, 20, id(font2), bt);
+            d.print(0, 40, id(font2), wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
             d.display();
             return;
           }
-          if (id(athan_playing)) {
+          if (time_ok && id(athan_playing)) {
             d.print(0, 0, id(font1), "Athan Time:");
             snprintf(line, sizeof(line), "%s prayer", names[id(current_athan_prayer_index)]);
             d.print(0, 22, id(font1), line);
@@ -1511,19 +1509,32 @@ script:
             d.display();
             return;
           }
+          // As on V2: until the clock is set the three rows are drawn and struck through (lines at y 11, 33, 55
+          // cross rows 1-3); until today's prayer times are loaded, rows 2 and 3 are. Unknown values show as dashes.
+          const bool times_ok = time_ok && id(times_loaded);
+          if (!time_ok) d.line(0, 11, 127, 11);
+          if (!times_ok) { d.line(0, 33, 127, 33); d.line(0, 55, 127, 55); }
           // Line 1: time and date
           {
             int x1, y1, wd, hd;
-            snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
-            d.get_text_bounds(0, 0, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
-            int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
-            int x = draw_time(0, 0, now.hour, now.minute);
-            d.print(x + gap, 0, id(font1), line);
+            if (time_ok) {
+              snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
+              d.get_text_bounds(0, 0, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
+              int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
+              int x = draw_time(0, 0, now.hour, now.minute);
+              d.print(x + gap, 0, id(font1), line);
+            } else {
+              d.print(0, 0, id(font1), "--:--");
+              d.get_text_bounds(0, 0, "--:--", id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
+              d.print(wd + 10, 0, id(font1), "-----");
+            }
           }
-          if (!id(times_loaded)) {
-            d.line(0, 33, 127, 33); d.line(0, 55, 127, 55);
-            d.print(0, 24, id(font2), wifi_ok ? "Loading prayer times" : "No prayer times yet");
+          if (!times_ok) {
+            d.print(0, 22, id(font1), "Next --:--");
+            d.print(0, 44, id(font1), "Rem --:--");
             if (!wifi_ok) draw_nowifi();
+            if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
+            if (id(athan_core).radio_active() >= 0) d.filled_triangle(wifi_ok ? 108 : 86, 55, wifi_ok ? 108 : 86, 63, wifi_ok ? 114 : 92, 59);
             d.display();
             return;
           }
@@ -1573,6 +1584,9 @@ interval:
             id(load_today).execute();
           }
           auto now = id(sntp_time).now();
+          // No clock yet: on_time does not fire, so redraw every 5 s (Wi-Fi mark, setup mode, struck-through rows).
+          static uint8_t waiting_ticks = 0;
+          if (!now.is_valid() && ++waiting_ticks % 5 == 0) id(update_display).execute();
           if (!now.is_valid() || !id(times_loaded)) return;
           int cur = now.hour * 60 + now.minute;
           int next = id(next_prayer_hour) * 60 + id(next_prayer_minute);
