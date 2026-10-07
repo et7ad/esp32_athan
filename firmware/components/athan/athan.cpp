@@ -1529,10 +1529,9 @@ std::string AthanComponent::render_audio_page() {
        "</style></head><body>";
   h += "<p><a href=\"/\">&larr; Device page</a></p><h1>Athan sounds</h1>";
   h += "<div class=\"bar\"><iframe name=\"st\" title=\"Status\" src=\"/audio/status?g=" + g + "\"></iframe></div>";
-  h += "<p class=\"hint\">Preview plays the selected sound from the clock and any other from the internet; "
-       "nothing is stored. Download fetches the entry, checks it, and only then replaces the sound on the clock. "
-       "Downloading the selected entry does nothing. A failed download or a file over the limit never touches the "
-       "selected sound. An uploaded sound shows as Custom until a download replaces it.</p>";
+  h += "<p class=\"hint\">Preview plays the selected sound from the clock and any other from the internet. "
+       "Download fetches the entry then replaces the sound on the clock. "
+       "An uploaded sound shows as Custom until a download replaces it.</p>";
   for (int s = 0; s < NUM_SLOTS; s++) {
     const int selected = this->selected_entry(s);
     h += "<h2 id=\"s" + std::to_string(s) + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>Selected: ";
