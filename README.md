@@ -195,6 +195,18 @@ channel, so the whole sound must be in that channel. A recording with something 
 echo) loses it. Converting the file to mono, as below, makes any recording safe. The amplifier is wired for left
 only because its mono-mix mode caused audible artifacts during testing.
 
+#### Quick way: an online converter (nothing to install)
+
+1. Open [online-convert.com's MP3 converter](https://audio.online-convert.com/convert-to-mp3) (free, in the
+   browser) and choose your file. It also takes WAV, M4A or a video.
+2. In the optional settings, set **Change audio channels** to **Mono** and **Change audio sample rate** to
+   **44100 Hz**. Set the bitrate to **64 kbps** (48 kbps for an hourly tick).
+3. Convert, download the result, and upload it on the clock's `/audio` page. The clock checks every file first
+   (MP3, size, length) and says what is wrong if it doesn't fit.
+
+Your file goes to that service's servers. To keep it on your computer, or to cut a long recording to the limit,
+use ffmpeg instead.
+
 #### Preparing your own file with ffmpeg
 
 1. Install [ffmpeg](https://ffmpeg.org) once: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows) or

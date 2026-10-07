@@ -9,7 +9,7 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
 |---|---|
 | `firmware/athan.yaml` | All behaviour: entities, menus, schedule, OLED, scripts, intervals (ESPHome + inline C++ lambdas) |
 | `firmware/partitions.csv` | 16 MB layout: nvs, otadata, app0/app1 (0x360000 each), `prayer` (0x41, 128 KB), `audio` (0x40, 0x910000) |
-| `firmware/components/athan/__init__.py` | Component schema: `media_player`, `time_id`, `data_url`, `radio_urls` (list of `text` ids). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
+| `firmware/components/athan/__init__.py` | Component schema: `media_player`, `media_speaker` and `announcement_speaker` (the two resamplers, for clean starts and format checks), `time_id`, `data_url`, `radio_urls` (list of `text` ids). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
 | `athan.h/.cpp` | `AthanComponent`, the worker task, `AudioWebHandler` (the `/audio` page) |
 | `audio_slots.h/.cpp` | The four stored sounds |
 | `prayer_store.h/.cpp` | Yearly file parser + the stored years |
@@ -28,9 +28,10 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
 2. `esphome: on_boot` (priority -100):
    1. Copies `volume_level` into `fajr_volume_level` the first time (when it is -1).
    2. Calls `set_location(selected_location_key)`.
-   3. Handles the two power-up button gestures: both buttons forget Wi-Fi and restart; exactly one unlocks the
-      buttons.
-   4. Applies the volume and draws the screen.
+   3. Adds the menu's rows (`menu_setup`).
+   4. Handles the two power-up gestures of the 5-way switch: Select held forgets Wi-Fi and restarts; any
+      direction held unlocks the buttons.
+   5. Applies the volume and draws the screen.
 3. `AthanComponent::loop()` runs a 1 s tick:
    1. Fetches the catalog and the station list when due.
    2. Downloads the default into an empty slot (catalog entry 0; per slot at most every 30 min).
@@ -45,14 +46,23 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | Method | Use |
 |---|---|
 | `slot_valid(s)`, `slot_label(s)` | Slot 0 athan, 1 fajr, 2 tawashih, 3 tick |
-| `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline. False if the slot is empty or being rewritten (the yaml then plays three click tones) |
+| `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline, once that pipeline has stopped (clean start). False if the slot is empty or being rewritten (the yaml then plays three click tones) |
+| `play_tone(file)`, `stop_announcements()` | The only way the yaml starts or stops the announcement pipeline: a tone waits for the sound before it to stop; never over the athan, tawashih or tick |
+| `set_hard_stop_callback(cb)` | The yaml's `hard_mute`, called when browsing leaves a playing preview, by `stop_preview()`, and for the `/audio` page's Stop |
+| `set_wifi_low_latency(on)` | Wi-Fi modem sleep off (`on`) or back on. Only while Bluetooth is off: the yaml calls it after `ble.disable` has finished and before `ble.enable` |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
 | `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The selected entry is never downloaded again ("already selected"); downloading another entry first fetches it anew |
 | `selected_entry(list)` | Index of the list entry (the selected one) whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
 | `sound_busy()`, `sound_status()` | One download/upload at a time |
 | `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists |
+| `has_custom(list)` | The slot holds a sound that is not a list entry: an upload (source 0), or a download the loaded list no longer has. Shown as "Custom" in the menu and on `/audio` |
+| `menu_size(l, off)`, `menu_item(l, off, i)`, `menu_index(l, off, item)` | The OLED sound list: `MENU_OFF` (tick only), `MENU_CUSTOM` (while `has_custom`), then the entries. `MENU_NONE` for an index with nothing there |
+| `request_preview(l, item, ms)` | How the menu and `/audio` start previews: stops the current preview at once (one STOP), starts the new one (`preview_catalog` or `preview_stored`) after `ms` without another request. Menu Left/Right use 500 ms, reaching a sound row 800 ms, `/audio` 300 ms. Keeps fast browsing to one stream and a few media commands (CLAUDE.md, "Never send media player commands in bursts") |
+| `preview_stored(list)` | Plays the stored sound from flash as a preview (the Custom item; `/audio/preview?entry=-1`) |
 | `preview_catalog(l, e)` | Nothing stored. The selected entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
-| `stop_media()` | Stops the media pipeline (preview or radio) and a preview playing from flash, never the athan or the tick |
+| `stop_media()` | Stops the media pipeline (preview or radio) and a preview playing from flash, never the athan or the tick. Drops a stream still waiting to start |
+| `stop_preview()` | Stops a preview (and one still waiting for its pause) silently (`hard_stop_cb`); nothing else. The radio plays on unless a preview had replaced it. The menu calls it when it leaves a sound row |
+| `menu()` | The OLED menu (`Menu`, `menu.h`): `open()`, `close()`, `key(k)`, `is_open()`, `add_row(row)`, `set_on_close(cb)`. Main loop only |
 | `radio_play(slot, subscribed)`, `radio_stop()`, `radio_active()` (-1 or slot) | Radio |
 | `station_available(slot, subscribed)`, `station_name(slot)`, `own_url(slot)`, `radio_status()` | Radio menu/web |
 | `set_location(key)`, `location()` | Changing the key resets the fetch timers and bumps `schedule_version()` |
@@ -61,6 +71,8 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `times_standin()` | Today's times come from last year |
 | `refresh_prayer_times()`, `prayer_status()` | Force a fresh current-year download; status line |
 | `web_action`, `upload_begin/data/end`, `render_audio_page` | Used by `AudioWebHandler` only |
+
+Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`menu_view.h`) draws the open menu.
 
 ## 4. Threading
 
@@ -98,6 +110,22 @@ fields before it). A version 1 header (no source) is still read: its `header_crc
 label. The MP3 follows at +4 KB. `begin()` and `reload()`
 check both CRCs, then memory-map the region (`esp_partition_mmap`) and wrap it in an `audio::AudioFile`
 (`audio::AudioFileType::MP3`), which `play_slot()` hands to `SpeakerMediaPlayer::play_file(file, announcement=true)`.
+They also run `mp3_scan()` over the file: the `AudioFile` starts at its first chained frame (a tag or junk before
+it could give ESPHome's decoder a false header, whose sample rate it would keep), and the real sample rate and
+channel count are kept for the format check after each start (boot log: `… Hz, … ch`).
+
+**Clean starts and format checks** (`pump_starts_()`, `check_formats_()`, every loop):
+- ESPHome's `AudioPipeline` passes a stream's format to its speaker once, when the speaker starts; a new URL or
+  file on a pipeline that still runs reuses it, and the resampler keeps converting from the previous format.
+  `start_stream_()` and `start_announcement_()` therefore send one STOP if needed and start only when the player
+  is no longer `PLAYING` / `ANNOUNCING` and the resampler `is_stopped()` (after 4 s / 3 s they start anyway, with
+  a warning, and the format check catches a stale chain).
+- Stored sounds: about 300 ms after the start, the announcement resampler's `get_audio_stream_info()` must match
+  the slot's scanned rate and channels; one restart otherwise.
+- Streams (MP3 only): `CHECK_STREAM` reads the first 12 KB with `http_get_(…, truncate)` and `mp3_scan()`s them
+  (the first position where frames chain, so a stream joined mid-frame is fine). Once the media resampler runs,
+  its format must match; up to 3 restarts per stream, then the stream stops with an error. The radio is checked
+  again every 3 minutes (a station can switch format between programs).
 
 **Download** (`DOWNLOAD_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as
@@ -119,14 +147,17 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 - **Catalog** `docs/audio/catalog.json` (≤ 64 KB): lists `athan`, `fajr`, `tawashih`, `tick`, each ≤ 10
   `{name, url}`. A relative URL resolves against `<data_url>/audio/`. It is fetched at boot, then every 12 h
   (retry every 1 min on failure), and kept in RAM only.
-- **Stations** `docs/radio/stations.json` (≤ 16 KB): 10 `{name, url}`. Fetched every 6 h (retry every 1 min),
-  and again on every play of a subscribed slot (`STATION_PLAY`). If that fetch fails, the cached link is used and
-  the status says "(cached link)".
-- **`radio_play(slot, subscribed)`:** a subscribed slot queues `STATION_PLAY`, an own slot plays the slot's
-  `text` entity (`radio_url_N`). Each play bumps `radio_token_`, so a stale answer from an older request is
+- **Stations** `docs/radio/stations.json` (≤ 16 KB): 10 `{name, url}`, kept in memory (`stations_`). Fetched at
+  boot and every 6 h (retry every 1 min until a first copy exists, then every 30 min), and early when a
+  subscribed station gives up after 3 reconnects (at most every 10 min, `stations_fetched_at_`). `radio_play()`
+  uses the copy in memory at once; only without any copy it queues `STATION_PLAY` (fetch, then play; a waiting
+  one is replaced, not doubled, `enqueue_(job, true)`). The yaml labels the Radio Station select options from it
+  (fixed buffers, rewritten in place; the select is synced by index).
+- **`radio_play(slot, subscribed)`:** a subscribed slot plays the link from the list in memory (or queues
+  `STATION_PLAY` when no list was ever loaded), an own slot plays the slot's `text` entity (`radio_url_N`). Each play bumps `radio_token_`, so a stale answer from an older request is
   dropped.
 - **`radio_tick_()`:** when the stream stops on its own more than 15 s after starting, it reconnects up to 3 times,
-  then gives up with "station not reachable".
+  then gives up with "station not reachable". While it plays, it queues a format check every 3 minutes.
 - **The yaml side:**
   - `make_athan` and `run_prefajr` save `radio_active()` into `radio_resume`, stop the radio, and restart that
     slot when they finish.
@@ -181,25 +212,34 @@ to 00:00–23:59.
 |---|---|
 | `apply_volume`, `apply_fajr_volume` | Set the player volume. Owner % → 10 % = −`volume_range_db` dB (30) rising evenly to 100 % = 0 dB, 0 % silent; converted to ESPHome's player value, which its I2S speaker turns into −49 dB × (1 − v) |
 | `play_tone_click`, `play_tone_volume` | Play the built-in tones, not over an athan |
-| `apply_playing_volume` | The volume for whatever plays now: Fajr volume for the Fajr athan, the Pre-Fajr Tawashih (`prefajr_playing`) and Fajr/Tawashih previews (`preview_list()` 1 or 2), else normal. Every "restore" uses it |
+| `check_fajr_sound` | Sets `fajr_sound_on`: the Fajr athan, the Pre-Fajr Tawashih (`prefajr_playing`) or a Fajr/Tawashih preview (`preview_list()` 1 or 2) plays. The one "which volume" test |
+| `apply_playing_volume` | The volume for whatever plays now: Fajr volume when `check_fajr_sound` says so, else normal. Every "restore" uses it |
+| `volume_step(delta)` | Left/Right on the clock: ±10 % on the volume of what plays, stopping at 10 %; pop-up; a tone when nothing plays |
+| `show_toast(kind)` | The clock's 2 s pop-up (`toast_kind`: 1 volume, 2 Fajr volume, 3 relay) |
+| `ui_key(button)` | Every key (`athan::MenuKey` 0–4): lock, clock-screen keys, or `menu.key()`. The only place keys are decided |
+| `menu_setup` | Adds the menu's rows at boot, each defined once (CLAUDE.md "Keys and the menu") |
+| `stop_sound` | Stop the athan, tawashih, tick or a preview, not the radio; silent at once when no radio plays |
+| `radio_off` | Radio off on purpose (Up, the menu, web Stop Radio): silent at once, no automatic resume |
 | `fajr_volume_feedback` | Fajr volume changed (menu or web): tone at the new Fajr level, then `apply_playing_volume`; while a Fajr sound plays it just takes the new level |
 | `amp_wake` | Amp on ahead of a sound and starts `amp_idle_off`, so a sound that never starts (no radio link, empty tawashih or tick slot) cannot leave it on |
 | `amp_idle_off` | Amp off 5 s after the player goes idle |
-| `silence_audio` | Stop everything, cancel the radio resume |
+| `hard_mute` | Instant silence for a stop the owner asked for: mutes the I2S speaker (applied as audio leaves its 500 ms buffer, so silent within its 50 ms of DMA), unmutes 800 ms later. Volume changes meanwhile wait (`output_muted`, `volume_pending`) |
+| `silence_audio` | Stop everything, cancel the radio resume (locked keys, web Stop Audio) |
 | `radio_start` | Play `radio_slot` |
 | `make_athan` | Regular or Fajr slot, Fajr volume at Fajr, LED on, waits for the end (≤ 7 min), resumes the radio |
-| `run_prefajr` | Relay on, tawashih at the Fajr volume, resume the radio, relay off after `prefajr_relay_min` |
+| `run_prefajr` | Relay on, tawashih at the Fajr volume, resume the radio; `prefajr_relay_off` turns the relay off `prefajr_relay_min` after the tawashih (or `prefajr_relay_min` + 7 min after the start, if it was stopped) |
 | `play_tick` | Tick over the ducked radio |
 | `check_update` | `update.check`, then sets `update_check_state` for the menu |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
 | `sync_web_state` (1 s interval) | Publish entities only on change |
 | `update_display` | The whole OLED |
 
-**Intervals:** 1 s schedule, 1 s `sync_web_state`, 10 s OLED watchdog (ESPHome setup for a never-initialised
-display; one in-place `setup()` per boot for a display that came back).
+**Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout and its redraw while open), 10 s
+OLED watchdog (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
+came back).
 
-**Menu and `ui_mode`:** CLAUDE.md "Menu state machine". The main-menu indices appear in three places, so move
-them together.
+**Keys and the menu:** CLAUDE.md "Keys and the menu". Navigation is `components/athan/menu.h` (host-tested in
+`firmware/tests/test_menu.cpp`), drawing `menu_view.h`, the rows script `menu_setup`. No row numbers anywhere.
 
 **Wi-Fi:**
 - No network is compiled in: `wifi: ap:` (AthanFallbackHotspot / athan404, `ap_timeout: 3min`) +

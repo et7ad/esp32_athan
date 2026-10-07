@@ -1,0 +1,4 @@
+(sym_lib_table
+	(version 7)
+	(lib (name "SKRHABE010") (type "KiCad") (uri "${KIPRJMOD}/libs/SKRHABE010/easyeda2kicad.kicad_sym") (options "") (descr ""))
+)

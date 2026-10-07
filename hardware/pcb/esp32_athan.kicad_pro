@@ -106,7 +106,11 @@
           ""
         ],
         [
-          "silk_overlap|87379761|102110000|20d114df-e0e9-4e94-9717-4b4748115fb7|939106f7-bc72-448c-a263-50d2f063f608",
+          "silk_overlap|90119047|76002438|9e5ed5a7-00a4-43cb-867c-45ef0c0bc6e3|e76c7176-f267-46c1-8ea5-7b9133e003ad",
+          ""
+        ],
+        [
+          "silk_overlap|90119047|76002438|9e5ed5a7-00a4-43cb-867c-45ef0c0bc6e3|fdf85aa5-7164-407e-a3a4-60287da9a90c",
           ""
         ]
       ],
@@ -311,6 +315,30 @@
   },
   "erc": {
     "erc_exclusions": [
+      [
+        "pin_to_pin|1270000|1727200|9579bc75-10ca-431f-8925-7036e3712212|b8d5d3d5-283a-466e-a1bc-a0efa89bd263|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
+      [
+        "pin_to_pin|1270000|1752600|b4cd19f5-5707-4eba-85e1-d49c99b911a3|eddc7c7c-8503-4a79-9760-e0f5c0450e99|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
+      [
+        "pin_to_pin|1270000|1778000|bdb0a2a8-8859-482a-9631-d98a0f3d6b7b|13b1793f-071c-4605-ac01-4ad130775d87|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
+      [
+        "pin_to_pin|1473200|1727200|05ae5ff0-56d2-41f2-bf1d-3e50b473c235|2927b528-48b3-4b41-b452-4f8e3d5bcb37|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
+      [
+        "pin_to_pin|1473200|1752600|e3a8b805-cd9c-44cf-aafc-d9463e227d8c|65097e86-8a24-4077-ac41-3c24a52fe926|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
+      [
+        "pin_to_pin|1473200|1778000|a922a6e1-ba21-40c3-bce7-60d63e15690a|00538432-a995-4be9-b6e2-ac2eccf3a2cb|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
+        ""
+      ],
       [
         "pin_to_pin|609600|1409700|74426daa-7e2c-4ced-9d32-148942d580c7|16d8a630-1417-459e-a28a-0157e2a050fa|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac|/6c2452ef-45b6-4fa3-afe0-a595c894c1ac",
         ""
@@ -668,7 +696,7 @@
           "show": true
         },
         {
-          "group_by": false,
+          "group_by": true,
           "label": "Description",
           "name": "Description",
           "show": true
@@ -683,6 +711,24 @@
           "group_by": false,
           "label": "Sim.Pins",
           "name": "Sim.Pins",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "MPN",
+          "name": "MPN",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "Manufacturer",
+          "name": "Manufacturer",
+          "show": false
+        },
+        {
+          "group_by": false,
+          "label": "LCSC Part",
+          "name": "LCSC Part",
           "show": false
         }
       ],
@@ -734,7 +780,7 @@
         "uuid": "6c2452ef-45b6-4fa3-afe0-a595c894c1ac"
       }
     ],
-    "used_designators": "#FLG1-2,H1-4,SW1-2,D1,#PWR1-22,C1-7,JP1-3,R1-11,J1-6,U1-3",
+    "used_designators": "#FLG1-2,H1-4,SW1-2,D1,#PWR1-23,C1-7,JP1-3,R1-11,J1-6,U1-3",
     "variants": []
   },
   "sheets": [

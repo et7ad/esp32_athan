@@ -14,7 +14,7 @@ USB-C 6-pin (5 V only) ──┬── 5 V rail ──┬── MAX98357A (VDD) 
    CC1/CC2 5.1 kΩ        │   bulk cap   │        ▲ I2S BCLK/LRCLK/DIN, SD_MODE (4.7 kΩ)
                          │              │        │
                          └── LDO 3.3 V ─┴── ESP32-S3-WROOM-1-N16R8 ── I2C ── OLED header (SSD1306)
-                                                 ├── Next / Select buttons (to GND)
+                                                 ├── 5-way switch: Up/Down/Left/Right/Select (to GND)
                                                  ├── status LED
                                                  ├── relay output terminal (logic signal + GND)
                                                  └── UART0 + EN + IO0 ── J6 programming header
@@ -23,12 +23,13 @@ USB-C 6-pin (5 V only) ──┬── 5 V rail ──┬── MAX98357A (VDD) 
 ## 2. Prototype on a breadboard (do this first)
 
 Parts: **ESP32-S3-DevKitC-1 N16R8**, an **Adafruit MAX98357A breakout (3006)** or a clone, the speaker, a
-128×64 SSD1306 I2C OLED, two push buttons, an LED + 1 kΩ, and a 4.7 kΩ resistor for the amp's SD pin.
+128×64 SSD1306 I2C OLED, the 5-way switch (3.5; five push buttons work too), an LED + 1 kΩ, and a 4.7 kΩ
+resistor for the amp's SD pin.
 
 | From (DevKitC pin) | To | Notes |
 |---|---|---|
 | 5V | breakout **Vin** | DevKitC's 5V pin carries USB VBUS when powered over USB |
-| GND | breakout **GND**, OLED GND, buttons, LED cathode | common ground |
+| GND | breakout **GND**, OLED GND, switch **COM**, LED cathode | common ground |
 | GPIO5 | breakout **BCLK** | |
 | GPIO6 | breakout **LRC** | |
 | GPIO7 | breakout **DIN** | |
@@ -37,8 +38,11 @@ Parts: **ESP32-S3-DevKitC-1 N16R8**, an **Adafruit MAX98357A breakout (3006)** o
 | breakout **+ / −** | speaker | |
 | 3V3 | OLED VCC | |
 | GPIO8 / GPIO9 | OLED SDA / SCL | most OLED modules already carry 4.7–10 kΩ pull-ups |
-| GPIO10 | Next button → GND | internal pull-up |
-| GPIO11 | Select button → GND | internal pull-up |
+| GPIO14 | switch **Up** | internal pull-up; the switch's COM goes to GND |
+| GPIO10 | switch **Down** | internal pull-up |
+| GPIO21 | switch **Left** | internal pull-up |
+| GPIO47 | switch **Right** | internal pull-up |
+| GPIO11 | switch **Select** (centre push) | internal pull-up |
 | GPIO12 | 1 kΩ → relay input (or an LED to see it) | |
 | GPIO13 | 1 kΩ → LED → GND | status LED |
 
@@ -119,8 +123,11 @@ Adafruit 3006 board and the plan. Net names in **bold** match the firmware.
 | **AMP_SD** | 15 | 4.7 kΩ → MAX98357A SD_MODE (pin 4), left channel |
 | **I2C_SDA** | 8 | OLED header SDA, 4.7 kΩ to +3V3 |
 | **I2C_SCL** | 9 | OLED header SCL, 4.7 kΩ to +3V3 |
-| **BTN_NEXT** | 10 | Next button to GND |
-| **BTN_SELECT** | 11 | Select button to GND |
+| **BTN_UP** | 14 | 5-way switch Up (3.5) |
+| **BTN_DOWN** | 10 | 5-way switch Down |
+| **BTN_LEFT** | 21 | 5-way switch Left |
+| **BTN_RIGHT** | 47 | 5-way switch Right |
+| **BTN_SELECT** | 11 | 5-way switch centre push |
 | **RELAY_OUT** | 12 | 1 kΩ → relay terminal pin 1 (pin 2 = GND) |
 | **LED** | 13 | 1 kΩ → LED → GND |
 | **TXD0 / RXD0** | 43 / 44 | J6 pins 4 / 5 (UART0: flashing and logs) |
@@ -145,15 +152,49 @@ The same footprints as the V2 board (`../esp_athan/hardware/pcb/athan_kicad`):
 
 | Part | Footprint (V2) |
 |---|---|
-| Next, Select buttons | `Button_Switch_THT:SW_SPST_Omron_B3F-40xx` |
+| 5-way switch (SMD, hand-soldered: 3.5) | drawn from the seller's drawing |
 | Speaker terminal, relay terminal | `TerminalBlock:TerminalBlock_MaiXu_MX126-5.0-02P_1x02_P5.00mm` |
 | OLED header 1×4 (GND, VCC, SCL, SDA) | 2.54 mm pin header. **Print the order on the silkscreen**; modules differ (GND-VCC or VCC-GND first) |
 | Status LED | 3 mm or 5 mm THT LED |
 | Mounting holes | `MountingHole_3.2mm_M3` × 4 |
 
 Removed compared with V2: DFPlayer, microSD, 3.5 mm jack, the on-board display footprint, speaker slide switch,
-5 V screw-terminal input. Kept: the 6-pin power-only USB-C (now with CC resistors) and a programming header (J6,
-1×6, new pin order).
+5 V screw-terminal input, the two push buttons (now one 5-way switch, 3.5). Kept: the 6-pin power-only USB-C (now
+with CC resistors) and a programming header (J6, 1×6, new pin order).
+
+### 3.5 The 5-way switch
+
+The common 10 × 10 mm SMD 5-way switch with 6 pins (sold as Bestol, uxcell 10×10×9, TS-1505 type): four directions
+and a centre push, each closing to one common pin. Only one key closes at a time.
+
+- **Wiring:** COM → GND; each direction and the centre → its GPIO. No resistors: the firmware turns on the internal
+  pull-ups (about 45 kΩ) and debounces (40 ms).
+- **Pins:** GPIO10 and GPIO11 (the old Next and Select) plus **GPIO14, GPIO21, GPIO47**. All five sit on the module's
+  bottom edge (module pins 18, 19, 22, 23, 24; GPIO12/13, relay and LED, are pins 20/21 between them), and none
+  is a strapping, flash/PSRAM, USB or JTAG pin. GPIO47 runs at the flash voltage, 3.3 V on the N16R8 (it would be
+  1.8 V only on the 1.8 V "V" modules). On a DevKitC-1, GPIO14 is on the left header next to GPIO13, and GPIO21
+  and GPIO47 are on the right header.
+- **Any assignment works.** The five lines are identical inputs, so route whatever is shortest and change the
+  `pin_up` / `pin_down` / `pin_left` / `pin_right` / `pin_select` substitutions at the top of `firmware/athan.yaml`
+  to match.
+- **Pinout (community-reported for this switch type; sellers differ, so check yours):**
+
+  | Pad | 1 | 2 | 3 | 4 | 5 | 6 |
+  |---|---|---|---|---|---|---|
+  | Function | **COM** (→ GND) | Left | Centre (Select) | Up | Right | Down |
+
+  Check it with a meter in continuity mode before laying out: one probe on the pad you think is COM, then tilt
+  the stem each way and press it in; each of the other five pads should beep for exactly one of them. If two pads
+  beep for everything, the probe is not on COM.
+- **Orientation:** "Up" is the direction the owner pushes, as they face the clock. The switch sits on the back of
+  the board (3.4), so the side the owner sees is the mirror of the board's front view in KiCad: left and right
+  swap. Name the nets by the owner's view, or swap `pin_left` / `pin_right` in the yaml after the first test.
+- **Assembly:** the switch is SMD but sits on the back, where the board has only THT parts (one-sided assembly,
+  section 5). Solder it by hand after assembly (its pads are large), or pay for assembly on both sides.
+- **Footprint:** KiCad has none for this switch; draw it from the seller's drawing. The Ultra Librarian library in
+  `hardware/pcb/libs/ul_SKQUCAA010/` is for the **Alps SKQUCAA010**, a different part: through-hole snap-in, its
+  pins numbered 1 Up (A), 2 Left (B), 3 Down (C), 4 COM, 5 Right (D), 6 Centre (Alps datasheet), and listed by
+  Alps as not recommended for new designs. Its footprint and numbering do not fit the SMD switch.
 
 ## 4. Bill of materials (per board)
 
@@ -175,7 +216,7 @@ Removed compared with V2: DFPlayer, microSD, 3.5 mm jack, the on-board display f
 | 2 | 10 µF (LDO in, amp VDD) | Basic | front |
 | — | ≈ 470 µF bulk on 5 V (one SMD cap or several ceramics) | — | front |
 | 1 | 2×3 pin header + 1 jumper (gain) | — | front or back |
-| 2 | Omron B3F-40xx push buttons | — | back, THT |
+| 1 | 5-way switch, 10 × 10 mm, 6-pin SMD (TS-1505 type, 3.5) | — | back, hand-soldered |
 | 2 | MX126 2-pin 5.0 mm terminals | — | back, THT |
 | 1 | 1×4 pin header (OLED) | — | back, THT |
 | 1 | 1×6 pin header + 1 jumper cap (J6, programming) | — | back, THT |
@@ -228,10 +269,10 @@ pins. If you fit them through-hole, put them within a few mm of the pins with sh
    flash needs it, later updates go over Wi-Fi.
 5. **Ground:** a continuous ground pour on the back layer; stitch vias around the board and the amp.
 6. **Power:** +5V from USB-C to the amp and the LDO with wide traces (≥ 1 mm). The amp's peaks are about 1 A.
-7. **Silkscreen:** button names (Next, Select), the OLED pin order, gain jumper settings (3/6/9/12/15 dB, "open =
+7. **Silkscreen:** the switch's directions (arrows and "SEL"), the OLED pin order, gain jumper settings (3/6/9/12/15 dB, "open =
    9 dB"), terminal labels (SPK +/−, RELAY SIG/GND), board name and version "Athan V3", and the GitHub URL.
 8. **Mechanical:** 4 × M3 holes matching the enclosure. Put the USB-C at an edge where the enclosure has its
-   opening. Place the buttons and LED where the enclosure's button caps and light pipe sit.
+   opening. Place the switch and LED where the enclosure's switch opening and light pipe sit.
 
 Before ordering: run KiCad's DRC and ERC, compare the footprint pin-out of the module and the amp with their
 datasheets, and check the 3D view for anything tall on the front.
@@ -254,14 +295,14 @@ rectangular speaker variants, two display variants), and adapt it:
 | USB-C opening | Power only, as on V2; big enough for common cable boots (≈ 12 × 7 mm) |
 | J6 | Reachable with the case open (first flash only), or a small slot if you want to reflash closed |
 | Removed openings | No AUX jack, no SD card slot, no screw-terminal power input, no speaker slide switch |
-| Buttons | Two button caps or plungers over the back-side buttons (Next, Select) |
+| Switch | An opening or a cap over the 5-way switch's stem, room to tilt it in four directions and press it in |
 | LED | Light pipe or hole over the LED |
 | OLED | Window and clips for the 128×64 module; leave room for the 4-wire cable to the header |
 | Speaker | Same speaker; a sealed back volume around it sounds fuller; grille holes in front of the cone |
 | Antenna | No metal, screws or speaker magnet within ≈ 15 mm of the module's antenna end; plastic only there |
 | Relay terminal | Cable exit or opening for the 2-wire relay lead |
 | Ventilation | A few slots; the amp and ESP get warm at full volume |
-| Labels | Embossed "Next" / "Select", optional QR code to the README |
+| Labels | Embossed arrows around the switch, optional QR code to the README |
 
 Put the exported STL/STEP/F3D files in `hardware/enclosure/`.
 
