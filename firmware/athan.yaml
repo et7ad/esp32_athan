@@ -21,15 +21,25 @@ substitutions:
   # Firmware updates: manifest attached to the latest GitHub Release (scripts/make_release_manifest.py)
   update_manifest: "https://github.com/et7ad/esp32_athan/releases/latest/download/manifest.json"
 
-  # Pins: version3_planning.md section 3.3
+  # Serial log level. DEBUG while testing: the log is how a crash or restart gets explained. For a finished build,
+  # WARN keeps only warnings and errors (smaller, a little less work per event); NONE removes the log entirely.
+  # Choices: NONE, ERROR, WARN, INFO, DEBUG, VERBOSE.
+  log_level: DEBUG
+
+  # Pins: HARDWARE.md 3.2 (also version3_planning.md section 3.3)
   pin_i2s_bclk: GPIO5
   pin_i2s_lrclk: GPIO6
   pin_i2s_dout: GPIO7
   pin_amp_sd: GPIO15       # MAX98357A SD_MODE through 4.7 kOhm: high = on (left channel), low/floating = off
   pin_sda: GPIO8
   pin_scl: GPIO9
-  pin_next: GPIO10
-  pin_select: GPIO11
+  # The 5-way switch: each direction and the centre push switch to GND (internal pull-ups). Any of the five
+  # may be swapped here to suit the board's routing.
+  pin_up: GPIO14
+  pin_down: GPIO10
+  pin_left: GPIO21
+  pin_right: GPIO47
+  pin_select: GPIO11       # centre push
   pin_relay: GPIO12
   pin_led: GPIO13
 
@@ -64,15 +74,16 @@ esphome:
             if (list == 1 || list == 2) id(apply_fajr_volume).execute();
             else id(apply_volume).execute();
           });
-      # Wi-Fi reset: power up holding BOTH buttons. Overwrites the saved network, so setup mode starts
+          // Stopping a preview (browsing to the next one, the /audio page's Stop) silences at once (hard_mute).
+          id(athan_core).set_hard_stop_callback([]() { id(hard_mute).execute(); });
+      - script.execute: menu_setup
+      # Wi-Fi reset: power up holding Select (the centre push). Overwrites the saved network, so setup mode starts
       # (Bluetooth, then the hotspot).
       - if:
           condition:
-            and:
-              - binary_sensor.is_on: ui_next
-              - binary_sensor.is_on: ui_select
+            binary_sensor.is_on: ui_select
           then:
-            - logger.log: "Both buttons held at power-up: forgetting Wi-Fi"
+            - logger.log: "Select held at power-up: forgetting Wi-Fi"
             - lambda: |-
                 wifi::global_wifi_component->clear_sta();
                 wifi::global_wifi_component->save_wifi_sta("doesntexist", "passwordfornonetwork");
@@ -84,14 +95,14 @@ esphome:
                   - output.turn_off: led_output
                   - delay: 300ms
             - button.press: web_restart
-      # Button unlock: power up holding exactly ONE button.
+      # Button unlock: power up holding any of the four directions.
       - if:
           condition:
-            lambda: 'return id(buttons_locked) && (id(ui_next).state != id(ui_select).state);'
+            lambda: 'return id(buttons_locked) && (id(ui_up).state || id(ui_down).state || id(ui_left).state || id(ui_right).state);'
           then:
             - lambda: |-
                 id(buttons_locked) = false;
-                ESP_LOGI("ui", "Buttons unlocked (one button held at power-up)");
+                ESP_LOGI("ui", "Buttons unlocked (a direction held at power-up)");
             - repeat:
                 count: 3
                 then:
@@ -109,13 +120,17 @@ esp32:
   partitions: partitions.csv
   framework:
     type: esp-idf
+    sdkconfig_options:
+      # TLS buffers (about 40 KB per HTTPS stream or download, more while two overlap) in PSRAM instead of the
+      # scarce internal RAM, which Wi-Fi, the web server and the audio drivers need.
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: "y"
 
 psram:
   mode: octal
   speed: 80MHz
 
 logger:
-  level: DEBUG
+  level: ${log_level}   # set at the top (substitutions)
   # UART0 = TXD0/RXD0 on the J6 programming header. The board's 6-pin USB-C carries power only, so ESPHome's S3
   # default (native USB) would print nowhere. On a DevKitC prototype these logs come out of its "UART" port.
   hardware_uart: UART0
@@ -190,7 +205,15 @@ wifi:
     - logger.log: "Wi-Fi connected"
     - ble.disable:
     - script.execute: update_display
+    # No Wi-Fi modem sleep once Bluetooth is really off: streams start faster and play steadier. ESP-IDF needs
+    # modem sleep while Bluetooth runs, so it comes back before ble.enable below.
+    - wait_until:
+        condition:
+          lambda: 'return !esp32_ble::global_ble->is_active();'
+        timeout: 15s
+    - lambda: 'if (!esp32_ble::global_ble->is_active()) id(athan_core).set_wifi_low_latency(true);'
   on_disconnect:
+    - lambda: 'id(athan_core).set_wifi_low_latency(false);'
     - ble.enable:
 
 captive_portal:
@@ -291,6 +314,10 @@ media_player:
 athan:
   id: athan_core
   media_player: player
+  # Every start waits for its pipeline's first speaker to stop, then checks the format it was given: a sound
+  # started on a chain still set up for the one before plays at the wrong speed and pitch.
+  media_speaker: media_resampler
+  announcement_speaker: announce_resampler
   time_id: sntp_time
   data_url: ${data_url}
   # Own links of radio slots 1..10 (the text entities below), used when a slot does not follow the project list
@@ -312,251 +339,54 @@ output:
     pin: ${pin_led}
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Buttons. Menu state machine (ui_mode):
-#   0 normal  1 main menu  2 sound list (list_slot: 0 athan, 1 fajr, 2 tawashih, 3 tick)  3 location  4 volume
-#   5 fajr volume  6 athan on/off  7 info  8 tick window  9 tick start hour  10 tick end hour  11 radio
-#   12 download progress
-# Main menu items (index, 16 items, not persisted):
-#   0 Athan 1 Fajr Athan 2 Tawashih 3 Hourly Tick 4 Tick Window 5 Athan On/Off 6 Pre-Fajr 7 Radio 8 Location
-#   9 Volume 10 Fajr Volume 11 Clock 12 Update 13 Lock Buttons 14 Info 15 Cancel
+# The 5-way switch: Up, Down, Left, Right and Select (the centre push). Every press goes to script ui_key, the one
+# place that decides what a key does:
+#   Clock screen: Left/Right = volume of what plays (never stops it). Up = radio on/off (the slot chosen last).
+#     Down = relay on/off. Select = menu. While the athan, the tawashih, the tick or a preview plays, Up, Down and
+#     Select stop it (the radio plays on).
+#   Menu: Up/Down = rows, Left/Right = the row's items, Select = take it, or done. The rows are script menu_setup;
+#     navigation is components/athan/menu.h, drawing menu_view.h.
+#   Buttons locked: every key only silences.
+# Debounce on each key: a press is reported at once and contact bounce for 40 ms after it is ignored, so one press
+# is one event (bounce read as extra presses multiplied previews and media commands).
 # ---------------------------------------------------------------------------------------------------------------------
 binary_sensor:
   - platform: gpio
-    id: ui_next
-    name: "ui_next"
+    id: ui_up
+    name: "ui_up"
     internal: true
-    pin:
-      number: ${pin_next}
-      mode: INPUT_PULLUP
-      inverted: true
-    on_press:
-      then:
-        - lambda: |-
-            id(ui_last_activity) = millis();
-            const bool audio_on = id(athan_playing) || id(athan_core).slot_playing() ||
-                                  id(athan_core).radio_active() >= 0 ||
-                                  id(player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
-            if (id(buttons_locked)) {
-              id(silence_audio).execute();
-              return;
-            }
-            if (id(ui_mode) == 0) {
-              if (audio_on) {
-                id(silence_audio).execute();
-              } else {
-                id(external_relay).toggle();   // idle: Next toggles the relay, as on V2
-              }
-              id(update_display).execute();
-              return;
-            }
-            const int m = id(ui_mode);
-            if (m == 1) {
-              id(ui_menu_index) = (id(ui_menu_index) + 1) % 16;
-              if (id(ui_menu_index) == 12) id(update_check_state) = 0;
-            } else if (m == 2) {
-              const int slot = id(list_slot);
-              const int n = id(athan_core).catalog_size(slot) + (slot == 3 ? 1 : 0);   // tick list starts with "Off"
-              if (n > 0) {
-                id(list_index) = (id(list_index) + 1) % n;
-                const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
-                if (entry >= 0 && !id(athan_playing)) id(athan_core).preview_catalog(slot, entry);
-                else if (entry < 0) id(athan_core).stop_media();
-              }
-            } else if (m == 3) {
-              id(location_index) = (id(location_index) + 1) % (int) id(web_location_select).size();
-            } else if (m == 4) {
-              id(volume_level) = (id(volume_level) <= 10) ? 100 : id(volume_level) - 10;
-              id(apply_playing_volume).execute();   // a Fajr athan playing keeps the Fajr volume
-              id(play_tone_volume).execute();
-            } else if (m == 5) {
-              id(fajr_volume_level) = (id(fajr_volume_level) <= 10) ? 100 : id(fajr_volume_level) - 10;
-              id(fajr_volume_feedback).execute();
-            } else if (m == 6) {
-              id(mute_index) = (id(mute_index) + 1) % 6;
-            } else if (m == 8) {
-              id(tickwin_index) = (id(tickwin_index) + 1) % 3;
-            } else if (m == 9) {
-              id(htick_start_hour) = (id(htick_start_hour) + 1) % 24;
-            } else if (m == 10) {
-              id(htick_end_hour) = (id(htick_end_hour) + 1) % 24;
-            } else if (m == 11) {
-              // next radio slot that has something to play
-              for (int k = 1; k <= 10; k++) {
-                int c = (id(radio_cursor) + k) % 10;
-                if (id(athan_core).station_available(c, id(radio_subscribed)[c])) {
-                  id(radio_cursor) = c;
-                  break;
-                }
-              }
-            }
-            id(update_display).execute();
-
+    pin: {number: "${pin_up}", mode: INPUT_PULLUP, inverted: true}
+    filters: [settle: 40ms]
+    on_press: [script.execute: {id: ui_key, button: 0}]   # athan::MenuKey::UP
+  - platform: gpio
+    id: ui_down
+    name: "ui_down"
+    internal: true
+    pin: {number: "${pin_down}", mode: INPUT_PULLUP, inverted: true}
+    filters: [settle: 40ms]
+    on_press: [script.execute: {id: ui_key, button: 1}]   # DOWN
+  - platform: gpio
+    id: ui_left
+    name: "ui_left"
+    internal: true
+    pin: {number: "${pin_left}", mode: INPUT_PULLUP, inverted: true}
+    filters: [settle: 40ms]
+    on_press: [script.execute: {id: ui_key, button: 2}]   # LEFT
+  - platform: gpio
+    id: ui_right
+    name: "ui_right"
+    internal: true
+    pin: {number: "${pin_right}", mode: INPUT_PULLUP, inverted: true}
+    filters: [settle: 40ms]
+    on_press: [script.execute: {id: ui_key, button: 3}]   # RIGHT
+  # Also the Bluetooth setup's authorizer (esp32_improv) and, held at power-up, the Wi-Fi reset.
   - platform: gpio
     id: ui_select
     name: "ui_select"
     internal: true
-    pin:
-      number: ${pin_select}
-      mode: INPUT_PULLUP
-      inverted: true
-    on_press:
-      then:
-        - lambda: |-
-            id(ui_last_activity) = millis();
-            const bool audio_on = id(athan_playing) || id(athan_core).slot_playing() ||
-                                  id(athan_core).radio_active() >= 0 ||
-                                  id(player).state == media_player::MEDIA_PLAYER_STATE_PLAYING;
-            if (id(buttons_locked)) {
-              id(silence_audio).execute();
-              return;
-            }
-            if (id(ui_mode) == 0) {
-              if (audio_on) {
-                id(silence_audio).execute();
-                return;
-              }
-              if (!id(sntp_time).now().is_valid() && id(improv_ble).is_active() &&
-                  !wifi::global_wifi_component->is_connected()) {
-                // Setup screen showing: this press only authorises the phone (esp32_improv authorizer), no menu.
-                id(update_display).execute();
-                return;
-              }
-              id(ui_mode) = 1;
-              id(ui_menu_index) = 0;
-              id(update_check_state) = 0;
-              id(play_tone_click).execute();
-              id(update_display).execute();
-              return;
-            }
-            const int m = id(ui_mode);
-            if (m == 1) {
-              const int item = id(ui_menu_index);
-              if (item <= 3) {
-                // sound lists: 0 athan, 1 fajr, 2 tawashih, 3 tick. The list opens on the selected sound and
-                // plays it (from flash, no download); the tick list opens on "Off" when the tick is off.
-                id(list_slot) = item;
-                id(ui_mode) = 2;
-                if (!id(athan_core).catalog_ready()) id(athan_core).fetch_catalog();
-                int entry = id(athan_core).selected_entry(item);
-                if (item == 3 && !id(htick_enabled)) entry = -1;
-                else if (entry < 0 && id(athan_core).catalog_size(item) > 0) entry = 0;   // selected one not listed
-                id(list_index) = (item == 3) ? entry + 1 : std::max(0, entry);
-                if (entry >= 0 && !id(athan_playing)) id(athan_core).preview_catalog(item, entry);
-                else id(play_tone_click).execute();
-              } else if (item == 4) {
-                id(ui_mode) = 8;
-                id(tickwin_index) = 0;
-                id(play_tone_click).execute();
-              } else if (item == 5) {
-                id(ui_mode) = 6;
-                id(mute_index) = 0;
-                id(play_tone_click).execute();
-              } else if (item == 6) {
-                id(prefajr_enabled) = !id(prefajr_enabled);   // toggles in place
-                ESP_LOGI("ui", "Pre-Fajr Tawashih %s", id(prefajr_enabled) ? "ON" : "OFF");
-                id(play_tone_click).execute();
-              } else if (item == 7) {
-                id(ui_mode) = 11;
-                id(radio_cursor) = id(radio_slot);
-              } else if (item == 8) {
-                id(ui_mode) = 3;
-                id(location_index) = 0;
-                for (int i = 0; i < (int) id(web_location_select).size(); i++) {
-                  auto k = id(web_location_select).at(i);
-                  if (k.has_value() && std::string(k.value()) == id(selected_location_key)) id(location_index) = i;
-                }
-                id(play_tone_click).execute();
-              } else if (item == 9) {
-                id(ui_mode) = 4;
-                id(play_tone_volume).execute();
-              } else if (item == 10) {
-                id(ui_mode) = 5;
-                id(fajr_volume_feedback).execute();
-              } else if (item == 11) {
-                id(clock_12h) = !id(clock_12h);   // toggles in place
-                id(play_tone_click).execute();
-              } else if (item == 12) {
-                id(play_tone_click).execute();
-                if (id(update_check_state) == 2) {
-                  id(update_check_state) = 4;
-                  id(fw_update).perform(false);
-                } else if (id(update_check_state) != 3) {
-                  id(check_update).execute();
-                }
-              } else if (item == 13) {
-                id(buttons_locked) = true;
-                id(ui_mode) = 0;
-                id(play_tone_click).execute();
-              } else if (item == 14) {
-                id(ui_mode) = 7;
-                id(play_tone_click).execute();
-              } else {
-                id(ui_mode) = 0;
-                id(play_tone_click).execute();
-              }
-            } else if (m == 2) {
-              const int slot = id(list_slot);
-              const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
-              id(athan_core).stop_media();
-              id(apply_playing_volume).execute();
-              if (slot == 3 && entry < 0) {
-                id(htick_enabled) = false;    // "Off"
-                id(ui_mode) = 0;
-              } else if (id(athan_core).catalog_size(slot) > 0) {
-                if (slot == 3) id(htick_enabled) = true;
-                id(athan_core).download_from_catalog(slot, entry);
-                id(ui_mode) = 12;             // progress screen
-              } else {
-                id(ui_mode) = 0;
-              }
-              id(play_tone_click).execute();
-            } else if (m == 3) {
-              auto k = id(web_location_select).at(id(location_index));
-              if (k.has_value()) {
-                id(selected_location_key) = std::string(k.value());
-                id(athan_core).set_location(id(selected_location_key));
-              }
-              id(ui_mode) = 0;
-              id(play_tone_click).execute();
-            } else if (m == 4) {
-              id(ui_mode) = 0;
-              id(play_tone_click).execute();
-            } else if (m == 5) {
-              id(apply_playing_volume).execute();
-              id(ui_mode) = 0;
-              id(play_tone_click).execute();
-            } else if (m == 6) {
-              static const int prayer_of[5] = {0, 3, 4, 5, 6};   // Fajr, Dhuhr, Asr, Maghrib, Isha
-              if (id(mute_index) < 5) {
-                int p = prayer_of[id(mute_index)];
-                id(athan_enabled)[p] = !id(athan_enabled)[p];
-              } else {
-                id(ui_mode) = 0;
-              }
-              id(play_tone_click).execute();
-            } else if (m == 7 || m == 12) {
-              id(ui_mode) = 0;
-              id(play_tone_click).execute();
-            } else if (m == 8) {
-              if (id(tickwin_index) == 0) id(ui_mode) = 9;
-              else if (id(tickwin_index) == 1) id(ui_mode) = 10;
-              else id(ui_mode) = 0;
-              id(play_tone_click).execute();
-            } else if (m == 9 || m == 10) {
-              id(ui_mode) = 8;
-              id(play_tone_click).execute();
-            } else if (m == 11) {
-              // Select plays the slot (or stops it if it is the one playing) and returns to the clock.
-              const int c = id(radio_cursor);
-              if (id(athan_core).radio_active() == c) {
-                id(athan_core).radio_stop();
-              } else {
-                id(radio_slot) = c;
-                id(radio_start).execute();
-              }
-              id(ui_mode) = 0;
-            }
-            id(update_display).execute();
+    pin: {number: "${pin_select}", mode: INPUT_PULLUP, inverted: true}
+    filters: [settle: 40ms]
+    on_press: [script.execute: {id: ui_key, button: 4}]   # SELECT
 
   - platform: template
     name: "Athan Playing"
@@ -649,7 +479,7 @@ switch:
     icon: "mdi:lock"
     restore_mode: DISABLED
     lambda: return id(buttons_locked);
-    turn_on_action: [lambda: 'id(buttons_locked) = true; id(ui_mode) = 0; id(update_display).execute();']
+    turn_on_action: [lambda: 'id(buttons_locked) = true; id(athan_core).menu().close(); id(update_display).execute();']
     turn_off_action: [lambda: 'id(buttons_locked) = false; id(update_display).execute();']
     web_server: {sorting_group_id: grp_now, sorting_weight: 5}
   - platform: template
@@ -661,8 +491,8 @@ switch:
     turn_on_action: [lambda: 'id(clock_12h) = true; id(update_display).execute();']
     turn_off_action: [lambda: 'id(clock_12h) = false; id(update_display).execute();']
     web_server: {sorting_group_id: grp_now, sorting_weight: 6}
-  # Radio slots: ON = follow the project's station list (docs/radio/stations.json, link fetched on every play);
-  # OFF = play the slot's own link below.
+  # Radio slots: ON = follow the project's station list (docs/radio/stations.json, kept in memory and
+  # refreshed every 6 h); OFF = play the slot's own link below.
   - {platform: template, name: "Radio 1 follows project list", id: radio_sub_1, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[0];', turn_on_action: [lambda: 'id(radio_subscribed)[0] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[0] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 1}}
   - {platform: template, name: "Radio 2 follows project list", id: radio_sub_2, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[1];', turn_on_action: [lambda: 'id(radio_subscribed)[1] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[1] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 3}}
   - {platform: template, name: "Radio 3 follows project list", id: radio_sub_3, icon: "mdi:playlist-check", restore_mode: DISABLED, lambda: 'return id(radio_subscribed)[2];', turn_on_action: [lambda: 'id(radio_subscribed)[2] = true;'], turn_off_action: [lambda: 'id(radio_subscribed)[2] = false;'], web_server: {sorting_group_id: grp_stations, sorting_weight: 5}}
@@ -711,7 +541,13 @@ select:
     options: ["Radio 1", "Radio 2", "Radio 3", "Radio 4", "Radio 5", "Radio 6", "Radio 7", "Radio 8", "Radio 9", "Radio 10"]
     set_action:
       - lambda: |-
-          auto idx = id(web_radio_slot).index_of(x.c_str(), x.size());
+          auto idx = id(web_radio_slot).index_of(x.c_str(), x.size());   // the label's position = the slot
+          if (!idx.has_value()) {
+            // A page opened before the names loaded still sends the old label: "Radio N…" names the slot too.
+            int n = 0;
+            if (sscanf(std::string(x.c_str(), x.size()).c_str(), "Radio %d", &n) == 1 && n >= 1 && n <= 10)
+              idx = (size_t) (n - 1);
+          }
           if (!idx.has_value()) return;
           id(radio_slot) = (int) idx.value();
           id(web_radio_slot).publish_state(idx.value());
@@ -796,11 +632,7 @@ button:
     name: "Stop Radio"
     id: web_stop_radio
     icon: "mdi:stop"
-    on_press:
-      - lambda: |-
-          id(radio_resume) = -1;   // stopped on purpose: an athan that paused it must not restart it
-          id(athan_core).radio_stop();
-      - script.execute: update_display
+    on_press: [script.execute: radio_off]   # an athan that paused it must not restart it
     web_server: {sorting_group_id: grp_radio, sorting_weight: 3}
   - platform: template
     name: "Refresh Prayer Times"
@@ -828,6 +660,10 @@ sensor:
       name: "Free Internal Heap"
       id: web_free_heap
       web_server: {sorting_group_id: grp_system, sorting_weight: 8}
+    block:
+      name: "Largest Free Block"
+      id: web_largest_block
+      web_server: {sorting_group_id: grp_system, sorting_weight: 8.2}
     psram:
       name: "Free PSRAM"
       id: web_free_psram
@@ -878,8 +714,7 @@ font:
     size: 14
   - file: "gfonts://Roboto"
     id: font3
-    size: 10
-    glyphs: "AMP"
+    size: 10   # AM/PM, the radio slot number next to the play mark, the menu's faded previews and captions
 
 time:
   - platform: sntp
@@ -921,15 +756,14 @@ globals:
   - {id: radio_subscribed, type: "bool[10]", initial_value: "{true, true, true, true, true, true, true, true, true, true}", restore_value: true}
   - {id: radio_slot, type: int, initial_value: "0", restore_value: true}
   # not persisted
-  - {id: ui_mode, type: int, initial_value: "0"}
-  - {id: ui_menu_index, type: int, initial_value: "0"}
-  - {id: ui_last_activity, type: uint32_t, initial_value: "0"}
-  - {id: list_slot, type: int, initial_value: "0"}
-  - {id: list_index, type: int, initial_value: "0"}
-  - {id: location_index, type: int, initial_value: "0"}
-  - {id: mute_index, type: int, initial_value: "0"}
-  - {id: tickwin_index, type: int, initial_value: "0"}
-  - {id: radio_cursor, type: int, initial_value: "0"}
+  - {id: ui_last_activity, type: uint32_t, initial_value: "0"}  # last key press (the menu closes after 60 s)
+  - {id: last_tone_ms, type: uint32_t, initial_value: "0"}      # tone rate limit (play_tone_click / play_tone_volume)
+  - {id: output_muted, type: bool, initial_value: "false"}      # hard_mute holds the I2S output silent
+  - {id: volume_pending, type: bool, initial_value: "false"}    # a volume change waiting for hard_mute to end
+  - {id: toast_kind, type: int, initial_value: "0"}             # clock pop-up: 0 none, 1 volume, 2 Fajr volume, 3 relay
+  - {id: fajr_sound_on, type: bool, initial_value: "false"}     # check_fajr_sound's answer
+  - {id: menu_radio_resume, type: int, initial_value: "-1"}     # radio a menu preview replaced: back when the menu closes
+  - {id: menu_download_slot, type: int, initial_value: "-1"}    # sound row whose download the menu shows under the item
   - {id: radio_resume, type: int, initial_value: "-1"}
   - {id: athan_playing, type: bool, initial_value: "false"}
   - {id: current_athan_prayer_index, type: int, initial_value: "0"}
@@ -953,6 +787,9 @@ script:
     then:
       - lambda: |-
           id(volume_level) = std::max(0, std::min(100, id(volume_level)));
+          // While hard_mute holds the output silent, a volume change would undo it (ESPHome's I2S speaker
+          // recomputes its gain without checking mute): hard_mute applies it when it lets go.
+          if (id(output_muted)) { id(volume_pending) = true; return; }
           // Owner volume (0-100 %) -> player volume. ESPHome's I2S speaker turns the player volume v into
           // -49 dB x (1 - v), so here 10 % = -${volume_range_db} dB rising evenly to 100 % = 0 dB; 0 % is silent.
           const int pct = id(volume_level);
@@ -963,49 +800,86 @@ script:
     mode: restart
     then:
       - lambda: |-
+          if (id(output_muted)) { id(volume_pending) = true; return; }   // see apply_volume
           const int pct = id(fajr_volume_level) < 0 ? id(volume_level) : std::min(100, id(fajr_volume_level));
           float db = -${volume_range_db}.0f * (100 - std::max(10, pct)) / 90.0f;   // same curve as apply_volume
           float v = pct <= 0 ? 0.0f : std::max(0.0f, std::min(1.0f, 1.0f + db / 49.0f));
           id(player).make_call().set_volume(v).perform();
-  # The volume for whatever is playing now: Fajr volume for the Fajr athan, the Pre-Fajr Tawashih and a Fajr or
-  # Tawashih preview; the normal volume for everything else, and when nothing plays. Every "back to normal" uses
-  # this, so stopping or leaving something never drops a Fajr athan that is still playing to the normal volume.
+  # Whether a Fajr-volume sound plays now: the Fajr athan, the Pre-Fajr Tawashih, a Fajr or Tawashih preview.
+  # The one test for "which volume" (sets fajr_sound_on at once): apply_playing_volume and the volume keys use it.
+  - id: check_fajr_sound
+    then:
+      - lambda: |-
+          const int pl = id(athan_core).preview_list();
+          id(fajr_sound_on) = (id(athan_playing) && id(current_athan_prayer_index) == 0) || id(prefajr_playing) ||
+                              pl == 1 || pl == 2;
+  # The volume for whatever is playing now: Fajr volume for a Fajr sound (check_fajr_sound), the normal volume for
+  # everything else, and when nothing plays. Every "back to normal" uses this, so stopping or leaving something
+  # never drops a Fajr athan that is still playing to the normal volume.
   - id: apply_playing_volume
     mode: restart
     then:
       - lambda: |-
-          const int pl = id(athan_core).preview_list();
-          const bool fajr = (id(athan_playing) && id(current_athan_prayer_index) == 0) || id(prefajr_playing) ||
-                            pl == 1 || pl == 2;
-          if (fajr) id(apply_fajr_volume).execute();
+          id(check_fajr_sound).execute();
+          if (id(fajr_sound_on)) id(apply_fajr_volume).execute();
           else id(apply_volume).execute();
+  # Left/Right on the clock screen: the volume of what plays (the Fajr volume during a Fajr sound) by 10 %, shown
+  # for 2 s. Never stops or pauses anything. The keys stop at 10 %: 0 % (silent) only from the menu or the web.
+  - id: volume_step
+    parameters:
+      delta: int
+    then:
+      - lambda: |-
+          id(check_fajr_sound).execute();
+          const bool fajr = id(fajr_sound_on);
+          int &level = fajr ? id(fajr_volume_level) : id(volume_level);
+          const int v = level < 0 ? id(volume_level) : level;
+          int nv = std::min(100, v + 10 * delta);
+          if (delta < 0) nv = std::max(nv, std::min(v, 10));
+          level = nv;
+          id(apply_playing_volume).execute();
+          id(show_toast).execute(fajr ? 2 : 1);
+          // A short tone at the new level when nothing plays; over a sound, that sound is the feedback.
+          if (!id(athan_playing) && !id(athan_core).slot_playing() && id(athan_core).preview_list() < 0 &&
+              id(athan_core).radio_active() < 0)
+            id(play_tone_volume).execute();
+  # Pop-up over the clock for 2 s (toast_kind): the volume a Left/Right press set, the relay a Down press switched.
+  - id: show_toast
+    mode: restart
+    parameters:
+      kind: int
+    then:
+      - lambda: 'id(toast_kind) = kind; id(update_display).execute();'
+      - delay: 2s
+      - lambda: 'id(toast_kind) = 0; id(update_display).execute();'
+
   # Menu click and volume tone: at the normal volume when nothing else plays (over something, they share its volume).
   - id: play_tone_click
     mode: restart
     then:
       - if:
           condition:
-            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing();'
+            # At most one tone per 90 ms, however fast the presses or slider events come.
+            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing() && millis() - id(last_tone_ms) >= 90;'
           then:
-            - lambda: 'if (id(player).state == media_player::MEDIA_PLAYER_STATE_IDLE) id(apply_playing_volume).execute();'
+            - lambda: |-
+                id(last_tone_ms) = millis();
+                if (id(player).state == media_player::MEDIA_PLAYER_STATE_IDLE) id(apply_playing_volume).execute();
             - script.execute: amp_wake
-            - media_player.speaker.play_on_device_media_file:
-                id: player
-                media_file: tone_click
-                announcement: true
+            - lambda: 'id(athan_core).play_tone(id(tone_click));'   # waits for a sound before it to stop
   - id: play_tone_volume
     mode: restart
     then:
       - if:
           condition:
-            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing();'
+            # At most one tone per 90 ms, however fast the presses or slider events come.
+            lambda: 'return !id(athan_playing) && !id(athan_core).slot_playing() && millis() - id(last_tone_ms) >= 90;'
           then:
-            - lambda: 'if (id(player).state == media_player::MEDIA_PLAYER_STATE_IDLE) id(apply_playing_volume).execute();'
+            - lambda: |-
+                id(last_tone_ms) = millis();
+                if (id(player).state == media_player::MEDIA_PLAYER_STATE_IDLE) id(apply_playing_volume).execute();
             - script.execute: amp_wake
-            - media_player.speaker.play_on_device_media_file:
-                id: player
-                media_file: tone_volume
-                announcement: true
+            - lambda: 'id(athan_core).play_tone(id(tone_volume));'
   # Fajr volume changed (menu or web slider): play the volume tone at the new Fajr level, then go back to the volume
   # of whatever is playing. While the Fajr athan or the Pre-Fajr Tawashih plays, it just takes the new level.
   - id: fajr_volume_feedback
@@ -1018,11 +892,13 @@ script:
             - script.execute: apply_playing_volume
           else:
             - script.execute: apply_fajr_volume
-            - script.execute: amp_wake
-            - media_player.speaker.play_on_device_media_file:
-                id: player
-                media_file: tone_volume
-                announcement: true
+            - if:
+                condition:
+                  lambda: 'return millis() - id(last_tone_ms) >= 90;'   # a dragged web slider sends many events
+                then:
+                  - lambda: 'id(last_tone_ms) = millis();'
+                  - script.execute: amp_wake
+                  - lambda: 'id(athan_core).play_tone(id(tone_volume));'
             - delay: 1500ms
             - script.execute: apply_playing_volume
   # Amplifier on ahead of a sound, with the idle timer running: a sound that never starts (a radio slot without a
@@ -1032,6 +908,26 @@ script:
     then:
       - output.turn_on: amp_enable
       - script.execute: amp_idle_off
+  # Instant silence for a stop the owner asked for. Stopping a pipeline leaves up to 500 ms of audio in the I2S
+  # speaker's buffer (plus the mixer's and resampler's), which used to keep playing after the press. The I2S
+  # speaker applies its volume as audio leaves that buffer, so muting it here (directly, not through the media
+  # player's command queue) is silent within its 50 ms of DMA, without the pop of cutting the amp mid-sound. The
+  # pipelines stop behind it; once the buffer has drained (800 ms) the output is unmuted. The amp still goes off
+  # 5 s after idle (amp_idle_off).
+  - id: hard_mute
+    mode: restart
+    then:
+      - lambda: |-
+          id(output_muted) = true;
+          id(i2s_speaker)->set_mute_state(true);
+      - delay: 800ms
+      - lambda: |-
+          id(output_muted) = false;
+          id(i2s_speaker)->set_mute_state(false);
+          if (id(volume_pending)) {
+            id(volume_pending) = false;
+            id(apply_playing_volume).execute();
+          }
   # Amplifier off a few seconds after the player goes idle (no idle hiss).
   - id: amp_idle_off
     mode: restart
@@ -1047,17 +943,444 @@ script:
   - id: silence_audio
     mode: restart
     then:
+      - script.execute: hard_mute   # silent at once; everything below stops behind it
       - script.stop: make_athan
       - script.stop: run_prefajr
       - script.stop: play_tick
+      - mixer_speaker.apply_ducking:   # a tick stopped while it lowered the radio would leave the next radio low
+          id: media_mixer_input
+          decibel_reduction: 0
+          duration: 0.3s
       - lambda: |-
+          id(menu_radio_resume) = -1;
           id(athan_core).stop_media();
-          id(player).make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
+          // Sends a STOP only when something plays there (this runs on every press while the buttons are locked),
+          // and drops a sound still waiting to start.
+          id(athan_core).stop_announcements();
           id(athan_playing) = false;
           id(prefajr_playing) = false;
           id(radio_resume) = -1;
           id(led_output).turn_off();
           id(apply_playing_volume).execute();
+          id(update_display).execute();
+
+  # Stop the athan, the tawashih, the tick or a preview, and leave the radio playing: Up, Down or Select on the clock
+  # while one of them plays. Silent at once when no radio plays (with the radio on, the mute would cut it too; then
+  # only the tick's buffered half second plays out).
+  - id: stop_sound
+    then:
+      - lambda: 'if (id(athan_core).radio_active() < 0) id(hard_mute).execute();'
+      - script.stop: make_athan
+      - script.stop: run_prefajr
+      - script.stop: play_tick
+      - mixer_speaker.apply_ducking:   # a tick stopped while it lowered the radio
+          id: media_mixer_input
+          decibel_reduction: 0
+          duration: 0.3s
+      - lambda: |-
+          id(athan_core).stop_preview();
+          id(athan_core).stop_announcements();
+          id(athan_playing) = false;
+          id(prefajr_playing) = false;
+          id(radio_resume) = -1;   // stopped on purpose: a radio the athan paused stays off
+          id(led_output).turn_off();
+          id(apply_playing_volume).execute();
+          id(update_display).execute();
+
+  # ---------------- keys ----------------
+  # Every key of the 5-way switch (button = athan::MenuKey: 0 Up, 1 Down, 2 Left, 3 Right, 4 Select). What each
+  # one does is in the binary_sensor section's header.
+  - id: ui_key
+    parameters:
+      button: int
+    then:
+      - lambda: |-
+          using athan::MenuKey;
+          const MenuKey k = static_cast<MenuKey>(button);
+          id(ui_last_activity) = millis();
+          if (id(buttons_locked)) {
+            id(silence_audio).execute();
+            return;
+          }
+          auto &menu = id(athan_core).menu();
+          if (menu.is_open()) {
+            menu.key(k);
+            // A click for rows and Select; Left/Right sound through their row (preview, volume tone or nothing).
+            if (k == MenuKey::UP || k == MenuKey::DOWN || k == MenuKey::SELECT) id(play_tone_click).execute();
+            id(update_display).execute();
+            return;
+          }
+          // ---- clock screen ----
+          if (k == MenuKey::LEFT || k == MenuKey::RIGHT) {
+            id(volume_step).execute(k == MenuKey::RIGHT ? 1 : -1);
+            return;
+          }
+          const bool sound_on = id(athan_playing) || id(prefajr_playing) || id(athan_core).slot_playing() ||
+                                id(athan_core).preview_list() >= 0;
+          if (sound_on) {
+            id(stop_sound).execute();   // anything but the radio
+            return;
+          }
+          if (k == MenuKey::UP) {
+            if (id(athan_core).radio_active() >= 0) id(radio_off).execute();
+            else id(radio_start).execute();   // the slot chosen last (radio_slot): its number shows by the play mark
+          } else if (k == MenuKey::DOWN) {
+            id(external_relay).toggle();
+            id(show_toast).execute(3);
+          } else {
+            if (!id(sntp_time).now().is_valid() && id(improv_ble).is_active() &&
+                !wifi::global_wifi_component->is_connected()) {
+              id(update_display).execute();   // setup screen: this press only authorises the phone (esp32_improv)
+              return;
+            }
+            if (!id(athan_core).catalog_ready()) id(athan_core).fetch_catalog();   // for the sound rows
+            id(update_check_state) = 0;
+            id(play_tone_click).execute();
+            menu.open();
+          }
+          id(update_display).execute();
+
+  # ---------------- device menu ----------------
+  # The OLED menu's rows, top to bottom, each defined once (navigation: components/athan/menu.h, drawing:
+  # menu_view.h). Kinds: CHOICE = Left/Right show the choices, Select takes the one shown (on the one in use: closes
+  # the menu). VALUE = Left/Right change it at once, Select closes. ACTION = Select runs the item shown. Up past the
+  # first row or Down past the last returns to the clock, as does 60 s without a press.
+  - id: menu_setup
+    then:
+      - lambda: |-
+          using athan::MenuRow;
+          using athan::RowKind;
+          auto &menu = id(athan_core).menu();
+          // "06:00", or "6 AM" with the 12-hour clock
+          auto hour_text = [](int h) -> std::string {
+            char b[8];
+            if (id(clock_12h)) snprintf(b, sizeof(b), "%d %s", (h % 12) ? h % 12 : 12, h < 12 ? "AM" : "PM");
+            else snprintf(b, sizeof(b), "%02d:00", h);
+            return b;
+          };
+
+          // Radio: the ten slots. Select plays the one shown (the check mark: what Up on the clock plays), or stops
+          // it if it is the one playing, and returns to the clock.
+          {
+            MenuRow r;
+            r.title = "Radio";
+            r.kind = RowKind::ACTION;
+            r.count = []() { return 10; };
+            r.label = [](int i) -> std::string {
+              if (!id(radio_subscribed)[i]) return std::to_string(i + 1) + " own link";
+              const std::string nm = id(athan_core).station_name(i);
+              return nm.empty() ? "Radio " + std::to_string(i + 1) : std::to_string(i + 1) + " " + nm;
+            };
+            r.active = []() { return std::max(0, std::min(9, id(radio_slot))); };
+            r.playing = []() { return id(athan_core).radio_active(); };
+            r.caption = [](int i) -> std::string {
+              return (i < 0 || id(athan_core).station_available(i, id(radio_subscribed)[i])) ? "" : "No link here";
+            };
+            r.apply = [](int i) {
+              if (!id(athan_core).station_available(i, id(radio_subscribed)[i])) return false;
+              id(menu_radio_resume) = -1;   // chosen now: nothing to bring back when the menu closes
+              if (id(athan_core).radio_active() == i) {
+                id(radio_off).execute();
+              } else {
+                id(radio_slot) = i;
+                id(radio_start).execute();
+              }
+              return true;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Sound rows: "Off" (tick only), "Custom" (an uploaded sound), then the suggested list. They open on the
+          // sound in use; a pause on an item plays a preview (from flash for the stored one). Select on another
+          // entry downloads it (its progress shows under it, the check mark moves when it is stored).
+          auto sound_row = [](const char *title, int slot) {
+            const bool off = slot == 3;
+            auto pos_of = [=](int item) {
+              for (int p = 0; p < id(athan_core).menu_size(slot, off); p++)
+                if (id(athan_core).menu_item(slot, off, p) == item) return p;
+              return -1;
+            };
+            MenuRow r;
+            r.title = title;
+            r.count = [=]() { return id(athan_core).menu_size(slot, off); };
+            r.id_at = [=](int i) { return id(athan_core).menu_item(slot, off, i); };
+            r.find = pos_of;
+            r.label = [=](int i) -> std::string {
+              const int it = id(athan_core).menu_item(slot, off, i);
+              if (it == athan::MENU_OFF) return "Off";
+              if (it == athan::MENU_CUSTOM) return "Custom";
+              return id(athan_core).catalog_name(slot, it);
+            };
+            r.active = [=]() {
+              if (off && !id(htick_enabled)) return pos_of(athan::MENU_OFF);
+              return pos_of(id(athan_core).has_custom(slot) ? athan::MENU_CUSTOM : id(athan_core).selected_entry(slot));
+            };
+            r.caption = [=](int i) -> std::string {
+              if (!id(athan_core).catalog_ready())
+                return wifi::global_wifi_component->is_connected() ? "Loading list..." : "No internet";
+              if (i < 0) return "List is empty";
+              if (id(menu_download_slot) == slot) return id(athan_core).sound_status();   // what Select started
+              if (id(athan_core).menu_item(slot, off, i) == athan::MENU_CUSTOM) return id(athan_core).slot_label(slot);
+              return "";
+            };
+            r.show = [=](int i, bool entered) {
+              if (id(athan_playing) || id(prefajr_playing)) return;   // never preview over the athan
+              const int it = id(athan_core).menu_item(slot, off, i);
+              if (it < 0 && it != athan::MENU_CUSTOM) {
+                id(athan_core).stop_preview();   // "Off"
+                return;
+              }
+              const int radio = id(athan_core).radio_active();
+              if (radio >= 0) {
+                if (entered) return;   // scrolling past with the radio on: no preview cuts it
+                id(menu_radio_resume) = radio;   // a preview replaces the radio; it is back when the menu closes
+              }
+              // After a pause on the item: skipping through items or rows opens one stream, not one per press.
+              id(athan_core).request_preview(slot, it, entered ? 800 : 500);
+            };
+            r.apply = [=](int i) {
+              const int it = id(athan_core).menu_item(slot, off, i);
+              id(athan_core).stop_preview();
+              id(apply_playing_volume).execute();
+              if (it == athan::MENU_OFF) {
+                id(htick_enabled) = false;
+                return false;
+              }
+              if (off) id(htick_enabled) = true;
+              if (it >= 0) {
+                id(menu_download_slot) = slot;
+                id(athan_core).download_from_catalog(slot, it);
+              }
+              return false;   // stays: the check mark shows when it is in use
+            };
+            r.leave = []() {
+              id(athan_core).stop_preview();
+              id(apply_playing_volume).execute();
+            };
+            return r;
+          };
+          menu.add_row(sound_row("Athan", 0));
+          menu.add_row(sound_row("Fajr Athan", 1));
+          menu.add_row(sound_row("Tawashih", 2));
+
+          {
+            MenuRow r;
+            r.title = "Pre-Fajr";
+            r.count = []() { return 2; };
+            r.label = [](int i) { return std::string(i ? "On" : "Off"); };
+            r.active = []() { return id(prefajr_enabled) ? 1 : 0; };
+            r.caption = [](int) { return std::string("Tawashih ${prefajr_offset_min} min before Fajr"); };
+            r.apply = [](int i) {
+              id(prefajr_enabled) = i == 1;
+              ESP_LOGI("ui", "Pre-Fajr Tawashih %s", i ? "ON" : "OFF");
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          menu.add_row(sound_row("Hourly Tick", 3));
+
+          // Tick From / Tick Until: the hourly tick's window [from, until), at once; equal = all day.
+          for (int w = 0; w < 2; w++) {
+            MenuRow r;
+            r.title = w == 0 ? "Tick From" : "Tick Until";
+            r.kind = RowKind::VALUE;
+            r.count = []() { return 24; };
+            r.label = hour_text;
+            r.active = [w]() { return w == 0 ? id(htick_start_hour) : id(htick_end_hour); };
+            r.caption = [hour_text](int) -> std::string {
+              const int a = id(htick_start_hour), b = id(htick_end_hour);
+              if (a == b) return "All day";
+              return hour_text(a) + " to " + hour_text(b) + " (" + std::to_string((b - a + 24) % 24) + " h)";
+            };
+            r.apply = [w](int i) {
+              (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = i;
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Athan On/Off: Select switches the prayer shown.
+          {
+            static const char *const names[5] = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
+            static const int prayer_of[5] = {0, 3, 4, 5, 6};
+            MenuRow r;
+            r.title = "Athan On/Off";
+            r.kind = RowKind::ACTION;
+            r.count = []() { return 5; };
+            r.label = [](int i) { return std::string(names[i]) + (id(athan_enabled)[prayer_of[i]] ? ": On" : ": Off"); };
+            r.apply = [](int i) {
+              id(athan_enabled)[prayer_of[i]] = !id(athan_enabled)[prayer_of[i]];
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Volume, Fajr Volume: 0-100 % in steps of 10, at once (with a tone at the new level when nothing plays).
+          {
+            MenuRow r;
+            r.title = "Volume";
+            r.kind = RowKind::VALUE;
+            r.wrap = false;
+            r.count = []() { return 11; };
+            r.label = [](int i) { return std::to_string(i * 10) + "%"; };
+            r.active = []() { return std::max(0, std::min(10, (id(volume_level) + 5) / 10)); };
+            r.apply = [](int i) {
+              id(volume_level) = i * 10;
+              id(apply_playing_volume).execute();   // a Fajr athan playing keeps the Fajr volume
+              id(play_tone_volume).execute();
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+          {
+            MenuRow r;
+            r.title = "Fajr Volume";
+            r.kind = RowKind::VALUE;
+            r.wrap = false;
+            r.count = []() { return 11; };
+            r.label = [](int i) { return std::to_string(i * 10) + "%"; };
+            r.active = []() {
+              const int v = id(fajr_volume_level) < 0 ? id(volume_level) : id(fajr_volume_level);
+              return std::max(0, std::min(10, (v + 5) / 10));
+            };
+            r.apply = [](int i) {
+              id(fajr_volume_level) = i * 10;
+              id(fajr_volume_feedback).execute();
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          {
+            MenuRow r;
+            r.title = "Location";
+            r.count = []() { return (int) id(web_location_select).size(); };
+            r.label = [](int i) -> std::string {
+              auto k = id(web_location_select).at(i);
+              return k.has_value() ? std::string(k.value()) : std::string("?");
+            };
+            r.active = []() {
+              for (int i = 0; i < (int) id(web_location_select).size(); i++) {
+                auto k = id(web_location_select).at(i);
+                if (k.has_value() && std::string(k.value()) == id(selected_location_key)) return i;
+              }
+              return -1;
+            };
+            r.apply = [](int i) {
+              auto k = id(web_location_select).at(i);
+              if (k.has_value()) {
+                id(selected_location_key) = std::string(k.value());
+                id(athan_core).set_location(id(selected_location_key));
+              }
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          {
+            MenuRow r;
+            r.title = "Clock";
+            r.count = []() { return 2; };
+            r.label = [](int i) { return std::string(i ? "12-hour" : "24-hour"); };
+            r.active = []() { return id(clock_12h) ? 1 : 0; };
+            r.apply = [](int i) {
+              id(clock_12h) = i == 1;
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Update: Select checks the GitHub Release, then installs a newer version.
+          {
+            MenuRow r;
+            r.title = "Update";
+            r.kind = RowKind::ACTION;
+            r.count = []() { return 1; };
+            r.label = [](int) -> std::string {
+              switch (id(update_check_state)) {
+                case 2: return "Install " + id(fw_update).update_info.latest_version;
+                case 3: return "Checking...";
+                case 4: return "Installing...";
+                default: return "Check now";
+              }
+            };
+            r.caption = [](int) -> std::string {
+              switch (id(update_check_state)) {
+                case 1: return "V${project_version} is the latest";
+                case 5: return "Check failed (offline?)";
+                default: return "Installed: V${project_version}";
+              }
+            };
+            r.apply = [](int) {
+              if (id(update_check_state) == 2) {
+                id(update_check_state) = 4;
+                id(fw_update).perform(false);
+              } else if (id(update_check_state) != 3 && id(update_check_state) != 4) {
+                id(check_update).execute();
+              }
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          {
+            MenuRow r;
+            r.title = "Lock Buttons";
+            r.kind = RowKind::ACTION;
+            r.count = []() { return 1; };
+            r.label = [](int) { return std::string("Lock now"); };
+            r.caption = [](int) { return std::string("Unlock: hold arrow at boot"); };
+            r.apply = [](int) {
+              id(buttons_locked) = true;
+              return true;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Info: Left/Right page through it, Select closes.
+          {
+            MenuRow r;
+            r.title = "Info";
+            r.kind = RowKind::ACTION;
+            r.count = []() { return 3; };
+            r.label = [](int i) -> std::string {
+              if (i == 1) return "athan.local";
+              if (i == 2) return "V${project_version}";
+              auto ips = network::get_ip_addresses();
+              char ip[48] = "No Wi-Fi";
+              if (wifi::global_wifi_component->is_connected() && ips[0].is_set()) ips[0].str_to(ip);
+              return ip;
+            };
+            r.caption = [](int i) -> std::string {
+              static const char *const what[3] = {"IP address", "Web page", "Firmware"};
+              return (i >= 0 && i < 3) ? what[i] : "";
+            };
+            r.apply = [](int) { return true; };
+            menu.add_row(std::move(r));
+          }
+
+          menu.set_on_close([]() {
+            id(menu_download_slot) = -1;
+            id(apply_playing_volume).execute();
+            // A preview replaced the radio: it comes back.
+            const int r = id(menu_radio_resume);
+            id(menu_radio_resume) = -1;
+            if (r >= 0 && id(athan_core).radio_active() < 0 && !id(athan_playing) && !id(prefajr_playing)) {
+              id(radio_slot) = r;
+              id(radio_start).execute();
+            }
+          });
+
+  # Radio off on purpose (Up on the clock, the menu, the web Stop Radio): silent at once unless a stored sound plays
+  # (the mute would cut it too), and no radio comes back after an athan or a menu preview.
+  - id: radio_off
+    then:
+      - lambda: |-
+          id(radio_resume) = -1;
+          id(menu_radio_resume) = -1;
+          if (id(athan_core).radio_active() >= 0 && !id(athan_core).slot_playing()) id(hard_mute).execute();
+          id(athan_core).radio_stop();
           id(update_display).execute();
 
   # ---------------- radio ----------------
@@ -1082,6 +1405,7 @@ script:
     then:
       - lambda: |-
           id(athan_playing) = true;
+          id(athan_core).menu().close();   // the athan screen shows, and Up/Down/Select stop it
           int r = id(athan_core).radio_active();
           id(radio_resume) = r;
           if (r >= 0) id(athan_core).radio_stop();
@@ -1104,10 +1428,7 @@ script:
             - repeat:
                 count: 3
                 then:
-                  - media_player.speaker.play_on_device_media_file:
-                      id: player
-                      media_file: tone_click
-                      announcement: true
+                  - lambda: 'id(athan_core).play_tone(id(tone_click));'
                   - delay: 1500ms
       - script.execute: update_display
       - wait_until:
@@ -1126,17 +1447,21 @@ script:
           }
           id(update_display).execute();
 
-  # Pre-Fajr Tawashih: relay on, tawashih at the Fajr volume, relay off after ${prefajr_relay_min} min.
+  # Pre-Fajr Tawashih: relay on, tawashih at the Fajr volume, relay off ${prefajr_relay_min} min after it ends.
   - id: run_prefajr
     mode: single
     then:
       - lambda: |-
           ESP_LOGI("prefajr", "Pre-Fajr Tawashih");
+          id(athan_core).menu().close();   // Up/Down/Select on the clock stop it
           int r = id(athan_core).radio_active();
           id(radio_resume) = r;
           if (r >= 0) id(athan_core).radio_stop();
           id(amp_wake).execute();
       - switch.turn_on: external_relay
+      # Until the tawashih ends, the relay's timer allows for the longest one (the 7 min wait below): a tawashih
+      # stopped by a key or the web Stop (which stops this script) must not leave the relay on.
+      - lambda: 'id(prefajr_relay_off).execute((${prefajr_relay_min} + 7) * 60000);'
       - lambda: 'id(prefajr_playing) = true;'
       - script.execute: apply_fajr_volume
       - delay: 100ms
@@ -1152,7 +1477,15 @@ script:
           int r = id(radio_resume);
           id(radio_resume) = -1;
           if (r >= 0 && !id(athan_playing)) { id(radio_slot) = r; id(radio_start).execute(); }
-      - delay: !lambda 'return (uint32_t) ${prefajr_relay_min} * 60000UL - 7000UL;'
+          id(prefajr_relay_off).execute(${prefajr_relay_min} * 60000 - 7000);
+  # The Pre-Fajr relay's own timer (restart: the last call counts), apart from run_prefajr so that stopping that
+  # script never leaves the relay on.
+  - id: prefajr_relay_off
+    mode: restart
+    parameters:
+      after_ms: int
+    then:
+      - delay: !lambda 'return after_ms;'
       - switch.turn_off: external_relay
 
   # Hourly tick: plays over the radio with the radio lowered (mixer ducking).
@@ -1275,8 +1608,30 @@ script:
             }
           }
           {
-            std::string r = "Radio " + std::to_string(id(radio_slot) + 1);
-            if (id(web_radio_slot).current_option() != r) id(web_radio_slot).publish_state(r);
+            // Radio Station options: "Radio 1 Cairo Quran" from the station list in memory, "Radio 4 (own link)" for
+            // a slot with its own link, plain "Radio N" until the list has loaded. The labels live in fixed
+            // buffers the select points at (set once); their text is rewritten in place only when it changes.
+            static char labels[10][40];
+            static bool attached = false;
+            bool changed = !attached;
+            for (int k = 0; k < 10; k++) {
+              char want[40];
+              std::string nm = id(athan_core).station_name(k);
+              if (!id(radio_subscribed)[k]) snprintf(want, sizeof(want), "Radio %d (own link)", k + 1);
+              else if (!nm.empty()) snprintf(want, sizeof(want), "Radio %d %s", k + 1, nm.c_str());
+              else snprintf(want, sizeof(want), "Radio %d", k + 1);
+              if (strcmp(want, labels[k]) != 0) { memcpy(labels[k], want, sizeof(want)); changed = true; }
+            }
+            if (!attached) {
+              id(web_radio_slot).traits.set_options({labels[0], labels[1], labels[2], labels[3], labels[4],
+                                                     labels[5], labels[6], labels[7], labels[8], labels[9]});
+              attached = true;
+            }
+            // By index: the labels change, the slot does not. A changed label is republished for the web page.
+            const size_t slot = (size_t) std::max(0, std::min(9, id(radio_slot)));
+            auto cur = id(web_radio_slot).active_index();
+            if (changed || !id(web_radio_slot).has_state() || !cur.has_value() || cur.value() != slot)
+              id(web_radio_slot).publish_state(slot);
           }
           if (!id(web_volume).has_state() || (int) id(web_volume).state != id(volume_level)) id(web_volume).publish_state(id(volume_level));
           if (id(fajr_volume_level) >= 0 && (!id(web_fajr_volume).has_state() || (int) id(web_fajr_volume).state != id(fajr_volume_level))) id(web_fajr_volume).publish_state(id(fajr_volume_level));
@@ -1362,11 +1717,12 @@ script:
           auto now = id(sntp_time).now();
           const bool wifi_ok = wifi::global_wifi_component->is_connected();
 
-          // Menu timeout: 60 s without a press returns to the clock.
-          if (id(ui_mode) != 0 && millis() - id(ui_last_activity) >= 60000) {
-            if (id(ui_mode) == 2) id(athan_core).stop_media();
-            id(ui_mode) = 0;
-            id(apply_playing_volume).execute();
+          // The menu draws itself (components/athan/menu_view.h).
+          auto &menu = id(athan_core).menu();
+          if (menu.is_open()) {
+            athan::draw_menu(d, menu, {id(font1), id(font2), id(font3)});
+            d.display();
+            return;
           }
 
           static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
@@ -1404,128 +1760,45 @@ script:
             return x + w;
           };
           auto draw_lock = [&](int x, int y) { d.circle(x + 3, y + 2, 2); d.filled_rectangle(x, y + 4, 7, 5); };
-          auto draw_speaker = [&](int x, int y) {
-            d.filled_rectangle(x, y + 5, 4, 6);
-            d.filled_triangle(x + 4, y + 5, x + 9, y + 1, x + 9, y + 15);
-            d.filled_triangle(x + 4, y + 10, x + 9, y + 15, x + 4, y + 5);
-            d.line(x + 12, y + 5, x + 12, y + 10);
-            d.line(x + 15, y + 3, x + 15, y + 12);
-            d.line(x + 18, y + 1, x + 18, y + 14);
+          // Radio playing: the play mark and the slot number (1-10), right-aligned before the lock (and the
+          // no-Wi-Fi mark), so "10" fits too.
+          auto draw_radio = [&]() {
+            const int r = id(athan_core).radio_active();
+            if (r < 0) return;
+            char num[4];
+            snprintf(num, sizeof(num), "%d", r + 1);
+            int x1, y1, wn, hn;
+            d.get_text_bounds(0, 0, num, id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
+            const int right = wifi_ok ? (id(buttons_locked) ? 119 : 127) : (id(buttons_locked) ? 94 : 103);
+            const int x = right - (7 + 1 + wn) + 1;   // mark 7 px wide, 1 px gap, then the number
+            d.filled_triangle(x, 55, x, 63, x + 6, 59);
+            d.print(x + 8, 63, id(font3), display::TextAlign::BASELINE_LEFT, num);
           };
           auto draw_nowifi = [&]() { d.circle(116, 52, 10); d.print(107, 41, id(font1), "W"); d.line(105, 43, 125, 63); };
           char line[48];
 
-          if (id(ui_mode) != 0) {
-            const int m = id(ui_mode);
-            if (m == 1) {
-              static const char *items[16] = {"Athan", "Fajr Athan", "Tawashih", "Hourly Tick", "Tick Window",
-                "Athan On/Off", "Pre-Fajr", "Radio", "Location", "Volume", "Fajr Volume", "Clock", "Update",
-                "Lock Buttons", "Info", "Cancel"};
-              d.print(0, 0, id(font1), "Menu:");
-              const int i = id(ui_menu_index);
-              if (i == 11) snprintf(line, sizeof(line), "Clock: %s", id(clock_12h) ? "12h" : "24h");
-              else snprintf(line, sizeof(line), "%s", items[i]);
-              d.print(0, 22, id(font1), line);
-              if (i == 6) d.print(0, 44, id(font1), id(prefajr_enabled) ? "ON" : "OFF");
-              if (i == 12) {
-                const char *v = "${project_version}";
-                switch (id(update_check_state)) {
-                  case 3: snprintf(line, sizeof(line), "V%s checking..", v); break;
-                  case 1: snprintf(line, sizeof(line), "V%s up to date", v); break;
-                  case 2: snprintf(line, sizeof(line), "-> %s ?", id(fw_update).update_info.latest_version.c_str()); break;
-                  case 4: snprintf(line, sizeof(line), "installing.."); break;
-                  case 5: snprintf(line, sizeof(line), "check failed"); break;   // no release, or offline
-                  default: snprintf(line, sizeof(line), "V%s", v); break;
-                }
-                d.print(0, 46, id(font2), line);
-              }
-            } else if (m == 2) {
-              static const char *titles[4] = {"Athan:", "Fajr Athan:", "Tawashih:", "Hourly Tick:"};
-              const int slot = id(list_slot);
-              d.print(0, 0, id(font1), titles[slot]);
-              if (!id(athan_core).catalog_ready()) {
-                d.print(0, 24, id(font2), wifi_ok ? "Loading list..." : "No internet");
-              } else {
-                const int n = id(athan_core).catalog_size(slot);
-                const int entry = (slot == 3) ? id(list_index) - 1 : id(list_index);
-                if (entry < 0) {
-                  d.print(0, 22, id(font1), "Off");
-                } else {
-                  std::string name = id(athan_core).catalog_name(slot, entry);
-                  d.print(0, 22, id(font1), name.c_str());
-                  bool selected = (entry == id(athan_core).selected_entry(slot));
-                  snprintf(line, sizeof(line), "%d / %d%s", entry + 1, n, selected ? "  (selected)" : "");
-                  d.print(0, 46, id(font2), line);
-                }
-              }
-            } else if (m == 3) {
-              d.print(0, 0, id(font1), "Location:");
-              auto k = id(web_location_select).at(id(location_index));
-              d.print(0, 22, id(font1), k.has_value() ? std::string(k.value()).c_str() : "?");
-            } else if (m == 4) {
-              d.print(0, 0, id(font1), "Volume");
-              draw_speaker(76, 2);
-              snprintf(line, sizeof(line), "%d%%", id(volume_level));
-              d.print(0, 22, id(font1), line);
-            } else if (m == 5) {
-              d.print(0, 0, id(font1), "Fajr Volume");
-              snprintf(line, sizeof(line), "%d%%", id(fajr_volume_level));
-              d.print(0, 22, id(font1), line);
-              int x1, y1, w, h2;
-              d.get_text_bounds(0, 22, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
-              draw_speaker(w + 8, 24);
-            } else if (m == 6) {
-              static const char *mnames[6] = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha", "Done"};
-              static const int prayer_of[5] = {0, 3, 4, 5, 6};
-              d.print(0, 0, id(font1), "Athan On/Off");
-              if (id(mute_index) < 5) snprintf(line, sizeof(line), "%s: %s", mnames[id(mute_index)], id(athan_enabled)[prayer_of[id(mute_index)]] ? "ON" : "OFF");
-              else snprintf(line, sizeof(line), "Done");
-              d.print(0, 22, id(font1), line);
-            } else if (m == 7) {
-              d.print(0, 0, id(font1), "Info V${project_version}");
-              auto ips = network::get_ip_addresses();
-              char ip[48] = "no wifi";
-              if (wifi_ok && ips[0].is_set()) ips[0].str_to(ip);
-              d.print(0, 26, id(font2), ip);
-              d.print(0, 46, id(font2), "athan.local");
-            } else if (m == 8 || m == 9 || m == 10) {
-              d.print(0, 0, id(font1), "Tick Window");
-              int s = id(htick_start_hour), e = id(htick_end_hour);
-              int x1, y1, w, h2;
-              if (m == 9 || (m == 8 && id(tickwin_index) == 0)) {
-                const char *lbl = (m == 9) ? "Start>" : "Start:";
-                d.print(0, 22, id(font1), lbl);
-                d.get_text_bounds(0, 22, lbl, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
-                draw_time(w + 5, 22, s, 0);
-              } else if (m == 10 || (m == 8 && id(tickwin_index) == 1)) {
-                const char *lbl = (m == 10) ? "End>" : "End:";
-                d.print(0, 22, id(font1), lbl);
-                d.get_text_bounds(0, 22, lbl, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &h2);
-                draw_time(w + 5, 22, e, 0);
-              } else {
-                d.print(0, 22, id(font1), "Done");
-              }
-              snprintf(line, sizeof(line), "Window: %dh", (s == e) ? 24 : ((e - s + 24) % 24));
-              d.print(0, 44, id(font1), line);
-            } else if (m == 11) {
-              const int c = id(radio_cursor);
-              const bool on = id(athan_core).radio_active() == c;
-              snprintf(line, sizeof(line), "Radio %d", c + 1);
-              d.print(0, 0, id(font1), line);
-              if (on) d.filled_triangle(110, 4, 110, 18, 122, 11);   // playing mark
-              std::string nm = id(radio_subscribed)[c] ? id(athan_core).station_name(c) : std::string("own link");
-              d.print(0, 24, id(font2), nm.empty() ? "(project list)" : nm.c_str());
-              d.print(0, 46, id(font2), on ? "Next: more  Sel: stop" : "Next: more  Sel: play");
-            } else if (m == 12) {
-              d.print(0, 0, id(font1), "Sound");
-              std::string st = id(athan_core).sound_status();
-              std::string a = st.substr(0, 18), b = st.size() > 18 ? st.substr(18, 18) : "";
-              d.print(0, 24, id(font2), a.c_str());
-              d.print(0, 42, id(font2), b.c_str());
+          // Pop-up over the clock for 2 s after Left/Right (volume) or Down (relay): script show_toast.
+          auto draw_toast = [&]() {
+            const int k = id(toast_kind);
+            if (k == 0) return;
+            d.filled_rectangle(14, 11, 100, 42, display::COLOR_OFF);
+            d.rectangle(14, 11, 100, 42);
+            if (k == 3) {
+              d.print(64, 27, id(font2), display::TextAlign::BASELINE_CENTER, "Relay");
+              d.print(64, 47, id(font1), display::TextAlign::BASELINE_CENTER, id(external_relay).state ? "ON" : "OFF");
+              return;
             }
+            const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
+            d.print(64, 22, id(font3), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
+            snprintf(line, sizeof(line), "%d%%", pct);
+            d.print(64, 41, id(font1), display::TextAlign::BASELINE_CENTER, line);
+            d.rectangle(22, 45, 84, 4);
+            d.filled_rectangle(22, 45, 84 * pct / 100, 4);
+          };
+          auto finish = [&]() {
+            draw_toast();
             d.display();
-            return;
-          }
+          };
 
           // ---- normal screen ----
           const bool time_ok = now.is_valid();
@@ -1540,7 +1813,7 @@ script:
                            : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
             d.print(0, 20, id(font2), bt);
             d.print(0, 40, id(font2), wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
-            d.display();
+            finish();
             return;
           }
           if (time_ok && id(athan_playing)) {
@@ -1553,7 +1826,7 @@ script:
             int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
             int x = draw_time(0, 44, now.hour, now.minute);
             d.print(x + gap, 44, id(font1), line);
-            d.display();
+            finish();
             return;
           }
           // As on V2: until the clock is set the three rows are drawn and struck through (lines at y 11, 33, 55
@@ -1581,8 +1854,8 @@ script:
             d.print(0, 44, id(font1), "Rem --:--");
             if (!wifi_ok) draw_nowifi();
             if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
-            if (id(athan_core).radio_active() >= 0) d.filled_triangle(wifi_ok ? 108 : 86, 55, wifi_ok ? 108 : 86, 63, wifi_ok ? 114 : 92, 59);
-            d.display();
+            draw_radio();
+            finish();
             return;
           }
           // Line 2: next prayer and its time
@@ -1605,7 +1878,7 @@ script:
           }
           if (!wifi_ok) draw_nowifi();
           if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
-          if (id(athan_core).radio_active() >= 0) d.filled_triangle(wifi_ok ? 108 : 86, 55, wifi_ok ? 108 : 86, 63, wifi_ok ? 114 : 92, 59);
+          draw_radio();
           // Muted next prayer: strike through the last two letters of its name
           {
             int npi = id(next_prayer_index);
@@ -1618,7 +1891,7 @@ script:
               d.line(wh, sy, wf - 1, sy);
             }
           }
-          d.display();
+          finish();
 
 # ---------------------------------------------------------------------------------------------------------------------
 interval:
@@ -1663,6 +1936,13 @@ interval:
           static int shown = -2;
           const int r = id(athan_core).radio_active();
           if (r != shown) { shown = r; id(update_display).execute(); }
+          // Menu: back to the clock after 60 s without a press; redrawn every second while open (download
+          // progress, a list that loaded, the update check).
+          auto &menu = id(athan_core).menu();
+          if (menu.is_open()) {
+            if (millis() - id(ui_last_activity) >= 60000) menu.close();
+            id(update_display).execute();
+          }
       - script.execute: sync_web_state
   # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.
   - interval: 10s

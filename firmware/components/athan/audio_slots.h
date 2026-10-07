@@ -42,6 +42,9 @@ class AudioSlots {
   uint32_t duration_ms(int slot) const { return this->valid(slot) ? this->header_[slot].duration_ms : 0; }
   /// CRC-32 of the link the sound was downloaded from (source_id()), 0 for an upload or an unknown source.
   uint32_t source(int slot) const { return this->valid(slot) ? this->header_[slot].source_crc : 0; }
+  /// The sound's real format, from its own frames (0 if unknown). Playback compares the pipeline against it.
+  uint32_t sample_rate(int slot) const { return this->valid(slot) ? this->rate_[slot] : 0; }
+  uint8_t channels(int slot) const { return this->valid(slot) ? this->channels_[slot] : 0; }
   /// Written before the source was recorded (header version 1): only the label identifies the sound.
   bool legacy(int slot) const { return this->valid(slot) && this->header_[slot].version == 1; }
   /// Never 0, so 0 can mean "no link".
@@ -82,6 +85,8 @@ class AudioSlots {
   const uint8_t *map_ptr_[NUM_SLOTS]{};
   esp_partition_mmap_handle_t map_handle_[NUM_SLOTS]{};
   audio::AudioFile file_[NUM_SLOTS]{};
+  uint32_t rate_[NUM_SLOTS]{};
+  uint8_t channels_[NUM_SLOTS]{};
 };
 
 }  // namespace athan

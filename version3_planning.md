@@ -21,20 +21,22 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Topic | Plan said | Implemented |
 |---|---|---|
 | Files | `firmware/athan_v3.yaml`, component `athan_audio` | `firmware/athan.yaml`, component `firmware/components/athan/` (`DEVELOPER.md`) |
-| Radio defaults (7) | A "radio" list in the catalog and a **Reset Radio Stations** button | `docs/radio/stations.json` (exactly 10 stations) and a per-slot switch **Radio N follows project list** (on by default). A following slot fetches the list again on every play, so changing a link there reaches every following clock at its next play. Off = the slot's own link (`Radio N own link`). The OLED shows the station's name from the list |
+| Radio defaults (7) | A "radio" list in the catalog and a **Reset Radio Stations** button | `docs/radio/stations.json` (exactly 10 stations) and a per-slot switch **Radio N follows project list** (on by default). As built, the list stays in memory (fetched at boot and every 6 hours), so changing a link there reaches every following clock within 6 hours. Off = the slot's own link (`Radio N own link`). The OLED shows the station's name from the list |
 | Catalog (5) | Absolute URLs, a `radio` list | Lists `athan`, `fajr`, `tawashih`, `tick` only; a `url` may be relative to `docs/audio/`. Clocks re-read it every 12 h |
-| Preview (6.1) | 20 s | Plays until stopped, Next moves on, or a choice is made. The selected entry plays from flash, not the internet. A sound list opens on the selected entry and plays it. Downloading the selected entry again does nothing |
+| Preview (6.1) | 20 s | Plays until stopped, Left/Right move on, or a choice is made. The selected entry plays from flash, not the internet. A sound list opens on the selected entry and plays it. Downloading the selected entry again does nothing |
 | Location | Index persisted | The **key** is persisted (`selected_location_key`), so the Location list may be reordered or extended freely |
 | Generator (9.2, 9.3) | One script writes the V3 yearly file and the V2 daily files | Every script here writes **only** the V3 yearly file (one positional list per day). V2 daily files are produced in the V2 repository with its own scripts. `make_yearly_json.py` converts years that exist only as V2 daily files |
 | Built-in tones (4.1) | `audio_file` | `media_player: files:` from `firmware/sounds/click.mp3` and `volume.mp3` (V2's C3 and C2), added by the builder |
 | Stand-in mark (9.2) | Shape open | A small hollow square after the next prayer's time; "[estimated]" on the web page |
 | Wi-Fi setup screen (8.1) | Text open | `Wi-Fi setup:` / `BT: press Select` (or `allowed`, `joining..`) / `Hotspot: on` or `soon`. On that screen a Select press only authorises Bluetooth |
-| Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock** |
+| Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock**. All ten slots are listed (an empty one says "No link here"). On the clock, Up plays the slot chosen last, or stops the radio |
+| Buttons (3.1, 6.2) | Two buttons, Next and Select; a list menu | **One 5-way switch** (Up, Down, Left, Right, Select; owner's choice 2026-10-06). Clock screen: Left/Right = volume of what plays, Up = radio, Down = relay, Select = menu; Up/Down/Select stop the athan, tawashih, tick or a preview. The menu is two wheels (Up/Down rows, Left/Right items) with faded previews of the neighbours; Tick Window became the rows Tick From and Tick Until. Power-up: Select held = forget Wi-Fi, any direction held = unlock (README 1.3, CLAUDE.md "Keys and the menu") |
 | USB-C (3.1, 3.4) | 16-pin with USB data; flashing and logs over the charging cable | **6-pin power-only USB-C** (owner's choice 2026-10-05, with 5.1 kΩ CC resistors). The first flash and serial logs go through J6, a populated 1×6 UART header (GND, IO0, EN, TXD0, RXD0, 3V3; jumper 1–2 = download mode) with a 3.3 V USB-serial adapter; the firmware logs on UART0. Later updates go over Wi-Fi |
 | Empty slot | Download the default again at the next boot | Downloaded again automatically while online, at most every 30 min per slot (a missing default is not hammered) |
 
-Main menu as built (16 items): Athan, Fajr Athan, Tawashih, Hourly Tick, Tick Window, Athan On/Off, Pre-Fajr,
-Radio, Location, Volume, Fajr Volume, Clock, Update, Lock Buttons, Info, Cancel.
+Menu rows as built (16): Radio, Athan, Fajr Athan, Tawashih, Pre-Fajr, Hourly Tick, Tick From, Tick Until,
+Athan On/Off, Volume, Fajr Volume, Location, Clock, Update, Lock Buttons, Info. No Cancel item: Up from the first
+row or Down from the last returns to the clock.
 
 Still open: the sound files and their names in `docs/audio/catalog.json` (placeholders now), the F8 choice in
 5.1, and everything in section 13.
@@ -92,7 +94,7 @@ all (useful for prototyping).
 | Resistors and capacitors | Pull-ups, EN RC, decoupling, bulk | — |
 | 2-pin terminal: speaker (4 Ω 3 W, same speaker as today) | Back side | — |
 | 2-pin terminal: relay output (GPIO signal + GND, same as today, drives the external IoT relay) | Back side | — |
-| Two push buttons (Next, Select) | Back side | — |
+| 5-way switch (Up, Down, Left, Right, Select), 10 × 10 mm, 6-pin SMD | Back side, hand-soldered (HARDWARE.md 3.5) | — |
 | Status LED + resistor | Back side | — |
 | 4-pin OLED header (GND, VCC, SCL, SDA) | Back side; the SSD1306 module plugs in or is wired in the enclosure | — |
 | Programming pads, **unpopulated**: GND, 3V3, EN, GPIO0, TX0 (GPIO43), RX0 (GPIO44) | Recovery only (section 3.4) | — |
@@ -114,7 +116,7 @@ section 16.
 
 - **Front (top, SMD, assembled by the PCB house):** ESP32-S3 module, LDO, resistors and capacitors, MAX98357A,
   USB-C receptacle and its ESD part, the unpopulated programming pads.
-- **Back (bottom):** the two buttons, relay terminal, speaker terminal, status LED, OLED header.
+- **Back (bottom):** the 5-way switch, relay terminal, speaker terminal, status LED, OLED header.
 - Use through-hole parts on the back: they are soldered from the front, so the board needs only one-sided SMD
   assembly. SMD parts on both sides cost extra at assembly.
 - The module's antenna goes at a board edge, with no copper on either layer under or around it, no back-side part
@@ -135,7 +137,7 @@ section 16.
 | I2S BCLK / LRCLK / DOUT → MAX98357A | 5 / 6 / 7 | |
 | MAX98357A SD_MODE | 15 | Through 4.7 kΩ (changed 2026-10-06 from 560 kΩ; anything 1–47 kΩ): high = left channel only (the firmware sends the same mono samples in both I2S slots), low or floating (boot) = amp off, no idle hiss (`max98357a_amplifier.md` section 5) |
 | I2C SDA / SCL → OLED header | 8 / 9 | 4.7 kΩ pull-ups on the board |
-| Buttons Next / Select | 10 / 11 | Internal pull-ups, to GND, as today |
+| 5-way switch Up / Down / Left / Right / Select | 14 / 10 / 21 / 47 / 11 | Internal pull-ups, common pin to GND (HARDWARE.md 3.5). Down and Select are the old Next and Select pins |
 | Relay output | 12 | Series resistor, as today |
 | Status LED | 13 | |
 | USB D− / D+ | 19 / 20 | Native USB Serial/JTAG |
@@ -344,8 +346,9 @@ The behaviour stays exactly as today; only the name and its visibility change:
 
 - **Ten slots.** As built (decided 2026-10-05), each slot has a persisted switch **Radio N follows project
   list** (on by default) and a persisted text entity **Radio N own link** (up to 255 characters).
-  - A following slot plays station N of `docs/radio/stations.json` in this repository. The link is fetched again
-    before every play, so the project can move a station and every following clock picks it up.
+  - A following slot plays station N of `docs/radio/stations.json` in this repository. The list is fetched again
+    (as built: at boot and every 6 hours, kept in memory), so the project can move a station and every
+    following clock picks it up.
   - A slot that does not follow plays its own link. Empty slots are allowed.
 - Web page: the ten switches and link fields, **Play Radio**, **Stop Radio**, and a **Radio Station** select.
   There is no Reset button: switching a slot back to "follows project list" is the reset.
@@ -375,7 +378,7 @@ method) stays, so phones that cannot do Bluetooth setup, iPhones in particular, 
 
 - **New device** (no network saved at all): the hotspot and Bluetooth both start immediately at boot (confirmed in
   the ESPHome 2026.9 source, `WiFiComponent::start()`).
-- **After "forget Wi-Fi"** (both buttons held at power-up, as today): the reset saves a dummy network, so this
+- **After "forget Wi-Fi"** (Select held at power-up; on V2 both buttons): the reset saves a dummy network, so this
   behaves like the next case: Bluetooth after `wifi_timeout` (15 s), the hotspot after `ap_timeout` (about 3 min).
   Either way both methods end up available, and whichever finishes first wins.
 - **Saved network unreachable** (new router, changed password, or a router that is simply off): the device keeps
@@ -385,7 +388,7 @@ method) stays, so phones that cannot do Bluetooth setup, iPhones in particular, 
 - The OLED shows which methods are open (line 1 `Wi-Fi setup`, line 2 `Bluetooth`, later `BT + hotspot`; the
   hotspot name goes on the Info screen and in the README, it is too long for one line), and the status LED blinks
   the Improv states.
-- Holding one button at power-up still unlocks the buttons, as today.
+- Holding any of the four directions at power-up unlocks the buttons.
 
 ### 8.2 Method 1: Bluetooth (Improv)
 
@@ -647,7 +650,7 @@ coming from its own scripts (section 9.3 as built).
 
 Breadboard: **ESP32-S3-DevKitC-1 N16R8** (≈ €6–11; it carries the same ESP32-S3-WROOM-1-N16R8 module as the final
 board, so the firmware and partition table carry over unchanged) + a **MAX98357A breakout** (Adafruit 3006, $5.95,
-or a clone ≈ $3) + the current speaker, OLED and buttons. A regular XIAO ESP32S3 (8 MB flash) also works for
+or a clone ≈ $3) + the current speaker, OLED and the 5-way switch. A regular XIAO ESP32S3 (8 MB flash) also works for
 everything below except the full 3 MB slot sizes; shrink the slots in its partition table. Its 5V pin is USB VBUS
 directly (Seeed schematic v1.2), so the amp breakout can take its 5 V from there.
 
@@ -672,7 +675,11 @@ directly (Seeed schematic v1.2), so the amp breakout can take its 5 V from there
    changed in `docs/radio/stations.json`; an own link plays; behaviour after a router reboot is known.
 8. Radio playing: a scheduled athan pauses it and the same station comes back when the athan ends; the Pre-Fajr
    Tawashih does the same; Stop during the athan leaves the radio off; an hourly tick plays over the lowered radio.
-9. Web page, HA API, OLED and buttons respond while a stream plays; heap and PSRAM are stable over hours.
+9. Web page, HA API, OLED and the switch respond while a stream plays; heap and PSRAM are stable over hours.
+    The 5-way switch: each direction does what its name says as the owner faces the clock (else swap the pins in
+    the yaml); every menu row works from Up/Down/Left/Right/Select; quick browsing never restarts the board;
+    Left/Right change the volume of a playing athan and radio without stopping them; Up toggles the radio, Down
+    the relay; both power-up gestures work; the faded previews are readable on the real OLED.
 10. OTA from a GitHub Release (redirected asset URL) works; an ESP8266 device does not see it.
 11. 5 V current at full volume measured; no brownout resets; no audible Wi-Fi buzz.
 12. Prayer times: the generator script builds a yearly file for every published year, and they pass the device's checks.

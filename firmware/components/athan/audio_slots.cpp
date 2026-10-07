@@ -5,6 +5,8 @@
 
 #include "esphome/core/log.h"
 
+#include "mp3_check.h"
+
 #include <esp_heap_caps.h>
 #include <esp_rom_crc.h>
 
@@ -34,8 +36,9 @@ bool AudioSlots::begin() {
   for (int s = 0; s < NUM_SLOTS; s++) {
     this->valid_[s] = this->check_slot_(s);
     if (this->valid_[s]) {
-      ESP_LOGI(TAG, "Slot %s: '%s', %u bytes, %u s", SLOT_NAMES[s], this->header_[s].label,
-               (unsigned) this->header_[s].length, (unsigned) (this->header_[s].duration_ms / 1000));
+      ESP_LOGI(TAG, "Slot %s: '%s', %u bytes, %u s, %u Hz, %u ch", SLOT_NAMES[s], this->header_[s].label,
+               (unsigned) this->header_[s].length, (unsigned) (this->header_[s].duration_ms / 1000),
+               (unsigned) this->rate_[s], (unsigned) this->channels_[s]);
     } else {
       ESP_LOGI(TAG, "Slot %s: empty", SLOT_NAMES[s]);
     }
@@ -108,8 +111,14 @@ bool AudioSlots::check_slot_(int slot) {
   }
   this->header_[slot] = h;
   this->header_[slot].label[sizeof(h.label) - 1] = '\0';
-  this->file_[slot].data = data;
-  this->file_[slot].length = h.length;
+  // Hand the player the file from its first real frame: a decoder that syncs on a false header inside a tag or
+  // junk takes that header's sample rate for the whole file (wrong speed and pitch). Also note the real format.
+  Mp3Info info = mp3_scan(data, h.length);
+  const size_t skip = (info.ok && info.first_frame < h.length) ? info.first_frame : 0;
+  this->rate_[slot] = info.ok ? info.sample_rate : 0;
+  this->channels_[slot] = info.ok ? info.channels : 0;
+  this->file_[slot].data = data + skip;
+  this->file_[slot].length = h.length - skip;
 #ifdef USE_AUDIO_MP3_SUPPORT
   this->file_[slot].file_type = audio::AudioFileType::MP3;
 #endif

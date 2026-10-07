@@ -1,5 +1,6 @@
 #!/bin/bash
-# Host unit tests (no ESP32 needed): firmware/partitions.csv, and components/athan/tz_posix.cpp + mp3_check.cpp.
+# Host unit tests (no ESP32 needed): firmware/partitions.csv, and components/athan/tz_posix.cpp, mp3_check.cpp
+# and menu.cpp.
 # Needs: python3 (standard library), a C++17 compiler (c++/clang++/g++). Optional: ffprobe + some MP3 files.
 #
 #   firmware/tests/run_tests.sh                 # partition table, calendar, parser and time zone checks
@@ -86,3 +87,7 @@ for f in "$@"; do
   fi
 done
 "$OUT/test_helpers" "${ARGS[@]}"
+
+# Device menu navigation (components/athan/menu.cpp): rows, ends, wrapping, Select per row kind, lists that change.
+"$CXX" -std=c++17 -O1 -Wall -Wextra -o "$OUT/test_menu" test_menu.cpp ../components/athan/menu.cpp
+"$OUT/test_menu"

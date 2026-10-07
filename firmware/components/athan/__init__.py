@@ -1,7 +1,7 @@
 """athan: version 3 sounds, radio, yearly prayer times and the /audio page (see athan.h)."""
 
 import esphome.codegen as cg
-from esphome.components import audio, esp32, text
+from esphome.components import audio, esp32, speaker, text
 from esphome.components import time as time_
 from esphome.components.speaker.media_player import SpeakerMediaPlayer
 import esphome.config_validation as cv
@@ -12,6 +12,8 @@ DEPENDENCIES = ["esp32", "network", "psram", "web_server_base", "text"]
 AUTO_LOAD = ["json", "audio"]
 
 CONF_MEDIA_PLAYER = "media_player"
+CONF_MEDIA_SPEAKER = "media_speaker"
+CONF_ANNOUNCEMENT_SPEAKER = "announcement_speaker"
 CONF_DATA_URL = "data_url"
 CONF_RADIO_URLS = "radio_urls"
 
@@ -30,6 +32,10 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(AthanComponent),
             cv.Required(CONF_MEDIA_PLAYER): cv.use_id(SpeakerMediaPlayer),
+            # The first speaker of the media and announcement pipelines (their resamplers): every start waits for
+            # it to stop, and its format is checked against the sound's real one (wrong speed and pitch otherwise).
+            cv.Optional(CONF_MEDIA_SPEAKER): cv.use_id(speaker.Speaker),
+            cv.Optional(CONF_ANNOUNCEMENT_SPEAKER): cv.use_id(speaker.Speaker),
             cv.Required(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
             # Base URL of this repository's docs/ folder (catalog, stations, yearly prayer files).
             cv.Optional(
@@ -52,6 +58,10 @@ async def to_code(config):
     await cg.register_component(var, config)
     player = await cg.get_variable(config[CONF_MEDIA_PLAYER])
     cg.add(var.set_media_player(player))
+    if CONF_MEDIA_SPEAKER in config:
+        cg.add(var.set_media_speaker(await cg.get_variable(config[CONF_MEDIA_SPEAKER])))
+    if CONF_ANNOUNCEMENT_SPEAKER in config:
+        cg.add(var.set_announcement_speaker(await cg.get_variable(config[CONF_ANNOUNCEMENT_SPEAKER])))
     clock = await cg.get_variable(config[CONF_TIME_ID])
     cg.add(var.set_time(clock))
     cg.add(var.set_data_url(config[CONF_DATA_URL].rstrip("/")))

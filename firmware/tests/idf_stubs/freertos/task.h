@@ -11,3 +11,4 @@ TaskHandle_t xTaskGetCurrentTaskHandle();
 BaseType_t xTaskNotifyGive(TaskHandle_t);
 uint32_t ulTaskNotifyTake(BaseType_t, TickType_t);
 void vTaskSuspend(TaskHandle_t); void vTaskResume(TaskHandle_t);
+UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t);

@@ -66,9 +66,9 @@ iPhones cannot use Method 1 without the Home Assistant app, because Safari has n
 On a new clock both start right away. When a saved network has gone away, Bluetooth starts after 15 seconds and
 the hotspot after about 3 minutes, so a short router restart never opens it.
 
-**Forget the saved Wi-Fi:** unplug the clock, hold **both** buttons, and plug it back in. The LED blinks three
-times, the clock restarts, and it enters setup mode (Bluetooth after 15 seconds, the hotspot after about 3
-minutes).
+**Forget the saved Wi-Fi:** unplug the clock, hold **Select** (press the joystick straight in), and plug it back
+in. The LED blinks three times, the clock restarts, and it enters setup mode (Bluetooth after 15 seconds, the
+hotspot after about 3 minutes).
 
 **Your mosque:** a new clock starts with the first mosque in the list (Davis). Choose yours from the menu
 (**Location**) or on the web page. The clock downloads that mosque's year of prayer times. It also downloads
@@ -88,12 +88,13 @@ Rem 02:37      ▸ 🔒  time remaining, and status marks
 |---|---|
 | Small hollow square after the next prayer's time | **Estimated time.** This year's timetable is not published yet, so the clock uses the same date of last year (converted for daylight saving; at most about a minute off). It disappears when the real timetable arrives. Mosques often publish late, sometimes days into January, so this is normal |
 | Last two letters of the prayer's name struck through | The athan for that prayer is switched off |
-| Small filled triangle, bottom right | The radio is playing |
+| Small filled triangle with a number, bottom right | The radio is playing; the number is the radio slot (1–10). **Up** stops it |
 | Padlock, bottom right | The buttons are locked (1.3) |
 | Circled, crossed-out **W** | No Wi-Fi. The athan keeps working from the stored times |
 
 Other screens:
 - **Athan Time: Asr prayer** while the athan plays.
+- **A box over the clock for 2 seconds** after Left/Right (the volume and a bar) or Down (Relay ON/OFF).
 - **Struck-through rows** (lines through all three rows, with `--:--` where nothing is known) until the clock is set
   after a power-up; lines through rows 2 and 3 only until the day's prayer times are loaded. As on V2.
 - **Wi-Fi setup:** while Bluetooth setup or the hotspot is open, it shows `BT: press Select` / `BT: allowed` /
@@ -101,38 +102,51 @@ Other screens:
 
 ### 1.3 Buttons
 
-The clock has two buttons, **Next** and **Select**.
+The clock has one **5-way joystick**: **Up**, **Down**, **Left**, **Right**, and **Select** (press it straight in).
 
-On the normal screen:
+On the clock screen:
 
-- **While something plays** (athan, tawashih, tick, radio, a preview), either button stops it. Stopping the athan
-  also cancels the radio's automatic resume.
-- **When nothing plays:** Next switches the relay output on or off, and Select opens the menu.
-
-In the menu, **Next** moves and **Select** chooses. The menu closes by itself after 60 seconds without a press.
-
-| Menu item | What it does |
+| Key | What it does |
 |---|---|
-| **Athan** | Opens on the selected athan and plays it. Next steps through the suggested athans and plays a preview of each; the selected one always plays from the device. Select downloads the one showing and makes it the selected athan. Selecting the selected one again downloads nothing. A download takes up to a minute and the screen shows progress; the old sound stays until the new one has passed every check |
-| **Fajr Athan** | The same, for the Fajr athan. Previews play at the Fajr volume |
-| **Tawashih** | The same, for the Pre-Fajr Tawashih |
-| **Hourly Tick** | The same, plus **Off** as the first entry (where it opens while the tick is off). Choosing a tick switches the hourly tick on |
-| **Tick Window** | Start, End, Done. Select on Start or End edits it: Next adds an hour, Select goes back. Start = End means all day |
-| **Athan On/Off** | Fajr, Dhuhr, Asr, Maghrib, Isha, Done. Select switches the highlighted prayer's athan on or off |
-| **Pre-Fajr** | Switches Pre-Fajr Tawashih on or off, right there (the screen shows ON/OFF) |
-| **Radio** | Next steps through the radio slots that have something to play. Select plays the slot (or stops it, if it is the one playing) and returns to the clock |
-| **Location** | Next steps through the mosques. Select chooses one |
-| **Volume** | Each Next lowers the volume by 10 % and plays a tone; below 10 % it wraps to 100 %. Select keeps the setting |
-| **Fajr Volume** | The same, for the Fajr athan and the tawashih |
-| **Clock** | Switches between 24-hour and 12-hour display, right there |
-| **Update** | Select checks GitHub for new firmware. If there is one, the screen shows `-> 3.x.y ?`; Select again installs it. `check failed` means GitHub has no release yet or the clock is offline; Select tries again |
-| **Lock Buttons** | Locks the buttons and returns to the clock |
-| **Info** | Firmware version, IP address, `athan.local` |
-| **Cancel** | Back to the clock |
+| **Left / Right** | Volume down / up by 10 %, shown for 2 seconds. It changes the volume of whatever plays (the Fajr volume during the Fajr athan or the tawashih) and never stops it. With nothing playing, a short tone plays at the new volume. The keys stop at 10 %; 0 % (silent) is only in the menu or on the web page |
+| **Up** | Radio on or off. It plays the station chosen last (the number beside the play mark) |
+| **Down** | Relay output on or off |
+| **Select** | Opens the menu |
 
-**Button lock**, for clocks within children's reach: while locked, a press only stops what is playing. To unlock,
-use the **Buttons Locked** switch on the web page. You can also unplug the clock and plug it back in while holding
-**one** button: the LED blinks three times quickly. Holding both buttons forgets the Wi-Fi instead (1.1).
+While the athan, the tawashih, the tick or a preview plays, **Up**, **Down** and **Select** stop it instead. The
+radio is the exception: it keeps playing, so Up stops it, Select opens the menu and Down switches the relay as usual.
+Stopping the athan also cancels the radio's automatic resume.
+
+**The menu** is two wheels. **Up/Down** move between the menu's rows; the row's name is at the top, and each row is
+live as soon as you reach it: no "open" step. **Left/Right** move through that row's choices. Around the item in the
+middle you see faded previews of what is next: the choices to the left and right, the rows above and below with
+their current setting. A **check mark** marks what is in use, a **play mark** the radio station playing. Dots under
+the item show where you are in the row.
+
+**Select** takes the choice shown. Where nothing needs taking (the choice already in use, a volume, the tick
+hours, Info) it closes the menu. Up from the first row or Down from the last also returns to the clock (the faded
+preview there says **Home**), and so does 60 seconds without a press.
+
+| Row | Left/Right | Select |
+|---|---|---|
+| **Radio** | The ten radio slots (opens on the one chosen last) | Plays the slot shown, or stops it if it is playing, and returns to the clock |
+| **Athan** | The suggested athans, and **Custom** first if you uploaded one. Rest on one for half a second and its preview plays; the one in use plays from the device. The row opens on the athan in use and previews it (not while the radio plays: then only Left/Right preview, and the radio comes back when the menu closes) | Downloads the one shown and makes it the athan. Progress shows under it; the old sound stays until the new one has passed every check, then the check mark moves. Custom disappears once a download replaces it |
+| **Fajr Athan** | The same, for the Fajr athan. Previews play at the Fajr volume | The same |
+| **Tawashih** | The same, for the Pre-Fajr Tawashih | The same |
+| **Pre-Fajr** | Off, On | Takes it |
+| **Hourly Tick** | The ticks, with **Off** first | Takes it; any tick switches the hourly tick on |
+| **Tick From**, **Tick Until** | The hour, at once. The line under it shows the window; From = Until means all day | Closes |
+| **Athan On/Off** | Fajr, Dhuhr, Asr, Maghrib, Isha, each with On/Off | Switches the prayer shown |
+| **Volume**, **Fajr Volume** | 0–100 %, at once, with a tone at the new level | Closes |
+| **Location** | The mosques | Takes it; the clock downloads its prayer times |
+| **Clock** | 24-hour, 12-hour | Takes it |
+| **Update** | — | Checks GitHub for new firmware; when there is one, the item becomes **Install 3.x.y** and Select installs it. `Check failed` means GitHub has no release yet or the clock is offline |
+| **Lock Buttons** | — | Locks the buttons and returns to the clock |
+| **Info** | IP address, `athan.local`, firmware version | Closes |
+
+**Button lock**, for clocks within children's reach: while locked, any key only stops what is playing. To unlock,
+use the **Buttons Locked** switch on the web page, or unplug the clock and plug it back in while holding **any of
+the four directions**: the LED blinks three times quickly. (Holding Select instead forgets the Wi-Fi, 1.1.)
 
 ### 1.4 The web page
 
@@ -155,15 +169,17 @@ The same entities show up in Home Assistant when you add the device there (ESPHo
 
 Open it from the **Change Sounds At** link on the device page, or type the address. A status bar stays at the top
 of the page, with a **Stop** button for previews. Every button reports there, so the page never reloads or jumps
-back to the top. After a download or upload, the bar offers **Reload page** to show the new sound. For each of the four
-sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
+back to the top. After a download or upload, the bar offers **Reload page** to show the new sound. For each of
+the four sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
 
 - **Selected:** the name and length of the sound stored on the clock, the one it plays.
 - **The suggested list** from this project, with **Preview** and **Download** for each entry. The selected entry is
   marked *selected*. Preview stores nothing: the selected entry plays from the clock, any other streams from the
   internet. Download fetches the entry, checks it, and only then replaces the selected sound. Downloading the
   selected entry does nothing. To fetch it again, download another entry and then this one.
-- **Upload your own:** pick an MP3 file on your phone or computer and press Upload.
+- **Upload your own:** pick an MP3 file on your phone or computer and press Upload. The uploaded sound then shows
+  at the top of the list as **Custom**, with **Preview**, and in the clock's menu as **Custom** too. It stays
+  until you download a list entry for that sound, which replaces it.
 
 Limits, checked before anything is replaced:
 
@@ -172,13 +188,47 @@ Limits, checked before anything is replaced:
 | Athan, Fajr athan, tawashih | 3 MB | 5 minutes |
 | Hourly tick | 0.4 MB | 1 minute |
 
-The file must be an MP3. A 5-minute recording fits in 3 MB at 64 kbps mono. To shrink one, use
-`ffmpeg -i in.mp3 -map 0:a -map_metadata -1 -ac 1 -b:a 64k out.mp3`.
+The file must be an MP3. A 5-minute recording fits in 3 MB at 64 kbps mono.
 
 **The clock plays only the left channel.** A mono file always plays in full. A stereo file plays only its left
 channel, so the whole sound must be in that channel. A recording with something only on the right (a voice or an
-echo) loses it. The `ffmpeg … -ac 1` command above mixes both channels into one, which makes any file safe. The
-amplifier is wired for left only because its mono-mix mode caused audible artifacts during testing.
+echo) loses it. Converting the file to mono, as below, makes any recording safe. The amplifier is wired for left
+only because its mono-mix mode caused audible artifacts during testing.
+
+#### Preparing your own file with ffmpeg
+
+1. Install [ffmpeg](https://ffmpeg.org) once: `brew install ffmpeg` (macOS), `winget install ffmpeg` (Windows) or
+   `sudo apt install ffmpeg` (Debian, Ubuntu).
+2. See what the file is:
+
+   ```bash
+   ffprobe -v error -show_entries stream=channels,sample_rate:format=duration,size -of default=nw=1 in.mp3
+   ```
+
+   `channels=1` is mono, `channels=2` is stereo. `duration` is in seconds and `size` in bytes; compare them with
+   the limits above.
+3. Convert it to mono. This mixes both channels into one, so nothing from either side is lost:
+
+   ```bash
+   ffmpeg -i in.mp3 -map 0:a -map_metadata -1 -ac 1 -ar 44100 -b:a 64k out.mp3
+   ```
+
+   | Part | What it does |
+   |---|---|
+   | `-map 0:a -map_metadata -1` | Keeps only the audio, without cover art or tags (the clock does not need them) |
+   | `-ac 1` | One channel: mono |
+   | `-ar 44100` | 44.1 kHz, the clock's own rate, so it plays without resampling |
+   | `-b:a 64k` | 64 kbps: 5 minutes ≈ 2.4 MB. For an hourly tick use `-b:a 48k` |
+
+   The input can be any format ffmpeg reads (WAV, M4A, a video, …). The output is MP3 because the name ends in
+   `.mp3`.
+4. If the mono version sounds hollow or thin (the two channels cancel each other, which is rare), or one channel
+   is only noise, keep a single channel instead of mixing. Replace `-ac 1` with `-af "pan=mono|c0=c0"` for the
+   left channel, or `-af "pan=mono|c0=c1"` for the right one.
+5. If it is longer than the limit, add `-t 300` (5 minutes) or, for a tick, `-t 60` before `out.mp3` to cut it
+   there.
+6. Run the `ffprobe` command from step 2 on `out.mp3`: it should say `channels=1` and fit the limits. Then upload
+   it.
 
 A failed download, a file that is too big or
 too long, or a file that is not MP3 never touches the selected sound. The page says why it refused. A download
@@ -189,20 +239,70 @@ is refused while that sound is playing.
 There are ten slots. Each one has two settings on the web page:
 
 - **Radio N follows project list** (on by default): the slot plays station N of this project's list,
-  [docs/radio/stations.json](docs/radio/stations.json). The clock fetches the link fresh every time you play
-  the slot, so if a station moves, the project updates the list and every clock follows.
-- **Radio N own link:** switch "follows project list" off and paste any stream link here. If an `https://` link
-  forwards to an `http://` server, the clock refuses the switch: paste the `http://` form of the link instead.
+  [docs/radio/stations.json](docs/radio/stations.json). The clock keeps the list in memory, loaded at start-up
+  and refreshed every 6 hours, so a station starts at once and switching between them is quick. If a station
+  moves, the project updates the list and every clock follows within 6 hours (sooner if that station stops
+  working on a clock).
+- **Radio N own link:** switch "follows project list" off and paste a stream link here (see "Adding your own
+  station" below). The screen then shows "own link" for that slot instead of a station name.
 
-Play it from the menu (**Radio**), or with **Radio Station** + **Play Radio** on the web page.
+Play it from the menu (**Radio**), or with **Radio Station** + **Play Radio** on the web page. The **Radio
+Station** list shows each slot's name from the project list ("Radio 1 Cairo Quran"), "(own link)" for a slot
+with its own link, and just "Radio N" until the list has loaded. Reload the page to see names that loaded after
+it opened.
 
-- **Supported:** direct MP3, Opus or FLAC stream links (http or https). Not supported: AAC-only stations and HLS
-  (`.m3u8`). For a `.m3u` or `.pls` link, open the file in a text editor and use the stream URL inside it.
 - **At prayer time** the athan pauses the radio, and the same station comes back when the athan ends. The
   Pre-Fajr Tawashih does the same. If you stop the athan yourself, the radio stays off.
 - **The hourly tick** plays over the radio while the radio is turned down for a moment.
 - **If the stream drops** (for example the router restarts), the clock reconnects up to three times, then stops
   and shows the reason under Radio Status.
+- **Wrong speed safeguard:** after every start, and every 3 minutes while the radio plays, the clock compares the
+  format it is playing with the stream's real one and restarts the stream if they differ, so Quran never plays
+  sped up or slowed down. The same check runs for previews and for the stored sounds.
+
+#### Adding your own station
+
+A link works when all of these are true:
+
+- **It is the stream itself**, not a web page with a player. Pages on TuneIn, YouTube or a station's own site do
+  not work. If the link opens a bare audio player in the browser and starts playing, it is a stream.
+- **The format is MP3**, the safest choice, or Opus, FLAC or WAV. The clock reads the format from the server's
+  `Content-Type` (`audio/mpeg`, `audio/ogg; codecs=opus`, `audio/flac`, `audio/wav`). If the server sends no type
+  it knows, it reads the link's ending (`.mp3`, `.opus`, `.flac`, `.wav`). **Not supported:** AAC or AAC+
+  (`audio/aac`, `audio/aacp`, common on Shoutcast stations), Ogg Vorbis, and HLS (`.m3u8`).
+- **It is not a playlist file.** A `.m3u` or `.pls` link is a small text file: open it in a text editor and paste
+  the `http…` line inside it.
+- **`http://` or `https://`.** HTTPS needs a certificate from a common authority; for a site with a self-signed
+  certificate, use its `http://` link. An `https://` link that forwards to an `http://` server is refused, so
+  paste the `http://` form instead. The project's Cairo station is an example (3.3).
+- **It does not expire.** Some services forward to a link with a one-time token (`…?rj-tok=…`) that stops
+  working within seconds. Paste the link from before the forward, never the one the browser ends up on.
+- **At most 255 characters.**
+
+A stereo station plays only its left channel (1.5). That loses nothing on nearly every station, because both
+channels carry the same sound. Any sample rate works; 44.1 kHz plays without resampling. 64 to 128 kbps MP3 is
+plenty for one speaker.
+
+**Where to find links:**
+
+- **Quran stations:** [mp3quran.net/eng/radios](https://www.mp3quran.net/eng/radios) lists over 170 stations by
+  reciter, all MP3 over HTTPS. The project's own list uses these. The same list as data, with each station's
+  `url`: <https://www.mp3quran.net/api/v3/radios?language=eng>.
+- **Any station:** [radio-browser.info](https://www.radio-browser.info) is an open directory of tens of thousands
+  of stations. Search for one, check that its codec says **MP3**, and copy its stream link.
+- **A station's own website:** look for "direct link", "listen in your player" or a `.m3u` / `.pls` download.
+  Another way: in Chrome, start the station's web player, open **Developer Tools → Network → Media**, and copy the
+  address of the request that keeps loading. Skip it if that address ends in `.m3u8` (HLS).
+
+**Test a link before pasting it** (macOS and Linux have `curl`; on Windows use PowerShell's `curl.exe`):
+
+```bash
+curl -sI -X GET --max-time 5 <link>
+```
+
+You want `HTTP/… 200` and a `content-type` from the list above. A `302` with `location: https://…` is fine: the
+clock follows up to five forwards. A `location: http://…` answer to an `https://` link means: use `http://`. Then
+paste it into **Radio N own link**, switch **Radio N follows project list** off, and play the slot.
 
 ### 1.7 Prayer times
 
@@ -247,7 +347,7 @@ succeeded once. That needs a published release (3.4) and internet.
 |---|---|
 | ESP32-S3-WROOM-1-**N16R8** module (16 MB flash, 8 MB PSRAM), LCSC C2913202 | the board's processor |
 | MAX98357A amplifier (MAX98357AETE+T, LCSC C910544) | I2S DAC + 3 W amplifier |
-| 4 Ω 3 W speaker, SSD1306 128×64 I2C OLED, two push buttons, an LED | |
+| 4 Ω 3 W speaker, SSD1306 128×64 I2C OLED, a 5-way joystick switch (10 × 10 mm), an LED | |
 | USB-C 6-pin (power only), 3.3 V LDO, passives | |
 | 1×6 programming header (J6) + a 3.3 V USB-serial adapter (CP2102/CH340) | first flash only |
 
@@ -255,7 +355,7 @@ The full parts list, the pin map, and instructions for the PCB and the enclosure
 [HARDWARE.md](HARDWARE.md). The amplifier circuit is in [max98357a_amplifier.md](max98357a_amplifier.md).
 
 **Prototype on a breadboard** first: an **ESP32-S3-DevKitC-1 N16R8** (same module), an Adafruit MAX98357A breakout
-(3006) or a clone, and the OLED, buttons and speaker. The wiring is in HARDWARE.md section 2. The firmware and
+(3006) or a clone, and the OLED, the 5-way switch and speaker. The wiring is in HARDWARE.md section 2. The firmware and
 flash layout are the same as on the final board. Wire the breakout's SD pin to GPIO15 through 4.7 kΩ (left
 channel). Left unconnected, SD puts the breakout in its mono-mix mode, which gives audible artifacts.
 
@@ -309,7 +409,9 @@ Wi-Fi updates (from both scripts) go only to a clock that serves the V3 `/audio`
    4. Remove the jumper, then unplug and replug the USB-C.
 
    On a DevKitC prototype, just plug in its USB port; it enters download mode by itself. Serial logs come out on
-   UART0 (J6 pins 4/5, or the DevKitC's UART port): `./build_firmware.sh logs /dev/cu.usbserial-…`.
+   UART0 (J6 pins 4/5, or the DevKitC's UART port): `./build_firmware.sh logs /dev/cu.usbserial-…`. How much it
+   logs is `log_level` at the top of `firmware/athan.yaml`: `DEBUG` while testing, `WARN` (or `NONE`) for a
+   finished build.
 4. Later flashes can go over Wi-Fi (`./build_firmware.sh ota`), or the clock can update itself from GitHub
    Releases (3.4).
 
@@ -395,8 +497,9 @@ named.
 
 [docs/radio/stations.json](docs/radio/stations.json) has exactly 10 entries; slot *k* of a subscribed clock plays
 entry *k*. Change a link there and every subscribed clock uses it the next time that slot plays. An empty `url`
-makes that slot empty for subscribers. Names follow the same 12-character rule. Like the sounds (1.5), a stereo
-station plays only its left channel. Check each link with
+makes that slot empty for subscribers. Names follow the same 12-character rule. Every link must meet the rules
+in 1.6 ("Adding your own station"); like the sounds (1.5), a stereo station plays only its left channel. Check
+each link with
 `curl -sI -X GET --max-time 5 <url>`. A `Location: http://…` answer to an `https://` link means the clock will
 refuse it, because ESP-IDF blocks HTTPS-to-HTTP redirects. Use an HTTPS source that answers `200` directly, or
 list the `http://` form. Egypt's Quran Radio is an example: its official radiojar link

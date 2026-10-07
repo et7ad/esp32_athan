@@ -50,8 +50,9 @@ FLAGS=(-std=gnu++20 "${DEFS[@]}" -I"$B" -I"$STUBS" -fsyntax-only -ferror-limit=0
 
 fail=0
 echo "== components/athan"
-for f in athan audio_slots prayer_store tz_posix mp3_check; do
-  out=$("$CXX" "${FLAGS[@]}" -Wall -Wextra -Wno-unused-parameter "$B/esphome/components/athan/$f.cpp" 2>&1 \
+for p in "$B"/esphome/components/athan/*.cpp; do
+  f=$(basename "$p" .cpp)
+  out=$("$CXX" "${FLAGS[@]}" -Wall -Wextra -Wno-unused-parameter "$p" 2>&1 \
         | grep -E "components/athan/[^:]+:[0-9]+:[0-9]+: (error|warning)" || true)
   if [ -n "$out" ]; then echo "$out" | sed "s|$B/||"; fail=1; else echo "   $f.cpp ok"; fi
 done
