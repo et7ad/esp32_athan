@@ -11,7 +11,7 @@ Status: nothing is drawn yet. Build the prototype (section 2) and run its checkl
 
 ```text
 USB-C 6-pin (5 V only) ──┬── 5 V rail ──┬── MAX98357A (VDD) ── speaker terminal (OUTP/OUTN, 4 Ω 3 W)
-   CC1/CC2 5.1 kΩ        │   bulk cap   │        ▲ I2S BCLK/LRCLK/DIN, SD_MODE (560 kΩ)
+   CC1/CC2 5.1 kΩ        │   bulk cap   │        ▲ I2S BCLK/LRCLK/DIN, SD_MODE (4.7 kΩ)
                          │              │        │
                          └── LDO 3.3 V ─┴── ESP32-S3-WROOM-1-N16R8 ── I2C ── OLED header (SSD1306)
                                                  ├── Next / Select buttons (to GND)
@@ -23,7 +23,7 @@ USB-C 6-pin (5 V only) ──┬── 5 V rail ──┬── MAX98357A (VDD) 
 ## 2. Prototype on a breadboard (do this first)
 
 Parts: **ESP32-S3-DevKitC-1 N16R8**, an **Adafruit MAX98357A breakout (3006)** or a clone, the speaker, a
-128×64 SSD1306 I2C OLED, two push buttons, an LED + 1 kΩ, and a 560 kΩ resistor (any 470–680 kΩ).
+128×64 SSD1306 I2C OLED, two push buttons, an LED + 1 kΩ, and a 4.7 kΩ resistor for the amp's SD pin.
 
 | From (DevKitC pin) | To | Notes |
 |---|---|---|
@@ -42,14 +42,10 @@ Parts: **ESP32-S3-DevKitC-1 N16R8**, an **Adafruit MAX98357A breakout (3006)** o
 | GPIO12 | 1 kΩ → relay input (or an LED to see it) | |
 | GPIO13 | 1 kΩ → LED → GND | status LED |
 
-**SD on the breakout:** the Adafruit board already has 1 MΩ from SD to Vin, which keeps the amp on in mono mode.
-Do **not** add our 560 kΩ next to it. Together they put SD at about 0.4 V with GPIO15 low (amp still on) and
-about 0.85 V with GPIO15 high (right channel only). Pick one:
-
-- **Simplest:** leave SD unconnected and GPIO15 unused. The amp is always on (it idles in standby when I2S stops).
-  Fine for everything except the "no hiss / no pop" checks.
-- **Faithful to the PCB:** remove the breakout's 1 MΩ (or cut its trace), then wire GPIO15 → 560 kΩ → SD.
-  Clones vary; measure SD first.
+**SD on the breakout:** wire GPIO15 → 4.7 kΩ → SD, as on the PCB. The breakout's own 1 MΩ from SD to Vin can
+stay: with GPIO15 low the 4.7 kΩ pulls SD to about 0.02 V (shutdown), with GPIO15 high to about 3.1 V (left
+channel). Don't leave SD unconnected: the breakout then sits in its mono-mix mode, which gave audible artifacts in
+testing, and it never shuts down.
 
 Flash it over either DevKitC port and watch the log on its **UART** port: the firmware logs on UART0, which on the
 final board is the J6 header. Then run `version3_planning.md` section 13. The firmware, partition table and pins
@@ -120,7 +116,7 @@ Adafruit 3006 board and the plan. Net names in **bold** match the firmware.
 | **I2S_BCLK** | 5 | MAX98357A BCLK (pin 16) |
 | **I2S_LRCLK** | 6 | MAX98357A LRCLK (pin 14) |
 | **I2S_DOUT** | 7 | MAX98357A DIN (pin 1) |
-| **AMP_SD** | 15 | 560 kΩ → MAX98357A SD_MODE (pin 4) |
+| **AMP_SD** | 15 | 4.7 kΩ → MAX98357A SD_MODE (pin 4), left channel |
 | **I2C_SDA** | 8 | OLED header SDA, 4.7 kΩ to +3V3 |
 | **I2C_SCL** | 9 | OLED header SCL, 4.7 kΩ to +3V3 |
 | **BTN_NEXT** | 10 | Next button to GND |
@@ -135,7 +131,7 @@ Copy `max98357a_amplifier.md` section 3 exactly:
 
 - MAX98357AETE+T (LCSC C910544), TQFN-16 with exposed pad to GND.
 - 10 µF + 100 nF at VDD.
-- SD_MODE through 560 kΩ from GPIO15.
+- SD_MODE through 4.7 kΩ from GPIO15: high = left channel only, low = shutdown.
 - 2×3 gain jumper header (no jumper = 9 dB). As `Conn_02x03_Odd_Even`: pins 3 and 4 = GAIN, 2 = +5V (2–4: 6 dB),
   6 = GND (4–6: 12 dB), 1 = 100 kΩ to +5V (1–3: 3 dB), 5 = 100 kΩ to GND (3–5: 15 dB).
 - OUTP/OUTN straight to the speaker terminal, no output filter.
@@ -172,7 +168,7 @@ Removed compared with V2: DFPlayer, microSD, 3.5 mm jack, the on-board display f
 | 2 | 4.7 kΩ (I2C pull-ups) | Basic part | front |
 | 2 | 100 kΩ (gain header: 3 dB and 15 dB positions) | Basic part | front |
 | 2 | 1 kΩ (LED, relay) | Basic part | front |
-| 1 | 560 kΩ ±5 % or better (SD_MODE; safe range 470–680 kΩ, never 1 MΩ) | Basic/Extended | front |
+| 1 | 4.7 kΩ (SD_MODE, left channel; anything 1–47 kΩ) | Basic part | front |
 | 1 | 1 µF (EN) | Basic | front |
 | 2 | 100 nF (3V3, amp VDD) | Basic | front |
 | 1 | 22 µF (3V3 at the module, also the LDO output cap) | Basic | front |
@@ -205,7 +201,7 @@ pins. If you fit them through-hole, put them within a few mm of the pins with sh
 |---|---|---|---|
 | R1, R2 | 5.1 kΩ 1% | Yageo MFR-25FBF52-5K1 | Yageo RC1206FR-075K1L |
 | R3 (R4 optional) | 10 kΩ 1% | Yageo MFR-25FBF52-10K | Yageo RC1206FR-0710KL |
-| R5 | 560 kΩ 1% (any 470–680 kΩ) | Yageo MFR-25FBF52-560K | Yageo RC1206FR-07560KL |
+| R5 | 4.7 kΩ 1% (any 1–47 kΩ) | Yageo MFR-25FBF52-4K7 | Yageo RC1206FR-074K7L |
 | R6, R7 | 100 kΩ 1% | Yageo MFR-25FBF52-100K | Yageo RC1206FR-07100KL |
 | R8, R9 | 4.7 kΩ 1% | Yageo MFR-25FBF52-4K7 | Yageo RC1206FR-074K7L |
 | R10, R11 | 1 kΩ 1% | Yageo MFR-25FBF52-1K | Yageo RC1206FR-071KL |

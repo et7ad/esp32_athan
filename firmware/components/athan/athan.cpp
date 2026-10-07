@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <strings.h>
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/network/util.h"
@@ -82,6 +83,11 @@ class AudioWebHandler : public AsyncWebHandler {
       request->send(200, "text/html; charset=utf-8", page.c_str());
       return;
     }
+    if (request->method() == HTTP_GET && url == "/audio/status") {
+      std::string bar = this->parent_->render_audio_status(std::strtoul(request->arg("g").c_str(), nullptr, 10));
+      request->send(200, "text/html; charset=utf-8", bar.c_str());
+      return;
+    }
     if (request->method() == HTTP_POST) {
       int a = std::atoi(request->arg("list").c_str());
       int b = std::atoi(request->arg("entry").c_str());
@@ -91,8 +97,9 @@ class AudioWebHandler : public AsyncWebHandler {
         this->parent_->web_action(AthanComponent::WebAction::PREVIEW, a, b);
       else if (url == "/audio/stop")
         this->parent_->web_action(AthanComponent::WebAction::STOP, 0, 0);
-      // /audio/upload: the file already arrived through handleUpload()
-      request->redirect("/audio");
+      // /audio/upload: the file already arrived through handleUpload().
+      // Every form posts into the page's status bar (an iframe), so the answer is the bar, not the page.
+      request->redirect("/audio/status?g=" + std::to_string(std::strtoul(request->arg("g").c_str(), nullptr, 10)));
       return;
     }
     request->send(404, "text/plain", "Not found");
@@ -173,6 +180,7 @@ void AthanComponent::loop() {
       this->playing_seen_ = true;
     } else if (this->playing_seen_ || millis() - this->playing_since_ > 5000) {
       this->playing_slot_ = -1;
+      this->slot_preview_ = false;
     }
   }
 
@@ -247,11 +255,23 @@ void AthanComponent::run_job_(Job &job) {
   }
 }
 
+// Keeps the response's ETag (http_get_'s user_data is a std::string).
+static esp_err_t capture_etag(esp_http_client_event_t *evt) {
+  if (evt->event_id == HTTP_EVENT_ON_HEADER && evt->user_data != nullptr && evt->header_key != nullptr &&
+      evt->header_value != nullptr && strcasecmp(evt->header_key, "ETag") == 0)
+    *static_cast<std::string *>(evt->user_data) = evt->header_value;
+  return ESP_OK;
+}
+
 AthanComponent::HttpResult AthanComponent::http_get_(const std::string &url, size_t max_len, uint8_t **out,
-                                                     size_t *out_len, int progress_slot) {
+                                                     size_t *out_len, int progress_slot,
+                                                     const std::string &if_none_match, std::string *etag_out) {
   *out = nullptr;
   *out_len = 0;
+  std::string etag;
   esp_http_client_config_t cfg = {};
+  cfg.event_handler = capture_etag;
+  cfg.user_data = &etag;
   cfg.url = url.c_str();
   cfg.timeout_ms = 20000;
   cfg.crt_bundle_attach = esp_crt_bundle_attach;
@@ -262,11 +282,14 @@ AthanComponent::HttpResult AthanComponent::http_get_(const std::string &url, siz
   esp_http_client_handle_t client = esp_http_client_init(&cfg);
   if (client == nullptr)
     return HttpResult::FAILED;
+  if (!if_none_match.empty())
+    esp_http_client_set_header(client, "If-None-Match", if_none_match.c_str());
 
   HttpResult result = HttpResult::FAILED;
   int64_t content_length = -1;
   int status = 0;
   for (int redirects = 0;; redirects++) {
+    etag.clear();  // only the final response's ETag counts
     if (esp_http_client_open(client, 0) != ESP_OK) {
       ESP_LOGW(TAG, "Cannot reach %s", url.c_str());
       esp_http_client_cleanup(client);
@@ -284,6 +307,10 @@ AthanComponent::HttpResult AthanComponent::http_get_(const std::string &url, siz
   if (status == 404) {
     esp_http_client_cleanup(client);
     return HttpResult::NOT_FOUND;
+  }
+  if (status == 304 && !if_none_match.empty()) {
+    esp_http_client_cleanup(client);
+    return HttpResult::NOT_MODIFIED;
   }
   if (status != 200) {
     ESP_LOGW(TAG, "HTTP %d for %s", status, url.c_str());
@@ -344,6 +371,8 @@ AthanComponent::HttpResult AthanComponent::http_get_(const std::string &url, siz
   buf[len] = 0;  // handy for JSON
   *out = buf;
   *out_len = len;
+  if (etag_out != nullptr)
+    *etag_out = etag;
   return HttpResult::OK;
 }
 
@@ -432,10 +461,31 @@ void AthanComponent::preview_catalog(int list, int entry) {
     url = this->catalog_[list][entry].url;
     name = this->catalog_[list][entry].name;
   }
+  if (this->playing_slot_ >= 0 && !this->slot_preview_) {
+    this->set_sound_status_("A sound is playing: preview after it");  // never cut the athan or the tick
+    return;
+  }
   this->radio_station_ = -1;  // a preview replaces the radio
   this->radio_token_++;
+  if (entry == this->installed_entry(list)) {
+    // The installed entry plays from flash: nothing is downloaded and it works without internet.
+    if (this->player_ != nullptr)
+      this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(false).perform();
+    if (this->play_slot(list)) {
+      this->slot_preview_ = true;
+      this->set_sound_status_("Playing " + name + " from the device");
+      return;
+    }
+  }
+  this->stop_slot_preview_();
   this->start_stream_(url);
   this->set_sound_status_("Previewing " + name);
+}
+
+void AthanComponent::stop_slot_preview_() {
+  // playing_slot_ stays set until the player has really stopped (loop()), so the slot is not rewritten under it.
+  if (this->slot_preview_ && this->playing_slot_ >= 0 && this->player_ != nullptr)
+    this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
 }
 
 void AthanComponent::stop_media() {
@@ -443,6 +493,7 @@ void AthanComponent::stop_media() {
   this->radio_station_ = -1;
   if (this->player_ != nullptr)
     this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(false).perform();
+  this->stop_slot_preview_();
   this->set_radio_status_("Radio off");
 }
 
@@ -462,7 +513,25 @@ bool AthanComponent::play_slot(int slot) {
   this->playing_slot_ = slot;
   this->playing_since_ = millis();
   this->playing_seen_ = false;
+  this->slot_preview_ = false;  // preview_catalog() sets it again for a preview
   return true;
+}
+
+int AthanComponent::installed_entry(int slot) const {
+  if (slot < 0 || slot >= NUM_SLOTS || !this->slots_.valid(slot))
+    return -1;
+  const uint32_t source = this->slots_.source(slot);
+  const bool legacy = this->slots_.legacy(slot);  // installed before the link was recorded: match the name
+  if (source == 0 && !legacy)
+    return -1;  // an uploaded file
+  const std::string label = legacy ? this->slots_.label(slot) : std::string();
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  for (size_t e = 0; e < this->catalog_[slot].size(); e++) {
+    const NamedUrl &n = this->catalog_[slot][e];
+    if (legacy ? n.name == label : AudioSlots::source_id(n.url) == source)
+      return static_cast<int>(e);
+  }
+  return -1;
 }
 
 void AthanComponent::install_from_catalog(int slot, int entry) {
@@ -477,7 +546,7 @@ void AthanComponent::install_from_catalog(int slot, int entry) {
     }
     e = this->catalog_[slot][entry];
   }
-  if (this->playing_slot_ >= 0) {
+  if (this->playing_slot_ >= 0 && !this->slot_preview_) {
     this->set_sound_status_("Busy: a sound is playing, try again after it");
     return;
   }
@@ -485,19 +554,37 @@ void AthanComponent::install_from_catalog(int slot, int entry) {
     this->set_sound_status_("Busy with another sound, try again in a moment");
     return;
   }
-  this->set_sound_status_("Downloading " + e.name);
+  this->stop_slot_preview_();  // stopped long before the download ends and the slot is rewritten
   Job job;
   job.type = JobType::INSTALL_URL;
   job.slot = slot;
   job.url = e.url;
   job.label = e.name;
+  if (entry == this->installed_entry(slot)) {
+    job.etag = this->slots_.etag(slot);
+    if (job.etag.empty()) {
+      // No ETag to ask the server with: the link alone says the file on the device is this entry.
+      this->sound_busy_ = false;
+      this->set_sound_status_(e.name + " is already installed");
+      return;
+    }
+    this->set_sound_status_("Checking " + e.name);  // downloads only if the file changed on the server
+  } else {
+    this->set_sound_status_("Downloading " + e.name);
+  }
   this->enqueue_(std::move(job));
 }
 
 void AthanComponent::job_install_url_(Job &job) {
   uint8_t *buf;
   size_t len;
-  HttpResult r = this->http_get_(job.url, SLOT_MAX_BYTES[job.slot], &buf, &len, job.slot);
+  std::string etag;
+  HttpResult r = this->http_get_(job.url, SLOT_MAX_BYTES[job.slot], &buf, &len, job.slot, job.etag, &etag);
+  if (r == HttpResult::NOT_MODIFIED) {
+    this->set_sound_status_(job.label + " is already installed (same file)");
+    this->sound_busy_ = false;
+    return;
+  }
   if (r != HttpResult::OK) {
     switch (r) {
       case HttpResult::NOT_FOUND: this->set_sound_status_(job.label + ": file not found on GitHub"); break;
@@ -510,10 +597,11 @@ void AthanComponent::job_install_url_(Job &job) {
     this->sound_busy_ = false;
     return;
   }
-  this->job_commit_(job.slot, buf, len, job.label);
+  this->job_commit_(job.slot, buf, len, job.label, AudioSlots::source_id(job.url), etag);
 }
 
-void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std::string &label) {
+void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source,
+                                 const std::string &etag) {
   auto fail = [this, data](const std::string &msg) {
     heap_caps_free(data);
     this->set_sound_status_(msg);
@@ -570,7 +658,7 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
   }
   this->set_sound_status_("Saving " + label);
   bool ok = this->slots_.write(
-      slot, data, len, info.duration_ms, label,
+      slot, data, len, info.duration_ms, label, source, etag,
       [](void *ctx, int pct) {
         static_cast<AthanComponent *>(ctx)->set_sound_status_("Saving " + std::to_string(pct) + "%");
       },
@@ -578,6 +666,7 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
   heap_caps_free(data);
   this->defer([this, slot, ok, label, info]() {
     this->slots_.reload(slot);
+    this->sounds_changed_++;  // the slot changed either way (new sound, or empty after a failed write)
     if (ok && this->slots_.valid(slot)) {
       this->set_sound_status_("Installed " + label + " (" + fmt_duration(info.duration_ms) + ")");
     } else {
@@ -1078,37 +1167,41 @@ std::string AthanComponent::prayer_status() const {
 // ==============================================================================================================
 // /audio page
 // ==============================================================================================================
+// The page never reloads on an action: every form posts into the status bar at the top (an iframe named "st"),
+// which answers with /audio/status. Plain HTML, no JavaScript.
+static const char AUDIO_FONT[] = "font-family:-apple-system,Segoe UI,Roboto,sans-serif;";
+
 std::string AthanComponent::render_audio_page() {
   std::vector<NamedUrl> lists[NUM_LISTS];
-  std::string status;
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
     for (int l = 0; l < NUM_LISTS; l++)
       lists[l] = this->catalog_[l];
-    status = this->sound_status_;
   }
-  const bool busy = this->sound_busy_.load();
+  const std::string g = std::to_string(this->sounds_changed_.load());
   std::string h;
-  h.reserve(12000);
+  h.reserve(14000);
   h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-       "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">";
-  if (busy)
-    h += "<meta http-equiv=\"refresh\" content=\"3\">";
-  h += "<title>Athan sounds</title><style>"
-       "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;margin:0 auto;padding:16px;"
-       "color:#1f2937;background:#fafafa}h1{font-size:1.4em}h2{font-size:1.1em;margin-top:1.6em;"
-       "border-top:1px solid #ddd;padding-top:.8em}.st{background:#eef6f3;padding:8px 12px;border-radius:6px}"
+       "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+       "<title>Athan sounds</title><style>body{";
+  h += AUDIO_FONT;
+  h += "max-width:760px;margin:0 auto;padding:16px;color:#1f2937;background:#fafafa}h1{font-size:1.4em}"
+       "h2{font-size:1.1em;margin-top:1.6em;border-top:1px solid #ddd;padding-top:.8em;scroll-margin-top:72px}"
+       ".bar{position:sticky;top:0;z-index:1;background:#fafafa;padding:6px 0}"
+       ".bar iframe{display:block;width:100%;height:48px;border:0;border-radius:6px}"
        "table{border-collapse:collapse;width:100%}td{padding:4px 6px;border-bottom:1px solid #eee}"
        "form{display:inline;margin:0}button{padding:4px 10px}.hint{color:#6b7280;font-size:.9em}"
+       ".ok{color:#047857;font-size:.85em;font-weight:600;margin-left:6px}"
        "</style></head><body>";
   h += "<p><a href=\"/\">&larr; Device page</a></p><h1>Athan sounds</h1>";
-  h += "<p class=\"st\">" + html_escape(status) + (busy ? " &hellip;" : "") + "</p>";
-  h += "<form method=\"post\" action=\"/audio/stop\"><button>Stop preview</button></form>";
-  h += "<p class=\"hint\">Preview streams the sound from the internet; nothing is stored. Install downloads it, "
-       "checks it, and only then replaces the sound on the device. A failed download or a file over the limit "
-       "never touches the installed sound.</p>";
+  h += "<div class=\"bar\"><iframe name=\"st\" title=\"Status\" src=\"/audio/status?g=" + g + "\"></iframe></div>";
+  h += "<p class=\"hint\">Preview plays the installed sound from the device and any other from the internet; "
+       "nothing is stored. Install downloads it, checks it, and only then replaces the sound on the device. "
+       "Installing the sound that is already installed downloads nothing. A failed download or a file over the "
+       "limit never touches the installed sound.</p>";
   for (int s = 0; s < NUM_SLOTS; s++) {
-    h += "<h2>" + std::string(LIST_TITLES[s]) + "</h2><p>Installed: ";
+    const int installed = this->installed_entry(s);
+    h += "<h2 id=\"s" + std::to_string(s) + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>Installed: ";
     if (this->slots_.valid(s))
       h += "<b>" + html_escape(this->slots_.label(s)) + "</b> (" + fmt_duration(this->slots_.duration_ms(s)) + ")";
     else
@@ -1119,21 +1212,52 @@ std::string AthanComponent::render_audio_page() {
     } else {
       h += "<table>";
       for (size_t e = 0; e < lists[s].size(); e++) {
-        std::string q = "?list=" + std::to_string(s) + "&amp;entry=" + std::to_string(e);
-        h += "<tr><td>" + html_escape(lists[s][e].name) + "</td><td>";
-        h += "<form method=\"post\" action=\"/audio/preview" + q + "\"><button>Preview</button></form> ";
-        h += "<form method=\"post\" action=\"/audio/install" + q + "\"><button>Install</button></form>";
+        std::string q = "?list=" + std::to_string(s) + "&amp;entry=" + std::to_string(e) + "&amp;g=" + g;
+        h += "<tr><td>" + html_escape(lists[s][e].name);
+        if (static_cast<int>(e) == installed)
+          h += "<span class=\"ok\">installed</span>";
+        h += "</td><td>";
+        h += "<form method=\"post\" target=\"st\" action=\"/audio/preview" + q + "\"><button>Preview</button></form> ";
+        h += "<form method=\"post\" target=\"st\" action=\"/audio/install" + q + "\"><button>Install</button></form>";
         h += "</td></tr>";
       }
       h += "</table>";
     }
-    h += "<p>Upload your own: <form method=\"post\" action=\"/audio/upload?slot=" + std::to_string(s) +
-         "\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" accept=\".mp3,audio/mpeg\" required> "
-         "<button>Upload</button></form></p>";
+    h += "<p>Upload your own: <form method=\"post\" target=\"st\" action=\"/audio/upload?slot=" + std::to_string(s) +
+         "&amp;g=" + g + "\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" "
+         "accept=\".mp3,audio/mpeg\" required> <button>Upload</button></form></p>";
     h += "<p class=\"hint\">MP3, at most " + fmt_mb(SLOT_MAX_BYTES[s]) + " and " + fmt_duration(SLOT_MAX_MS[s]) +
-         " min.</p>";
+         " min. Mono, or stereo with the whole sound in the left channel: the clock plays only the left "
+         "channel.</p>";
   }
   h += "</body></html>";
+  return h;
+}
+
+std::string AthanComponent::render_audio_status(uint32_t gen) {
+  std::string status;
+  {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    status = this->sound_status_;
+  }
+  const bool busy = this->sound_busy_.load();
+  const std::string text = html_escape(status) + (busy ? " &hellip;" : "");
+  std::string h;
+  h.reserve(1500);
+  h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">";
+  if (busy)
+    h += "<meta http-equiv=\"refresh\" content=\"2\">";  // reloads only this bar, never the page
+  h += "<style>body{margin:0;";
+  h += AUDIO_FONT;
+  h += "font-size:15px;color:#1f2937;background:#eef6f3}"
+       ".b{display:flex;align-items:center;gap:10px;height:48px;padding:0 12px;box-sizing:border-box}"
+       ".t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}form{margin:0}button{padding:4px 10px}"
+       "a{color:#0b62d6;white-space:nowrap}</style></head><body><div class=\"b\">";
+  h += "<span class=\"t\" title=\"" + html_escape(status) + "\">" + text + "</span>";
+  if (!busy && gen != this->sounds_changed_.load())
+    h += "<a href=\"/audio\" target=\"_top\">Reload page</a>";  // an install changed what the page shows
+  h += "<form method=\"post\" action=\"/audio/stop?g=" + std::to_string(gen) + "\"><button>Stop</button></form>";
+  h += "</div></body></html>";
   return h;
 }
 

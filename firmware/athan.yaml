@@ -25,7 +25,7 @@ substitutions:
   pin_i2s_bclk: GPIO5
   pin_i2s_lrclk: GPIO6
   pin_i2s_dout: GPIO7
-  pin_amp_sd: GPIO15       # MAX98357A SD_MODE through 560 kOhm: high = on (mono mix), low/floating = off
+  pin_amp_sd: GPIO15       # MAX98357A SD_MODE through 4.7 kOhm: high = on (left channel), low/floating = off
   pin_sda: GPIO8
   pin_scl: GPIO9
   pin_next: GPIO10
@@ -120,6 +120,8 @@ api:
 web_server:
   version: 3
   log: false
+  # Makes the "Change Sounds At" value a clickable link (ESPHome shows values as plain text). This page only.
+  js_include: web_audio_link.js
   sorting_groups:
     - id: grp_now
       name: "Now"
@@ -207,6 +209,10 @@ i2c:
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Audio: media player -> resamplers -> mixer -> I2S -> MAX98357A
+# 44.1 kHz: the stations and tones are 44.1 kHz MP3s, so the resamplers pass them through without resampling.
+# Left channel only. The mono mixer keeps channel 0 of a stereo source, and channel: mono sends that sample in
+# both I2S slots. The amp plays the left slot (SD_MODE through 4.7 kOhm): its (L+R)/2 mode gave artifacts in testing.
+# So every sound needs its whole content in the left channel (README 1.5).
 # ---------------------------------------------------------------------------------------------------------------------
 i2s_audio:
   - id: i2s_out
@@ -219,7 +225,7 @@ speaker:
     i2s_audio_id: i2s_out
     i2s_dout_pin: ${pin_i2s_dout}
     dac_type: external
-    sample_rate: 48000
+    sample_rate: 44100
     bits_per_sample: 16bit
     channel: mono
   - platform: mixer
@@ -252,13 +258,13 @@ media_player:
       speaker: announce_resampler
       format: MP3
       num_channels: 1
-      sample_rate: 48000
+      sample_rate: 44100
     # Radio and previews: every codec (MP3, Opus, FLAC, WAV)
     media_pipeline:
       speaker: media_resampler
       format: NONE
       num_channels: 1
-      sample_rate: 48000
+      sample_rate: 44100
     files:
       - id: tone_click
         file: sounds/click.mp3
@@ -418,13 +424,18 @@ binary_sensor:
             if (m == 1) {
               const int item = id(ui_menu_index);
               if (item <= 3) {
-                // sound lists: 0 athan, 1 fajr, 2 tawashih, 3 tick
+                // sound lists: 0 athan, 1 fajr, 2 tawashih, 3 tick. The list opens on the installed sound and
+                // plays it (from flash, no download); the tick list opens on "Off" when the tick is off.
                 id(list_slot) = item;
-                id(list_index) = 0;
                 id(ui_mode) = 2;
                 if (!id(athan_core).catalog_ready()) id(athan_core).fetch_catalog();
                 if (item == 1) id(apply_fajr_volume).execute();   // Fajr previews at the Fajr volume
-                id(play_tone_click).execute();
+                int entry = id(athan_core).installed_entry(item);
+                if (item == 3 && !id(htick_enabled)) entry = -1;
+                else if (entry < 0 && id(athan_core).catalog_size(item) > 0) entry = 0;   // installed one not listed
+                id(list_index) = (item == 3) ? entry + 1 : std::max(0, entry);
+                if (entry >= 0 && !id(athan_playing)) id(athan_core).preview_catalog(item, entry);
+                else id(play_tone_click).execute();
               } else if (item == 4) {
                 id(ui_mode) = 8;
                 id(tickwin_index) = 0;
@@ -779,7 +790,11 @@ button:
     name: "Stop Radio"
     id: web_stop_radio
     icon: "mdi:stop"
-    on_press: [lambda: 'id(athan_core).radio_stop();']
+    on_press:
+      - lambda: |-
+          id(radio_resume) = -1;   // stopped on purpose: an athan that paused it must not restart it
+          id(athan_core).radio_stop();
+      - script.execute: update_display
     web_server: {sorting_group_id: grp_radio, sorting_weight: 3}
   - platform: template
     name: "Refresh Prayer Times"
@@ -819,6 +834,9 @@ text_sensor:
   - {platform: template, name: "Installed Sounds", id: web_sounds, icon: "mdi:music-box-multiple", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 1}}
   - {platform: template, name: "Sound Status", id: web_sound_status, icon: "mdi:information-outline", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 2}}
   - {platform: template, name: "Change Sounds At", id: web_audio_page, icon: "mdi:web", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 3}}
+  # The installed version is always shown here: ESPHome's Firmware entity stays UNKNOWN, without any version,
+  # until one check of the release manifest has succeeded.
+  - {platform: template, name: "Firmware Version", id: web_fw_version, icon: "mdi:chip", update_interval: never, web_server: {sorting_group_id: grp_system, sorting_weight: 0}}
   - {platform: template, name: "Radio Status", id: web_radio_status, icon: "mdi:radio", update_interval: never, web_server: {sorting_group_id: grp_radio, sorting_weight: 4}}
   - {platform: template, name: "Prayer Data", id: web_prayer_data, icon: "mdi:database-clock", update_interval: never, web_server: {sorting_group_id: grp_location, sorting_weight: 3}}
   - platform: debug
@@ -918,7 +936,7 @@ globals:
   - {id: prefajr_next_hour, type: int, initial_value: "0"}
   - {id: prefajr_next_minute, type: int, initial_value: "0"}
   - {id: prefajr_triggered, type: bool, initial_value: "false"}
-  - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing
+  - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing, 5 check failed
 
 script:
   # ---------------- audio helpers ----------------
@@ -1123,7 +1141,11 @@ script:
       - update.check: fw_update
       - delay: 8s
       - lambda: |-
-          id(update_check_state) = (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) ? 2 : 1;
+          // A failed check (no release published yet, no internet) leaves the state UNKNOWN: not "up to date".
+          if (id(fw_update).status_has_error() || id(fw_update).state == update::UPDATE_STATE_UNKNOWN)
+            id(update_check_state) = 5;
+          else
+            id(update_check_state) = (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) ? 2 : 1;
           id(update_display).execute();
 
   # ---------------- schedule ----------------
@@ -1268,6 +1290,18 @@ script:
             if (ips[0].is_set()) ips[0].str_to(ip);
             pub(id(web_audio_page), std::string("http://") + (ip[0] ? ip : "athan.local") + "/audio");
           }
+          {
+            // This build's version (project_version) and what the last check of the GitHub Release said.
+            const std::string v = "${project_version}";
+            const std::string &latest = id(fw_update).update_info.latest_version;
+            std::string fw;
+            if (id(fw_update).state == update::UPDATE_STATE_INSTALLING) fw = v + " (installing " + latest + ")";
+            else if (id(fw_update).status_has_error()) fw = v + " (no release found on GitHub, or no internet)";
+            else if (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) fw = v + " (" + latest + " available)";
+            else if (id(fw_update).state == update::UPDATE_STATE_NO_UPDATE) fw = v + " (latest)";
+            else fw = v + " (not checked yet)";
+            pub(id(web_fw_version), fw);
+          }
 
   # ---------------- OLED ----------------
   - id: update_display
@@ -1353,6 +1387,7 @@ script:
                   case 1: snprintf(line, sizeof(line), "V%s up to date", v); break;
                   case 2: snprintf(line, sizeof(line), "-> %s ?", id(fw_update).update_info.latest_version.c_str()); break;
                   case 4: snprintf(line, sizeof(line), "installing.."); break;
+                  case 5: snprintf(line, sizeof(line), "check failed"); break;   // no release, or offline
                   default: snprintf(line, sizeof(line), "V%s", v); break;
                 }
                 d.print(0, 46, id(font2), line);
@@ -1371,7 +1406,7 @@ script:
                 } else {
                   std::string name = id(athan_core).catalog_name(slot, entry);
                   d.print(0, 22, id(font1), name.c_str());
-                  bool installed = (name == id(athan_core).slot_label(slot));
+                  bool installed = (entry == id(athan_core).installed_entry(slot));
                   snprintf(line, sizeof(line), "%d / %d%s", entry + 1, n, installed ? "  (installed)" : "");
                   d.print(0, 46, id(font2), line);
                 }
@@ -1561,6 +1596,12 @@ interval:
           }
   - interval: 1s
     then:
+      - lambda: |-
+          // Redraw when the radio starts or stops from anywhere (web buttons, /audio previews, a stream that
+          // gave up), so the OLED's radio mark never waits for the minute redraw.
+          static int shown = -2;
+          const int r = id(athan_core).radio_active();
+          if (r != shown) { shown = r; id(update_display).execute(); }
       - script.execute: sync_web_state
   # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.
   - interval: 10s

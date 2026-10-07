@@ -23,7 +23,7 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Files | `firmware/athan_v3.yaml`, component `athan_audio` | `firmware/athan.yaml`, component `firmware/components/athan/` (`DEVELOPER.md`) |
 | Radio defaults (7) | A "radio" list in the catalog and a **Reset Radio Stations** button | `docs/radio/stations.json` (exactly 10 stations) and a per-slot switch **Radio N follows project list** (on by default). A following slot fetches the list again on every play, so changing a link there reaches every following clock at its next play. Off = the slot's own link (`Radio N own link`). The OLED shows the station's name from the list |
 | Catalog (5) | Absolute URLs, a `radio` list | Lists `athan`, `fajr`, `tawashih`, `tick` only; a `url` may be relative to `docs/audio/`. Clocks re-read it every 12 h |
-| Preview (6.1) | 20 s | Plays until stopped, Next moves on, or a choice is made |
+| Preview (6.1) | 20 s | Plays until stopped, Next moves on, or a choice is made. The installed entry plays from flash, not the internet. A sound list opens on the installed entry and plays it. Installing the installed entry downloads nothing (ETag check) |
 | Location | Index persisted | The **key** is persisted (`selected_location_key`), so the Location list may be reordered or extended freely |
 | Generator (9.2, 9.3) | One script writes the V3 yearly file and the V2 daily files | Every script here writes **only** the V3 yearly file (one positional list per day). V2 daily files are produced in the V2 repository with its own scripts. `make_yearly_json.py` converts years that exist only as V2 daily files |
 | Built-in tones (4.1) | `audio_file` | `media_player: files:` from `firmware/sounds/click.mp3` and `volume.mp3` (V2's C3 and C2), added by the builder |
@@ -133,7 +133,7 @@ section 16.
 | Function | GPIO | Notes |
 |---|---|---|
 | I2S BCLK / LRCLK / DOUT → MAX98357A | 5 / 6 / 7 | |
-| MAX98357A SD_MODE | 15 | Through 560 kΩ (anything 470–680 kΩ works from 3.3 V; 1 MΩ does not): high = mono mix (L+R)/2, low or floating (boot) = amp off, no idle hiss (`max98357a_amplifier.md` section 5) |
+| MAX98357A SD_MODE | 15 | Through 4.7 kΩ (changed 2026-10-06 from 560 kΩ; anything 1–47 kΩ): high = left channel only (the firmware sends the same mono samples in both I2S slots), low or floating (boot) = amp off, no idle hiss (`max98357a_amplifier.md` section 5) |
 | I2C SDA / SCL → OLED header | 8 / 9 | 4.7 kΩ pull-ups on the board |
 | Buttons Next / Select | 10 / 11 | Internal pull-ups, to GND, as today |
 | Relay output | 12 | Series resistor, as today |
@@ -194,7 +194,8 @@ There is no library, file numbering or choice index on the device. Each slot hol
 label (the name from the list, or the uploaded file's name), kept so the web page and the OLED can say what is
 installed. Changing a sound means replacing that slot's file.
 
-Format: MP3 (any bitrate and sample rate, mono or stereo; ESPHome's resampler handles the rest). Other formats are
+Format: MP3 (any bitrate and sample rate; ESPHome's resampler handles the rest). Mono, or stereo with the whole
+sound in the left channel: the clock plays only the left channel (README 1.5). Other formats are
 in section 16.
 
 ### 4.2 Flash layout
@@ -287,7 +288,7 @@ Every file in the library must already pass the device's checks. Measured on 202
 
 | Problem | Files | Fix |
 |---|---|---|
-| Over 3 MB, length fine | A7, A8, A10, F1, F2, F3, F6, D7, D8, D10 (128–321 kbps) | Re-encode to mono 64 kbps: 5 min = 2.4 MB. The speaker is mono anyway (the amp plays (L+R)/2) |
+| Over 3 MB, length fine | A7, A8, A10, F1, F2, F3, F6, D7, D8, D10 (128–321 kbps) | Re-encode to mono 64 kbps: 5 min = 2.4 MB. The clock plays only the left channel anyway |
 | Over 5 min | F8 (5:17, 5.07 MB, no silence to trim) | Owner choice: cut with a short fade-out at 5:00, speed up ≈ 6 %, or use another recording; then mono 64 kbps (5 min at its current 128 kbps would be 4.8 MB) |
 | Over 0.4 MB (its 52 s is within the 1-minute limit) | B3 (1.67 MB, 256 kbps) | Re-encode to mono 48 kbps: 0.31 MB. At 64 kbps it would be 0.42 MB, just over; a full-minute tick must stay at or below ≈ 53 kbps |
 | Fine as they are | the other 28 files | Leave alone (several are already 16–40 kbps; re-encoding would only lose quality) |

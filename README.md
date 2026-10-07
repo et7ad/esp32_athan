@@ -110,10 +110,10 @@ In the menu, **Next** moves and **Select** chooses. The menu closes by itself af
 
 | Menu item | What it does |
 |---|---|
-| **Athan** | Next steps through the suggested athans and plays a preview of each. Select installs the one showing. Installing takes up to a minute and the screen shows progress; the old sound stays until the new one has passed every check |
+| **Athan** | Opens on the installed athan and plays it. Next steps through the suggested athans and plays a preview of each; the installed one always plays from the device. Select installs the one showing. Selecting the installed one downloads nothing. Installing takes up to a minute and the screen shows progress; the old sound stays until the new one has passed every check |
 | **Fajr Athan** | The same, for the Fajr athan. Previews play at the Fajr volume |
 | **Tawashih** | The same, for the Pre-Fajr Tawashih |
-| **Hourly Tick** | The same, plus **Off** as the first entry. Choosing a tick switches the hourly tick on |
+| **Hourly Tick** | The same, plus **Off** as the first entry (where it opens while the tick is off). Choosing a tick switches the hourly tick on |
 | **Tick Window** | Start, End, Done. Select on Start or End edits it: Next adds an hour, Select goes back. Start = End means all day |
 | **Athan On/Off** | Fajr, Dhuhr, Asr, Maghrib, Isha, Done. Select switches the highlighted prayer's athan on or off |
 | **Pre-Fajr** | Switches Pre-Fajr Tawashih on or off, right there (the screen shows ON/OFF) |
@@ -122,7 +122,7 @@ In the menu, **Next** moves and **Select** chooses. The menu closes by itself af
 | **Volume** | Each Next lowers the volume by 10 % and plays a tone; below 10 % it wraps to 100 %. Select keeps the setting |
 | **Fajr Volume** | The same, for the Fajr athan and the tawashih |
 | **Clock** | Switches between 24-hour and 12-hour display, right there |
-| **Update** | Select checks GitHub for new firmware. If there is one, the screen shows `-> 3.x.y ?`; Select again installs it |
+| **Update** | Select checks GitHub for new firmware. If there is one, the screen shows `-> 3.x.y ?`; Select again installs it. `check failed` means GitHub has no release yet or the clock is offline; Select tries again |
 | **Lock Buttons** | Locks the buttons and returns to the clock |
 | **Info** | Firmware version, IP address, `athan.local` |
 | **Cancel** | Back to the clock |
@@ -143,18 +143,23 @@ grouped:
 - **Radio:** Radio Station, Play Radio, Stop Radio, Radio Status.
 - **Radio Stations:** the ten slots (1.6).
 - **Location and Prayer Times:** Location, Refresh Prayer Times, Prayer Data (which years are stored).
-- **System:** Firmware (install updates), Check For Update, Restart, External Relay, IP address, memory.
+- **System:** Firmware Version (this build, and whether GitHub has a newer one), Firmware (install updates), Check
+  For Update, Restart, External Relay, IP address, memory.
 
 The same entities show up in Home Assistant when you add the device there (ESPHome integration).
 
 ### 1.5 Changing the sounds: <http://athan.local/audio>
 
-For each of the four sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
+Open it from the **Change Sounds At** link on the device page, or type the address. A status bar stays at the top
+of the page, with a **Stop** button for previews. Every button reports there, so the page never reloads or jumps
+back to the top. After an install, the bar offers **Reload page** to show the new sound. For each of the four
+sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
 
 - **Installed:** the name and length of the sound on the device.
-- **The suggested list** from this project, with **Preview** and **Install** for each entry. Preview plays the
-  sound from the internet and stores nothing. Install downloads it, checks it, and only then replaces the
-  installed sound.
+- **The suggested list** from this project, with **Preview** and **Install** for each entry. The installed entry is
+  marked *installed*. Preview stores nothing: the installed entry plays from the device, any other streams from
+  the internet. Install downloads the entry, checks it, and only then replaces the installed sound. Installing the
+  installed entry downloads nothing: the clock asks GitHub whether the file changed and fetches it only if it did.
 - **Upload your own:** pick an MP3 file on your phone or computer and press Upload.
 
 Limits, checked before anything is replaced:
@@ -165,7 +170,14 @@ Limits, checked before anything is replaced:
 | Hourly tick | 0.4 MB | 1 minute |
 
 The file must be an MP3. A 5-minute recording fits in 3 MB at 64 kbps mono. To shrink one, use
-`ffmpeg -i in.mp3 -map 0:a -map_metadata -1 -ac 1 -b:a 64k out.mp3`. A failed download, a file that is too big or
+`ffmpeg -i in.mp3 -map 0:a -map_metadata -1 -ac 1 -b:a 64k out.mp3`.
+
+**The clock plays only the left channel.** A mono file always plays in full. A stereo file plays only its left
+channel, so the whole sound must be in that channel. A recording with something only on the right (a voice or an
+echo) loses it. The `ffmpeg … -ac 1` command above mixes both channels into one, which makes any file safe. The
+amplifier is wired for left only because its mono-mix mode caused audible artifacts during testing.
+
+A failed download, a file that is too big or
 too long, or a file that is not MP3 never touches the installed sound. The page says why it refused. Installing
 is refused while that sound is playing.
 
@@ -176,7 +188,8 @@ There are ten slots. Each one has two settings on the web page:
 - **Radio N follows project list** (on by default): the slot plays station N of this project's list,
   [docs/radio/stations.json](docs/radio/stations.json). The clock fetches the link fresh every time you play
   the slot, so if a station moves, the project updates the list and every clock follows.
-- **Radio N own link:** switch "follows project list" off and paste any stream link here.
+- **Radio N own link:** switch "follows project list" off and paste any stream link here. If an `https://` link
+  forwards to an `http://` server, the clock refuses the switch: paste the `http://` form of the link instead.
 
 Play it from the menu (**Radio**), or with **Radio Station** + **Play Radio** on the web page.
 
@@ -217,6 +230,10 @@ To add your mosque, open an issue or send its yearly timetable. Section 3.1 show
 The clock checks this repository's latest GitHub Release every 6 hours. To install an update, use **Firmware** on
 the web page, the **Update** menu item, or Home Assistant. Your settings, sounds and prayer times stay.
 
+**Firmware Version** on the web page always shows the installed version (for example `3.0.0 (latest)` or
+`3.0.0 (3.0.1 available)`). ESPHome's own **Firmware** entry shows `UNKNOWN`, with no version, until a check has
+succeeded once. That needs a published release (3.4) and internet.
+
 ---
 
 ## 2. Building one
@@ -236,7 +253,8 @@ The full parts list, the pin map, and instructions for the PCB and the enclosure
 
 **Prototype on a breadboard** first: an **ESP32-S3-DevKitC-1 N16R8** (same module), an Adafruit MAX98357A breakout
 (3006) or a clone, and the OLED, buttons and speaker. The wiring is in HARDWARE.md section 2. The firmware and
-flash layout are the same as on the final board.
+flash layout are the same as on the final board. Wire the breakout's SD pin to GPIO15 through 4.7 kΩ (left
+channel). Left unconnected, SD puts the breakout in its mono-mix mode, which gives audible artifacts.
 
 ### 2.2 Firmware
 
@@ -293,7 +311,8 @@ Wi-Fi updates (from both scripts) go only to a clock that serves the V3 `/audio`
    Releases (3.4).
 
 **ESPHome dashboard (Docker) instead of the command line:** copy the *contents* of `firmware/` into the dashboard's
-config folder: `athan.yaml`, `partitions.csv`, `components/` and `sounds/`. The yaml finds them by relative path.
+config folder: `athan.yaml`, `partitions.csv`, `web_audio_link.js`, `components/` and `sounds/`. The yaml finds
+them by relative path.
 Make sure the dashboard image is 2026.9 or newer (`docker pull esphome/esphome:latest`).
 
 **A V2 clock on the same network** is also called `athan`. Give one of them another `device_name` (substitution at
@@ -350,6 +369,12 @@ V2 clocks read **daily** files from the V2 repository. Produce those with the V2
 
 ### 3.2 Sounds
 
+`python3 scripts/prepare_audio.py` builds the whole library from the V2 SD-card recordings
+(`../esp_athan/SDCard_files`: A → athan, F → fajr, D → tawashih, B → tick). It strips tags and cover art,
+re-encodes only the files over a limit (mono 64 kbps, ticks 48 kbps), speeds up any recording longer than the
+limit just enough to fit (pitch unchanged; `--long trim` cuts with a fade-out instead), and checks every result.
+Add `--check` to see what it would do without writing anything.
+
 - The files go in `docs/audio/athan/`, `fajr/`, `tawashih/` and `tick/`, named `01.mp3` … `10.mp3`.
 - Names and links go in [docs/audio/catalog.json](docs/audio/catalog.json). Each list holds up to 10 entries.
   Entry 1 is the default that new clocks install. A `url` can be relative to `docs/audio/` (`athan/01.mp3`) or a
@@ -366,7 +391,13 @@ named.
 
 [docs/radio/stations.json](docs/radio/stations.json) has exactly 10 entries; slot *k* of a subscribed clock plays
 entry *k*. Change a link there and every subscribed clock uses it the next time that slot plays. An empty `url`
-makes that slot empty for subscribers. Names follow the same 12-character rule.
+makes that slot empty for subscribers. Names follow the same 12-character rule. Like the sounds (1.5), a stereo
+station plays only its left channel. Check each link with
+`curl -sI -X GET --max-time 5 <url>`. A `Location: http://…` answer to an `https://` link means the clock will
+refuse it, because ESP-IDF blocks HTTPS-to-HTTP redirects. Use an HTTPS source that answers `200` directly, or
+list the `http://` form. Egypt's Quran Radio is an example: its official radiojar link
+(`stream.radiojar.com/8s5u5tpdtwzuv`) always redirects to HTTP, so slot 1 uses xecod.com's HTTPS relay. The
+radiojar link, written with `http://`, is the fallback if the relay goes away.
 
 ### 3.4 Firmware releases
 
@@ -392,6 +423,7 @@ A change to `firmware/partitions.csv` cannot be delivered this way. It needs a U
 firmware/
   athan.yaml               the whole device behaviour (ESPHome)
   partitions.csv           16 MB flash layout (app ×2, prayer years, sounds)
+  web_audio_link.js        makes the device page's Change Sounds At value a link (web_server js_include)
   components/athan/        custom component: stored sounds, lists, radio, yearly prayer files, /audio page
   sounds/                  click.mp3 + volume.mp3 (built-in tones; you add them)
   tests/                   host unit tests and a type check (no ESP32 needed)

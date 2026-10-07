@@ -47,11 +47,12 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `slot_valid(s)`, `slot_label(s)` | Slot 0 athan, 1 fajr, 2 tawashih, 3 tick |
 | `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline. False if the slot is empty or being rewritten (the yaml then plays three click tones) |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
-| `install_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()` |
+| `install_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The installed entry is fetched only if the server's file changed (`If-None-Match` with the stored ETag; no ETag stored: nothing is fetched) |
+| `installed_entry(list)` | Index of the list entry whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
 | `sound_busy()`, `sound_status()` | One install/upload at a time |
 | `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists |
-| `preview_catalog(l, e)` | Streams an entry on the media pipeline (replaces the radio), nothing stored |
-| `stop_media()` | Stops the media pipeline (preview or radio) |
+| `preview_catalog(l, e)` | Nothing stored. The installed entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
+| `stop_media()` | Stops the media pipeline (preview or radio) and a preview playing from flash, never the athan or the tick |
 | `radio_play(slot, subscribed)`, `radio_stop()`, `radio_active()` (-1 or slot) | Radio |
 | `station_available(slot, subscribed)`, `station_name(slot)`, `own_url(slot)`, `radio_status()` | Radio menu/web |
 | `set_location(key)`, `location()` | Changing the key resets the fetch timers and bumps `schedule_version()` |
@@ -91,18 +92,23 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | 2 tawashih | 0x5C0000 | 0x2E0000 | 3,000,000 B | 5 min |
 | 3 tick | 0x8A0000 | 0x070000 | 400,000 B | 1 min |
 
-**Header** (first 4 KB sector of the region): `magic "ATH1"`, `version 1`, `length`, `data_crc`, `duration_ms`,
-`label[64]`, `header_crc` (CRC-32 of the fields before it). The MP3 follows at +4 KB. `begin()` and `reload()`
+**Header** (first 4 KB sector of the region): `magic "ATH1"`, `version 2`, `length`, `data_crc`, `duration_ms`,
+`label[64]`, `source_crc` (CRC-32 of the download link, never 0; 0 for an upload), `etag[80]` (the server's ETag,
+empty if none or longer), `header_crc` (CRC-32 of the fields before it). A version 1 header (no source or ETag)
+is still read: its `header_crc` sits where `source_crc` is now, and such a sound is matched to the list by its
+label. The MP3 follows at +4 KB. `begin()` and `reload()`
 check both CRCs, then memory-map the region (`esp_partition_mmap`) and wrap it in an `audio::AudioFile`
 (`audio::AudioFileType::MP3`), which `play_slot()` hands to `SpeakerMediaPlayer::play_file(file, announcement=true)`.
 
 **Install** (`INSTALL_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as
-   soon as it passes the limit.
+   soon as it passes the limit. For the installed entry the request carries `If-None-Match: <stored ETag>`, and
+   a `304` ends the job ("already installed (same file)"). GitHub's raw files send a 66-character ETag.
 2. `mp3_scan()` needs three chained Layer III frames to sync (an ID3v2 tag is skipped). The duration is the sum
    of the frame durations.
 3. Size and duration are checked against the slot's limits.
-4. Handshake (section 4), erase, 4 KB bounce writes with progress, header last.
+4. Handshake (section 4), erase, 4 KB bounce writes with progress, header last (with the link's CRC and the
+   response's ETag; an upload stores 0 and no ETag).
 
 Any failure frees the buffer and leaves the slot as it was. A power cut during the write leaves no valid header,
 so the slot is empty and the default comes back automatically.
@@ -206,9 +212,14 @@ them together.
 
 - ESPHome's page (`web_server` v3) with sorting groups: Now, Athan, Athan On/Off per Prayer, Sounds, Radio,
   Radio Stations, Location and Prayer Times, System.
-- `/audio` (custom handler): `GET /audio` renders the page (refreshes itself every 3 s while busy).
-  `POST /audio/install|preview|stop?list=&entry=` queue an action and redirect back. `POST /audio/upload?slot=`
-  is a multipart upload. Plain HTML, no JavaScript.
+- `/audio` (custom handler): `GET /audio` renders the page. Its sticky status bar is an iframe named `st` showing
+  `GET /audio/status?g=`, and every form posts into it (`target="st"`), so an action never reloads or scrolls the
+  page. `POST /audio/install|preview|stop?list=&entry=&g=` queue an action and redirect to the bar.
+  `POST /audio/upload?slot=&g=` is a multipart upload. The bar refreshes itself every 2 s while an install or
+  upload is busy. `g` is `sounds_changed_` when the page was drawn: once a slot changed, the bar offers
+  **Reload page**. Plain HTML, no JavaScript.
+- ESPHome's page loads one script, `firmware/web_audio_link.js` (`web_server: js_include`, served as `/0.js`). It
+  underlines the **Change Sounds At** value and opens `/audio` on click, without replacing ESPHome's elements.
 - Firmware updates: `update: platform: http_request` with the Releases manifest (every 6 h, the Update menu
   item, the Check For Update button). `ota:` has `esphome` (encrypted, same key as the API), `http_request` and
   `web_server` (needed for multipart uploads to reach custom handlers).
@@ -242,4 +253,4 @@ assumptions that only hardware can confirm:
 - `esp_http_client` redirects for `releases/latest/download` (handled by ESPHome's `update` component) and for
   raw.githubusercontent.com (no redirect normally).
 - Stream reconnect behaviour after a router restart.
-- The MAX98357A gain jumper and the 560 kΩ SD_MODE resistor (`max98357a_amplifier.md`).
+- The MAX98357A gain jumper and the 4.7 kΩ SD_MODE resistor, left channel (`max98357a_amplifier.md`).

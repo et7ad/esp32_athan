@@ -66,8 +66,11 @@ class AthanComponent : public Component {
   bool play_slot(int slot);
   /// True while a stored sound started by play_slot() is playing.
   bool slot_playing() const { return this->playing_slot_ >= 0; }
-  /// Download entry `entry` of the suggested list for `slot` and install it (checks first).
+  /// Download entry `entry` of the suggested list for `slot` and install it (checks first). The installed entry
+  /// itself is not downloaded again: the server is asked with its ETag and only a changed file is fetched.
   void install_from_catalog(int slot, int entry);
+  /// Index of the suggested-list entry installed in `slot`, -1 if the installed sound is not in the list.
+  int installed_entry(int slot) const;
   bool sound_busy() const { return this->sound_busy_.load(); }
   std::string sound_status() const;
 
@@ -76,9 +79,9 @@ class AthanComponent : public Component {
   bool catalog_ready() const { return this->catalog_ready_.load(); }
   int catalog_size(int list) const;
   std::string catalog_name(int list, int entry) const;
-  /// Stream an entry for listening only (media pipeline, nothing stored).
+  /// Listen to an entry, nothing stored: the installed entry plays from flash, any other streams (media pipeline).
   void preview_catalog(int list, int entry);
-  /// Stop whatever plays on the media pipeline (preview or radio).
+  /// Stop the radio and any preview (also a preview playing from flash). Never stops the athan or the tick.
   void stop_media();
 
   // ---------------- radio ----------------
@@ -117,11 +120,14 @@ class AthanComponent : public Component {
   void upload_data(const uint8_t *data, size_t len);
   void upload_end();
   std::string render_audio_page();
+  /// The status bar of the /audio page (an iframe, so actions never reload or scroll the page). `gen` is the
+  /// sounds_changed_ value the page was drawn with: when it differs, the bar offers a reload.
+  std::string render_audio_status(uint32_t gen);
 
  protected:
   enum class JobType : uint8_t { CATALOG, STATIONS, STATION_PLAY, INSTALL_URL, COMMIT_BUFFER, PRAYER_YEAR };
   enum class PrayerPurpose : uint8_t { CURRENT, PREVIOUS, NEXT };
-  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY };
+  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY, NOT_MODIFIED };
   struct Job {
     JobType type;
     int slot{-1};
@@ -131,6 +137,7 @@ class AthanComponent : public Component {
     PrayerPurpose purpose{PrayerPurpose::CURRENT};
     std::string url;
     std::string label;
+    std::string etag;  // INSTALL_URL: the installed file's ETag when this entry is the installed one
     std::string key;
     uint8_t *data{nullptr};
     size_t len{0};
@@ -141,11 +148,15 @@ class AthanComponent : public Component {
   void worker_loop_();
   void enqueue_(Job &&job);
   void run_job_(Job &job);
-  HttpResult http_get_(const std::string &url, size_t max_len, uint8_t **out, size_t *out_len, int progress_slot);
+  /// `if_none_match` (an ETag) makes the request conditional: NOT_MODIFIED means the server's file is that one.
+  /// `etag_out` receives the response's ETag.
+  HttpResult http_get_(const std::string &url, size_t max_len, uint8_t **out, size_t *out_len, int progress_slot,
+                       const std::string &if_none_match = "", std::string *etag_out = nullptr);
   void job_catalog_();
   void job_stations_(Job &job, bool for_play);
   void job_install_url_(Job &job);
-  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label);
+  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0,
+                   const std::string &etag = "");
   void job_prayer_(Job &job);
   bool parse_stations_(const uint8_t *data, size_t len);
 
@@ -155,6 +166,7 @@ class AthanComponent : public Component {
   void apply_tz_(const std::string &tz);
   void radio_tick_();
   void start_stream_(const std::string &url);
+  void stop_slot_preview_();
   void set_sound_status_(const std::string &s);
   void set_radio_status_(const std::string &s);
   void set_prayer_status_(const std::string &s);
@@ -197,6 +209,7 @@ class AthanComponent : public Component {
   std::atomic<bool> stations_ready_{false};
   std::atomic<bool> stations_pending_{false};
   std::atomic<bool> sound_busy_{false};
+  std::atomic<uint32_t> sounds_changed_{0};  // +1 after every install that changed a slot (/audio reload hint)
   // Retry deadlines in 64-bit milliseconds (millis_64()): a 32-bit deadline goes stale after 24.8 days.
   uint64_t next_catalog_try_{0};
   uint64_t next_stations_try_{0};
@@ -206,6 +219,7 @@ class AthanComponent : public Component {
   int playing_slot_{-1};
   uint32_t playing_since_{0};
   bool playing_seen_{false};
+  bool slot_preview_{false};  // the stored sound playing is a preview (stop_media() stops it, an install may start)
 
   // radio
   int radio_station_{-1};

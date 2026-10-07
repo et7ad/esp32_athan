@@ -6,7 +6,7 @@ playback and off 5 s after the player goes idle (`amp_idle_off`).
 
 The version 3 board uses the bare MAX98357A chip (MAX98357AETE+T, LCSC/JLCPCB C910544) wired the way Adafruit wires
 its [MAX98357A I2S amp breakout, product 3006](https://www.adafruit.com/product/3006), with three changes: SD_MODE is
-driven by an ESP32-S3 GPIO, the gain is selectable with a jumper so it can be tried out on the real speaker, and the
+driven by an ESP32-S3 GPIO through 4.7 kΩ and selects the left channel (section 5), the gain is selectable with a jumper so it can be tried out on the real speaker, and the
 output EMI filter is left out because the speaker wires are only about 5 cm (it is described in section 8 in case
 it is ever needed).
 
@@ -95,9 +95,9 @@ and hundreds of ohms at MHz, where the switching noise is.
 | Part | Adafruit 3006 | Maxim evaluation board | Maxim's rule / note | Ours (section 3) |
 |---|---|---|---|---|
 | VDD bypass | 0.1 µF + 10 µF ceramic | 0.1 µF 16 V X7R + 10 µF 6.3 V X5R | datasheet: 0.1 µF + 10 µF | 0.1 µF X7R + 10 µF X5R/X7R, ≥ 10 V |
-| SD_MODE for the mono mix | 1 MΩ from VIN (5 V) | 634 kΩ ±1 % from 3.3 V logic | RLARGE = 222.2 × VDDIO − 100 kΩ | 560 kΩ ±5 % from the 3.3 V ESP GPIO (section 5) |
+| SD_MODE for the mono mix | 1 MΩ from VIN (5 V) | 634 kΩ ±1 % from 3.3 V logic | RLARGE = 222.2 × VDDIO − 100 kΩ | not used (artifacts in testing, section 5) |
 | SD_MODE for right only | (not fitted) | 226 kΩ ±1 % | RSMALL = 94 × VDDIO − 100 kΩ (210 kΩ at 3.3 V) | not used |
-| SD_MODE for left only | (not fitted) | 2 kΩ to 3.3 V logic | series resistor limits pin current | not used |
+| SD_MODE for left only | (not fitted) | 2 kΩ to 3.3 V logic | series resistor limits pin current | 4.7 kΩ from the 3.3 V ESP GPIO (section 5) |
 | Gain | pin left open (9 dB) | 5-pin jumper with two 100 kΩ ±5 % | datasheet: ±5 % resistors | 2 × 3 jumper with two 100 kΩ ±5 % |
 | Output ferrite beads | "Ferrite" (0805), no part number | Murata BLM18SG331TN1D (0603): 330 Ω at 100 MHz, 1.5 A, 0.07 Ω max | 100–600 Ω at high frequency, low DC resistance, rated at least 1 A | not fitted (section 8) |
 | Output capacitors | 220 pF (0805) | 680 pF C0G (TDK CGA2B1C0G2A681J) | under 1 nF, value tuned for EMI with the chosen bead | not fitted (section 8) |
@@ -124,7 +124,7 @@ Same circuit, with SD_MODE fed from an ESP GPIO, a jumper block on GAIN, and the
    ESP GPIO6  --------------| 14 LRCLK           |                          to the speaker
                             |                    |
    ESP GPIO15 ---[R_SD]-----| 4  SD_MODE         |
-                 560k       |                    |
+                 4.7k       |                    |
    gain block --------------| 2  GAIN_SLOT       |
    (section 4)              |            OUTN 10 |----------------o SPK -
                             |        GND         |
@@ -142,7 +142,7 @@ Same circuit, with SD_MODE fed from an ESP GPIO, a jumper block on GAIN, and the
 | U1 | MAX98357AETE+T (C910544) | No | TQFN with exposed pad: reflow only, placed by the PCB house with the other front-side SMD parts |
 | C1 | 0.1 µF, X7R, 16 V (Maxim's value) | Possible, SMD preferred | Must sit right at pins 7/8 with a short path to GND. An SMD part placed by the PCB house does that best; a THT ceramic disc works only with very short leads, a few mm from the chip |
 | C2 | 10 µF, X5R/X7R ceramic, ≥ 10 V | Possible, SMD preferred | Next to C1. Maxim fits a 6.3 V part, but a ceramic loses capacitance under DC voltage, so on a 5 V rail a 10–16 V rating keeps it near 10 µF. THT option: radial MLCC or low-ESR electrolytic |
-| R_SD | 560 kΩ ±5 % | Yes | Section 5: anything from about 470 kΩ to 680 kΩ works; Maxim's 634 kΩ ±1 % too |
+| R_SD | 4.7 kΩ | Yes | Section 5: left channel; anything from 1 kΩ to about 47 kΩ works |
 | R_G1, R_G2 | 100 kΩ ±5 % or better | Yes | Gain block, section 4 (the datasheet asks for ±5 %) |
 | Gain header | 2 × 3 pins, 2.54 mm, plus one jumper cap | Yes | Section 4 |
 | Speaker terminal | 2-pin screw terminal | Yes | Back side, as planned, wired straight to OUTP/OUTN |
@@ -236,16 +236,24 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
   RLARGE = 222.2 × V − 100 kΩ, where V is the voltage feeding the resistor:
   - from 5 V (Adafruit, resistor to VIN): 1011 kΩ, hence their 1 MΩ;
   - from a 3.3 V GPIO (ours): 634 kΩ, hence Maxim's 634 kΩ ±1 % (an E96 value; that is why it looks odd).
-- **Ours: 560 kΩ ±5 %** from ESP GPIO15 (push-pull, 3.3 V). It puts the pin at 0.50 V typical, the middle of the
-  window, and 0.45–0.56 V over all tolerances (±5 % resistor, ±8 % internal pull-down). It is also a common E12
-  value in any through-hole kit.
+- **Ours (owner's decision 2026-10-06): 4.7 kΩ from ESP GPIO15 = left channel only.** The firmware's I2S output is
+  `channel: mono`, which ESPHome sends as the same samples in both the left and the right slot (checked in the
+  ESPHome 2026.9 source: slot mode MONO, slot mask BOTH), so left-only gets the same samples the mono mix would.
+  The difference is the pin itself: the mono mix needs SD_MODE held inside a 0.3 V window through a ~560 kΩ
+  resistor, a high-impedance node that noise from the amp's own switching can push across a threshold, while
+  4.7 kΩ holds it at about 3.1 V, far above B2. **Tested 2026-10-06 on the breadboard prototype: the mono-mix
+  mode gave audible artifacts, and 4.7 kΩ (left only) played clean.** Worst case (GPIO high at its 2.64 V minimum, internal pull-down at 92 kΩ):
+  2.5 V, still above B2's 1.5 V maximum. Any resistor up to about 70 kΩ meets that; 1–47 kΩ is comfortable.
+  GPIO low or floating (boot) still means shutdown.
+- **The mono-mix option, for reference** (the earlier choice; the rest of this list explains it): 560 kΩ ±5 % puts
+  the pin at 0.50 V typical, the middle of the window, and 0.45–0.56 V over all tolerances.
 - **Which values work from a 3.3 V GPIO** (worst-case window 0.355–0.65 V: above B0's maximum, below B1's minimum):
 
   | R_SD from 3.3 V | Voltage on SD_MODE (worst cases) | Result |
   |---|---|---|
   | 470 kΩ ±5 % | 0.52–0.64 V | mono on every chip, but close to the right-channel threshold |
   | 499 kΩ ±1 % or 510 kΩ ±5 % ("0.5 M") | 0.48–0.60 V | mono on every chip |
-  | **560 kΩ ±5 %** | 0.45–0.56 V | mono on every chip (chosen) |
+  | 560 kΩ ±5 % | 0.45–0.56 V | mono on every chip (the earlier choice) |
   | 634 kΩ ±1 % (Maxim) | 0.42–0.48 V | mono on every chip |
   | 680 kΩ ±5 % | 0.38–0.47 V | mono on every chip |
   | 750 kΩ ±5 % | 0.35–0.43 V | can read as shutdown on some chips |
@@ -257,7 +265,7 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 - **Without a GPIO:** 1 MΩ from the 5 V rail, exactly as Adafruit does it, also works. The amp is then always
   enabled and drops to standby (340 µA) by itself whenever the ESP stops the I2S clock. That frees GPIO15 but loses
   the guaranteed shutdown during boot.
-- GPIO high → mono mix, amp on. GPIO low → shutdown. While the ESP boots, the GPIO floats and the internal pull-down
+- GPIO high → left channel (4.7 kΩ; the earlier 560 kΩ gave the mono mix), amp on. GPIO low → shutdown. While the ESP boots, the GPIO floats and the internal pull-down
   keeps the amp in shutdown, so it stays silent during boot with no extra part.
 - Alternatives:
   - Left only: GPIO to SD_MODE through 2 kΩ, as on Maxim's board (3.3 V is above B2; with VDD at 5 V the series
@@ -266,8 +274,10 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 - Firmware side: raise SD before playback; after playback, let the audio fade or end, then pull it low (the
   datasheet: the chip has no ramp-down on entering shutdown, so the data should go quiet first). Without the GPIO the
   chip also drops to standby by itself (340 µA) when BCLK stops.
-- Check on the prototype: if the firmware sends mono only in the left slot, the (L+R)/2 mix comes out 6 dB quieter.
-  Either send the same samples to both slots (the usual mono setting) or switch to left-only mode.
+- Settled: left channel only. The firmware sends the same mono samples in both slots, so the level matches the
+  mono mix, but the mono mix had artifacts and left-only did not (tested 2026-10-06). The mono samples are
+  themselves the left channel: ESPHome's mixer keeps channel 0 of a stereo source. So a sound plays in full only if
+  it is mono or has its whole content in the left channel (README 1.5).
 
 ## 6. Layout
 
@@ -295,7 +305,7 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 3. Silence playing at each gain setting: confirm no audible hiss.
 4. Ten minutes at the chosen maximum: the speaker should be warm at most, and the 5 V rail should not dip enough to
    reset the ESP.
-5. Mono level: confirm the (L+R)/2 mix is not 6 dB down (section 5).
+5. Left channel: with 4.7 kΩ, SD_MODE measures about 3 V while playing and about 0 V when idle (section 5).
 6. Boot and shutdown: no pop at power-up, during ESP boot, or when SD goes low after playback.
 7. Interference: with the athan playing loud, the Wi-Fi stays connected and a radio stream does not stutter, and a
    nearby AM/FM radio does not pick up a buzz. If any of that fails, add the filter from section 8.
