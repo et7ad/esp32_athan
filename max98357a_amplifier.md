@@ -2,7 +2,8 @@
 
 Date: 2026-10-04. Companion to `version3_planning.md` (sections 3.1, 3.3 and 3.5) and `HARDWARE.md`. In the
 firmware, SD_MODE is `output: amp_enable` (GPIO15, `pin_amp_sd` in `firmware/athan.yaml`): switched on before any
-playback and off 5 s after the player goes idle (`amp_idle_off`).
+playback (`amp_wake`) and off 5 s after the player goes idle (`amp_idle_off`), also when a requested sound never
+started.
 
 The version 3 board uses the bare MAX98357A chip (MAX98357AETE+T, LCSC/JLCPCB C910544) wired the way Adafruit wires
 its [MAX98357A I2S amp breakout, product 3006](https://www.adafruit.com/product/3006), with three changes: SD_MODE is

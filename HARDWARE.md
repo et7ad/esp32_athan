@@ -276,6 +276,6 @@ Put the exported STL/STEP/F3D files in `hardware/enclosure/`.
    `Athan:` in the config dump, `Slot athan: (empty)` on a new board, and the I2C scan finding 0x3C. Once Wi-Fi is
    set up, `./build_firmware.sh logs athan.local` works without the adapter, and updates go over Wi-Fi
    (`./flash_firmware.sh ota`).
-4. Set up Wi-Fi (README 1.1). Within minutes the default sounds install. Play one from the menu at 10 %, then
+4. Set up Wi-Fi (README 1.1). Within minutes the default sounds download. Play one from the menu at 10 %, then
    raise the volume and listen for clipping (that sets the gain jumper).
 5. Run the full checklist in `version3_planning.md` section 13 on the first boards.

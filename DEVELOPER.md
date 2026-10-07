@@ -33,7 +33,7 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
    4. Applies the volume and draws the screen.
 3. `AthanComponent::loop()` runs a 1 s tick:
    1. Fetches the catalog and the station list when due.
-   2. Auto-installs the default into an empty slot (catalog entry 0; per slot at most every 30 min).
+   2. Downloads the default into an empty slot (catalog entry 0; per slot at most every 30 min).
    3. Runs `prayer_tick_()` and `radio_tick_()`.
 4. The yaml's 1 s interval watches `schedule_version()` and reruns `load_today` when it changes (new day, new
    data, new location).
@@ -47,11 +47,11 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `slot_valid(s)`, `slot_label(s)` | Slot 0 athan, 1 fajr, 2 tawashih, 3 tick |
 | `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline. False if the slot is empty or being rewritten (the yaml then plays three click tones) |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
-| `install_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The installed entry is fetched only if the server's file changed (`If-None-Match` with the stored ETag; no ETag stored: nothing is fetched) |
-| `installed_entry(list)` | Index of the list entry whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
-| `sound_busy()`, `sound_status()` | One install/upload at a time |
+| `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The selected entry is never downloaded again ("already selected"); downloading another entry first fetches it anew |
+| `selected_entry(list)` | Index of the list entry (the selected one) whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
+| `sound_busy()`, `sound_status()` | One download/upload at a time |
 | `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists |
-| `preview_catalog(l, e)` | Nothing stored. The installed entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
+| `preview_catalog(l, e)` | Nothing stored. The selected entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
 | `stop_media()` | Stops the media pipeline (preview or radio) and a preview playing from flash, never the athan or the tick |
 | `radio_play(slot, subscribed)`, `radio_stop()`, `radio_active()` (-1 or slot) | Radio |
 | `station_available(slot, subscribed)`, `station_name(slot)`, `own_url(slot)`, `radio_status()` | Radio menu/web |
@@ -65,12 +65,12 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 ## 4. Threading
 
 - **Main loop:** the yaml, `loop()`, the media player calls, entity publishing, the stored-sound map.
-- **Worker task:** a FIFO of `Job`s (`CATALOG`, `STATIONS`, `STATION_PLAY`, `INSTALL_URL`, `COMMIT_BUFFER`,
+- **Worker task:** a FIFO of `Job`s (`CATALOG`, `STATIONS`, `STATION_PLAY`, `DOWNLOAD_URL`, `COMMIT_BUFFER`,
   `PRAYER_YEAR`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
   limit before and during the read, PSRAM buffer), JSON parsing and flash erase/write. Results come back with
   `defer()`.
 - **httpd task:** `AudioWebHandler` renders the page from copies taken under `mutex_` and queues
-  install/preview/stop in `web_actions_`. Uploads are appended into a PSRAM buffer under `mutex_`, and
+  download/preview/stop in `web_actions_`. Uploads are appended into a PSRAM buffer under `mutex_`, and
   `upload_end()` queues `COMMIT_BUFFER`.
 - **Slot rewrite handshake:** after the file passes every check, the worker `defer`s a request to the main loop
   to `invalidate()` the slot. The main loop refuses if that slot is playing. The worker waits up to 10 s on a
@@ -93,22 +93,19 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | 3 tick | 0x8A0000 | 0x070000 | 400,000 B | 1 min |
 
 **Header** (first 4 KB sector of the region): `magic "ATH1"`, `version 2`, `length`, `data_crc`, `duration_ms`,
-`label[64]`, `source_crc` (CRC-32 of the download link, never 0; 0 for an upload), `etag[80]` (the server's ETag,
-empty if none or longer), `header_crc` (CRC-32 of the fields before it). A version 1 header (no source or ETag)
-is still read: its `header_crc` sits where `source_crc` is now, and such a sound is matched to the list by its
+`label[64]`, `source_crc` (CRC-32 of the download link, never 0; 0 for an upload), `header_crc` (CRC-32 of the
+fields before it). A version 1 header (no source) is still read: its `header_crc` sits where `source_crc` is now, and such a sound is matched to the list by its
 label. The MP3 follows at +4 KB. `begin()` and `reload()`
 check both CRCs, then memory-map the region (`esp_partition_mmap`) and wrap it in an `audio::AudioFile`
 (`audio::AudioFileType::MP3`), which `play_slot()` hands to `SpeakerMediaPlayer::play_file(file, announcement=true)`.
 
-**Install** (`INSTALL_URL`):
+**Download** (`DOWNLOAD_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as
-   soon as it passes the limit. For the installed entry the request carries `If-None-Match: <stored ETag>`, and
-   a `304` ends the job ("already installed (same file)"). GitHub's raw files send a 66-character ETag.
+   soon as it passes the limit. The selected entry is not downloaded at all (`selected_entry()`).
 2. `mp3_scan()` needs three chained Layer III frames to sync (an ID3v2 tag is skipped). The duration is the sum
    of the frame durations.
 3. Size and duration are checked against the slot's limits.
-4. Handshake (section 4), erase, 4 KB bounce writes with progress, header last (with the link's CRC and the
-   response's ETag; an upload stores 0 and no ETag).
+4. Handshake (section 4), erase, 4 KB bounce writes with progress, header last (with the link's CRC; an upload stores 0).
 
 Any failure frees the buffer and leaves the slot as it was. A power cut during the write leaves no valid header,
 so the slot is empty and the default comes back automatically.
@@ -182,9 +179,11 @@ to 00:00–23:59.
 
 | Script | Does |
 |---|---|
-| `apply_volume`, `apply_fajr_volume` | Set the player volume |
+| `apply_volume`, `apply_fajr_volume` | Set the player volume. Owner % → 10 % = −`volume_range_db` dB (30) rising evenly to 100 % = 0 dB, 0 % silent; converted to ESPHome's player value, which its I2S speaker turns into −49 dB × (1 − v) |
 | `play_tone_click`, `play_tone_volume` | Play the built-in tones, not over an athan |
-| `fajr_volume_feedback` | Web slider: play a tone at the Fajr level, then restore |
+| `apply_playing_volume` | The volume for whatever plays now: Fajr volume for the Fajr athan, the Pre-Fajr Tawashih (`prefajr_playing`) and Fajr/Tawashih previews (`preview_list()` 1 or 2), else normal. Every "restore" uses it |
+| `fajr_volume_feedback` | Fajr volume changed (menu or web): tone at the new Fajr level, then `apply_playing_volume`; while a Fajr sound plays it just takes the new level |
+| `amp_wake` | Amp on ahead of a sound and starts `amp_idle_off`, so a sound that never starts (no radio link, empty tawashih or tick slot) cannot leave it on |
 | `amp_idle_off` | Amp off 5 s after the player goes idle |
 | `silence_audio` | Stop everything, cancel the radio resume |
 | `radio_start` | Play `radio_slot` |
@@ -214,8 +213,8 @@ them together.
   Radio Stations, Location and Prayer Times, System.
 - `/audio` (custom handler): `GET /audio` renders the page. Its sticky status bar is an iframe named `st` showing
   `GET /audio/status?g=`, and every form posts into it (`target="st"`), so an action never reloads or scrolls the
-  page. `POST /audio/install|preview|stop?list=&entry=&g=` queue an action and redirect to the bar.
-  `POST /audio/upload?slot=&g=` is a multipart upload. The bar refreshes itself every 2 s while an install or
+  page. `POST /audio/download|preview|stop?list=&entry=&g=` queue an action and redirect to the bar.
+  `POST /audio/upload?slot=&g=` is a multipart upload. The bar refreshes itself every 2 s while a download or
   upload is busy. `g` is `sounds_changed_` when the page was drawn: once a slot changed, the bar offers
   **Reload page**. Plain HTML, no JavaScript.
 - ESPHome's page loads one script, `firmware/web_audio_link.js` (`web_server: js_include`, served as `/0.js`). It

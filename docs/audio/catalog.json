@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "note": "Suggested sounds. Entry 1 of each list is the default a new device installs. 'url' may be relative to this file's folder (docs/audio/) or a full https URL. Every file must already pass the device's checks: MP3, athan/fajr/tawashih at most 3 MB and 5 min, tick at most 0.4 MB and 1 min. Names: plain ASCII, at most 12 characters (OLED). Up to 10 entries per list.",
+  "note": "Suggested sounds. Entry 1 of each list is the default a new device downloads. 'url' may be relative to this file's folder (docs/audio/) or a full https URL. Every file must already pass the device's checks: MP3, athan/fajr/tawashih at most 3 MB and 5 min, tick at most 0.4 MB and 1 min. Names: plain ASCII, at most 12 characters (OLED). Up to 10 entries per list.",
   "athan": [
     {"name": "Athan 1", "url": "athan/01.mp3"},
     {"name": "Abdul Basit", "url": "athan/02.mp3"},

@@ -1,7 +1,7 @@
 #pragma once
 // athan: the version 3 parts ESPHome does not provide.
 //
-//  * Four replaceable sounds in flash (athan, fajr, tawashih, tick): install from the suggested list on GitHub or
+//  * Four replaceable sounds in flash (athan, fajr, tawashih, tick): download from the suggested list on GitHub or
 //    upload from the /audio web page; every file is checked (MP3, size, duration) in PSRAM before flash is touched.
 //  * The suggested lists (docs/audio/catalog.json) and the radio stations (docs/radio/stations.json).
 //  * Radio: ten slots, each either subscribed to the project's station list (link fetched fresh on every play)
@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -66,11 +67,11 @@ class AthanComponent : public Component {
   bool play_slot(int slot);
   /// True while a stored sound started by play_slot() is playing.
   bool slot_playing() const { return this->playing_slot_ >= 0; }
-  /// Download entry `entry` of the suggested list for `slot` and install it (checks first). The installed entry
-  /// itself is not downloaded again: the server is asked with its ETag and only a changed file is fetched.
-  void install_from_catalog(int slot, int entry);
-  /// Index of the suggested-list entry installed in `slot`, -1 if the installed sound is not in the list.
-  int installed_entry(int slot) const;
+  /// Download entry `entry` of the suggested list into `slot` (checks first). The selected entry is not
+  /// downloaded again (to refresh it, download another entry, then this one).
+  void download_from_catalog(int slot, int entry);
+  /// Index of the suggested-list entry selected in `slot` (stored there), -1 if the slot's sound is not listed.
+  int selected_entry(int slot) const;
   bool sound_busy() const { return this->sound_busy_.load(); }
   std::string sound_status() const;
 
@@ -79,8 +80,13 @@ class AthanComponent : public Component {
   bool catalog_ready() const { return this->catalog_ready_.load(); }
   int catalog_size(int list) const;
   std::string catalog_name(int list, int entry) const;
-  /// Listen to an entry, nothing stored: the installed entry plays from flash, any other streams (media pipeline).
+  /// Listen to an entry, nothing stored: the selected entry plays from flash, any other streams (media pipeline).
   void preview_catalog(int list, int entry);
+  /// Called right before a preview starts (menu or /audio page) with its list, so the yaml can set the volume:
+  /// Fajr volume for lists 1 (fajr) and 2 (tawashih), the normal volume for 0 (athan) and 3 (tick).
+  void set_preview_volume_callback(std::function<void(int)> cb) { this->preview_volume_cb_ = std::move(cb); }
+  /// List being previewed (streaming or from flash), -1 if none.
+  int preview_list() const { return this->preview_list_; }
   /// Stop the radio and any preview (also a preview playing from flash). Never stops the athan or the tick.
   void stop_media();
 
@@ -114,7 +120,7 @@ class AthanComponent : public Component {
   std::string prayer_status() const;
 
   // ---------------- used by the /audio web page (httpd task) ----------------
-  enum class WebAction : uint8_t { INSTALL, PREVIEW, STOP };
+  enum class WebAction : uint8_t { DOWNLOAD, PREVIEW, STOP };
   void web_action(WebAction action, int list, int entry);
   bool upload_begin(int slot, const std::string &filename);
   void upload_data(const uint8_t *data, size_t len);
@@ -125,9 +131,9 @@ class AthanComponent : public Component {
   std::string render_audio_status(uint32_t gen);
 
  protected:
-  enum class JobType : uint8_t { CATALOG, STATIONS, STATION_PLAY, INSTALL_URL, COMMIT_BUFFER, PRAYER_YEAR };
+  enum class JobType : uint8_t { CATALOG, STATIONS, STATION_PLAY, DOWNLOAD_URL, COMMIT_BUFFER, PRAYER_YEAR };
   enum class PrayerPurpose : uint8_t { CURRENT, PREVIOUS, NEXT };
-  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY, NOT_MODIFIED };
+  enum class HttpResult : uint8_t { OK, NOT_FOUND, TOO_BIG, FAILED, NO_MEMORY };
   struct Job {
     JobType type;
     int slot{-1};
@@ -137,7 +143,6 @@ class AthanComponent : public Component {
     PrayerPurpose purpose{PrayerPurpose::CURRENT};
     std::string url;
     std::string label;
-    std::string etag;  // INSTALL_URL: the installed file's ETag when this entry is the installed one
     std::string key;
     uint8_t *data{nullptr};
     size_t len{0};
@@ -148,15 +153,11 @@ class AthanComponent : public Component {
   void worker_loop_();
   void enqueue_(Job &&job);
   void run_job_(Job &job);
-  /// `if_none_match` (an ETag) makes the request conditional: NOT_MODIFIED means the server's file is that one.
-  /// `etag_out` receives the response's ETag.
-  HttpResult http_get_(const std::string &url, size_t max_len, uint8_t **out, size_t *out_len, int progress_slot,
-                       const std::string &if_none_match = "", std::string *etag_out = nullptr);
+  HttpResult http_get_(const std::string &url, size_t max_len, uint8_t **out, size_t *out_len, int progress_slot);
   void job_catalog_();
   void job_stations_(Job &job, bool for_play);
-  void job_install_url_(Job &job);
-  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0,
-                   const std::string &etag = "");
+  void job_download_url_(Job &job);
+  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0);
   void job_prayer_(Job &job);
   bool parse_stations_(const uint8_t *data, size_t len);
 
@@ -209,17 +210,20 @@ class AthanComponent : public Component {
   std::atomic<bool> stations_ready_{false};
   std::atomic<bool> stations_pending_{false};
   std::atomic<bool> sound_busy_{false};
-  std::atomic<uint32_t> sounds_changed_{0};  // +1 after every install that changed a slot (/audio reload hint)
+  std::atomic<uint32_t> sounds_changed_{0};  // +1 after every download/upload that changed a slot (/audio reload hint)
   // Retry deadlines in 64-bit milliseconds (millis_64()): a 32-bit deadline goes stale after 24.8 days.
   uint64_t next_catalog_try_{0};
   uint64_t next_stations_try_{0};
-  uint64_t next_default_try_[NUM_LISTS]{};  // automatic install of an empty slot: at most every 30 min
+  uint64_t next_default_try_[NUM_LISTS]{};  // automatic download into an empty slot: at most every 30 min
 
   // playback of stored sounds
   int playing_slot_{-1};
   uint32_t playing_since_{0};
   bool playing_seen_{false};
-  bool slot_preview_{false};  // the stored sound playing is a preview (stop_media() stops it, an install may start)
+  std::function<void(int)> preview_volume_cb_;
+  int preview_list_{-1};
+  uint32_t preview_started_{0};
+  bool slot_preview_{false};  // the stored sound playing is a preview (stop_media() stops it, a download may start)
 
   // radio
   int radio_station_{-1};

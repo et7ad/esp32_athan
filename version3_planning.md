@@ -23,7 +23,7 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Files | `firmware/athan_v3.yaml`, component `athan_audio` | `firmware/athan.yaml`, component `firmware/components/athan/` (`DEVELOPER.md`) |
 | Radio defaults (7) | A "radio" list in the catalog and a **Reset Radio Stations** button | `docs/radio/stations.json` (exactly 10 stations) and a per-slot switch **Radio N follows project list** (on by default). A following slot fetches the list again on every play, so changing a link there reaches every following clock at its next play. Off = the slot's own link (`Radio N own link`). The OLED shows the station's name from the list |
 | Catalog (5) | Absolute URLs, a `radio` list | Lists `athan`, `fajr`, `tawashih`, `tick` only; a `url` may be relative to `docs/audio/`. Clocks re-read it every 12 h |
-| Preview (6.1) | 20 s | Plays until stopped, Next moves on, or a choice is made. The installed entry plays from flash, not the internet. A sound list opens on the installed entry and plays it. Installing the installed entry downloads nothing (ETag check) |
+| Preview (6.1) | 20 s | Plays until stopped, Next moves on, or a choice is made. The selected entry plays from flash, not the internet. A sound list opens on the selected entry and plays it. Downloading the selected entry again does nothing |
 | Location | Index persisted | The **key** is persisted (`selected_location_key`), so the Location list may be reordered or extended freely |
 | Generator (9.2, 9.3) | One script writes the V3 yearly file and the V2 daily files | Every script here writes **only** the V3 yearly file (one positional list per day). V2 daily files are produced in the V2 repository with its own scripts. `make_yearly_json.py` converts years that exist only as V2 daily files |
 | Built-in tones (4.1) | `audio_file` | `media_player: files:` from `firmware/sounds/click.mp3` and `volume.mp3` (V2's C3 and C2), added by the builder |
@@ -31,7 +31,7 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Wi-Fi setup screen (8.1) | Text open | `Wi-Fi setup:` / `BT: press Select` (or `allowed`, `joining..`) / `Hotspot: on` or `soon`. On that screen a Select press only authorises Bluetooth |
 | Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock** |
 | USB-C (3.1, 3.4) | 16-pin with USB data; flashing and logs over the charging cable | **6-pin power-only USB-C** (owner's choice 2026-10-05, with 5.1 kΩ CC resistors). The first flash and serial logs go through J6, a populated 1×6 UART header (GND, IO0, EN, TXD0, RXD0, 3V3; jumper 1–2 = download mode) with a 3.3 V USB-serial adapter; the firmware logs on UART0. Later updates go over Wi-Fi |
-| Empty slot | Reinstall the default at the next boot | Reinstalled automatically while online, at most every 30 min per slot (a missing default is not hammered) |
+| Empty slot | Download the default again at the next boot | Downloaded again automatically while online, at most every 30 min per slot (a missing default is not hammered) |
 
 Main menu as built (16 items): Athan, Fajr Athan, Tawashih, Hourly Tick, Tick Window, Athan On/Off, Pre-Fajr,
 Radio, Location, Volume, Fajr Volume, Clock, Update, Lock Buttons, Info, Cancel.
@@ -191,8 +191,8 @@ MB here means 1,000,000 bytes, the same unit Finder and Windows show, so a user 
 the volume tone are tiny and never change; they are built into the firmware (`audio_file`).
 
 There is no library, file numbering or choice index on the device. Each slot holds exactly one file plus a short
-label (the name from the list, or the uploaded file's name), kept so the web page and the OLED can say what is
-installed. Changing a sound means replacing that slot's file.
+label (the name from the list, or the uploaded file's name), kept so the web page and the OLED can say which sound is
+selected. Changing a sound means replacing that slot's file.
 
 Format: MP3 (any bitrate and sample rate; ESPHome's resampler handles the rest). Mono, or stereo with the whole
 sound in the left channel: the clock plays only the left channel (README 1.5). Other formats are
@@ -229,21 +229,21 @@ there is roughly 1.5 MB of slack per app slot.
    reason, and leave the slot untouched. A partial download never reaches flash, so nothing needs cleaning up.
 4. Only after every check passes: erase the slot's region, write the file, then write the header last. This takes
    tens of seconds; the OLED and the web page show progress.
-5. Refuse to start an install while an athan is playing or another install is running.
+5. Refuse to start a download while an athan is playing or another download is running.
 
 Accepted risk: a power cut during step 4 leaves the slot without a valid header. The device then treats the slot
-as empty (4.4) and re-installs the list's default at the next boot with internet. Making step 4 atomic costs a
+as empty (4.4) and downloads the list's default again at the next boot with internet. Making step 4 atomic costs a
 fourth 3 MB region (section 16).
 
 ### 4.4 First boot and missing files
 
-- A new device has empty slots. Once Wi-Fi is up, it installs entry 1 of each list in the catalog (section 5).
+- A new device has empty slots. Once Wi-Fi is up, it downloads entry 1 of each list in the catalog (section 5).
 - If a slot is empty or invalid at playback time (first boot without internet, or after the power-cut case above),
   the device plays the built-in tone three times and logs it, so the prayer time is still marked audibly.
 
 ### 4.5 PSRAM budget (8 MB)
 
-One install at a time: up to 3 MB staging buffer, plus the media player's stream buffer (1 MB default), plus
+One download at a time: up to 3 MB staging buffer, plus the media player's stream buffer (1 MB default), plus
 Bluetooth buffers when setup mode is on (section 8). Local playback is memory-mapped and uses no PSRAM for the file.
 
 ## 5. The suggested lists on GitHub
@@ -271,7 +271,7 @@ One catalog file in the V3 repository (9.3), for example `docs/audio/catalog.jso
 
 ### 5.1 The audio library in the V3 repository (decided 2026-10-04)
 
-All current recordings become public in the V3 repository, so any device can preview, stream or install them; owners can
+All current recordings become public in the V3 repository, so any device can preview, stream or download them; owners can
 still upload their own (6.1). Layout, committed under `docs/` (today's `SDCard_files/` stays gitignored):
 
 | Folder | From | Entries |
@@ -305,19 +305,19 @@ ESPHome's select entities have fixed options at compile time, so they cannot sho
 custom component (section 10) therefore serves its own small page, for example `http://athan.local/audio`: plain
 HTML forms with no JavaScript, and every check runs on the device. For each slot:
 
-- What is installed (label) and the install status (idle, downloading 40 %, writing, failed: too long, …).
+- Which sound is selected (label) and the download status (idle, downloading 40 %, writing, failed: too long, …).
 - The ten catalog entries, each with **Preview** (streams the file from the internet for 20 s, nothing is stored)
-  and **Install** (the replace flow of 4.3).
+  and **Download** (the replace flow of 4.3).
 - **Upload your own**: file picker + Upload. Same checks; refused before replacing if it is over the size limit or
   over the duration limit.
 
 The main ESPHome page keeps its entities (volume, switches, buttons) and adds text sensors for the four labels, the
-install status, and the audio page's address.
+download status, and the audio page's address.
 
 ### 6.2 Device menu
 
 - **Athan**, **Fajr Athan**, **Tawashih**, **Hourly Tick**: Next steps through the catalog names, streaming a
-  preview of each (as today); Select installs the highlighted one with progress on the OLED; failures show the
+  preview of each (as today); Select downloads the highlighted one with progress on the OLED; failures show the
   reason and keep the current file. Hourly Tick also has an **Off** entry: a persisted on/off replaces today's
   "None" choice.
 - **Pre-Fajr** toggles the Pre-Fajr Tawashih on or off in place, like Clock (6.3). It replaces the Q item.
@@ -437,7 +437,7 @@ ESPHome warns that the Bluetooth stack together with audio components can crash 
   images start with the same 0xE9 byte, so an ESP8266 must never be offered a version 3 binary. Version 3 gets its
   own version numbering.
 - GitHub rate-limits unauthenticated raw downloads per IP. A device makes one prayer-times request a year plus the
-  occasional catalog, preview or install, far below that; section 16 has a CDN fallback if it ever matters.
+  occasional catalog, preview or download, far below that; section 16 has a CDN fallback if it ever matters.
 
 ### 9.2 Prayer times: one file per year (decided 2026-10-04)
 
@@ -659,12 +659,12 @@ directly (Seeed schematic v1.2), so the amp breakout can take its 5 V from there
    - A new device and a device whose saved network vanished both reach setup mode; when the saved network
      returns, the device reconnects by itself.
    - Free internal heap checked with Bluetooth + hotspot on and a local athan playing.
-3. Each slot installs from the catalog; a slot is unchanged after: pulling the network mid-download, a file over
+3. Each slot downloads from the catalog; a slot is unchanged after: pulling the network mid-download, a file over
    the size limit (3 MB, tick 0.4 MB), a file over the duration limit (5 min, tick 1 min), a non-MP3 file. The OLED
    and the page show the reason.
 4. Upload from the audio page with the same four failure cases.
 5. Power cut during the flash write → the slot is treated as empty → the tone plays at prayer time → the default is
-   re-installed at the next boot.
+   downloaded again at the next boot.
 6. Athan, Fajr athan, tawashih and tick play from the memory-mapped slots at 10 %…100 % volume; no hiss when idle
    with the amp shut down. Pre-Fajr Tawashih toggled from the web, from HA and from the menu: it fires 25 min before
    Fajr with the relay on for 15 min.
@@ -709,7 +709,7 @@ No open questions remain. The owner decided:
 3. The former Q option is visible everywhere and named **Pre-Fajr Tawashih** (6.3).
 4. Hourly tick: at most 0.4 MB and 1 minute (4.1).
 5. The athan pauses the radio, which resumes afterwards (section 7).
-6. All current recordings go public in the V3 repository under `docs/audio/` for preview, streaming and install; owners can
+6. All current recordings go public in the V3 repository under `docs/audio/` for preview, streaming and download; owners can
    also upload their own (5.1).
 7. Prayer times come as one file per mosque per year (≤ 100 KB), downloaded once and stored; the internet is then
    only needed for the clock (9.2). Next year's file is looked for from 1 December, may legitimately appear only

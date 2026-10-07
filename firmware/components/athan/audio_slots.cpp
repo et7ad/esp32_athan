@@ -17,7 +17,7 @@ static const uint32_t REGION_OFFSET[NUM_SLOTS] = {0x000000, 0x2E0000, 0x5C0000, 
 static const uint32_t REGION_SIZE[NUM_SLOTS] = {0x2E0000, 0x2E0000, 0x2E0000, 0x070000};
 static const uint32_t HEADER_SECTOR = 4096;
 static const uint32_t MAGIC = 0x31485441;  // "ATH1"
-static const uint32_t VERSION = 2;  // 2 added source_crc + etag; version 1 headers are still read
+static const uint32_t VERSION = 2;  // 2 added source_crc; version 1 headers are still read
 static const esp_partition_subtype_t AUDIO_SUBTYPE = static_cast<esp_partition_subtype_t>(0x40);
 
 bool AudioSlots::begin() {
@@ -48,12 +48,6 @@ uint32_t AudioSlots::source_id(const std::string &url) {
   return crc == 0 ? 1 : crc;
 }
 
-std::string AudioSlots::etag(int slot) const {
-  if (!this->valid(slot))
-    return "";
-  return std::string(this->header_[slot].etag, strnlen(this->header_[slot].etag, sizeof(this->header_[slot].etag)));
-}
-
 std::string AudioSlots::label(int slot) const {
   if (!this->valid(slot))
     return "";
@@ -66,12 +60,11 @@ bool AudioSlots::read_header_(int slot, Header *h) const {
   if (h->magic != MAGIC)
     return false;
   if (h->version == 1) {
-    // Version 1 stopped after label: its CRC sits where source_crc is now, and the rest is erased flash.
+    // Version 1 stopped after label: its CRC sits where source_crc is now.
     uint32_t crc = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(h), offsetof(Header, source_crc));
     if (crc != h->source_crc)
       return false;
     h->source_crc = 0;
-    std::memset(h->etag, 0, sizeof(h->etag));
   } else if (h->version == VERSION) {
     uint32_t crc = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(h), offsetof(Header, header_crc));
     if (crc != h->header_crc)
@@ -115,7 +108,6 @@ bool AudioSlots::check_slot_(int slot) {
   }
   this->header_[slot] = h;
   this->header_[slot].label[sizeof(h.label) - 1] = '\0';
-  this->header_[slot].etag[sizeof(h.etag) - 1] = '\0';
   this->file_[slot].data = data;
   this->file_[slot].length = h.length;
 #ifdef USE_AUDIO_MP3_SUPPORT
@@ -142,8 +134,7 @@ void AudioSlots::reload(int slot) {
 }
 
 bool AudioSlots::write(int slot, const uint8_t *data, size_t len, uint32_t duration_ms, const std::string &label,
-                       uint32_t source, const std::string &etag, void (*progress)(void *ctx, int percent),
-                       void *ctx) {
+                       uint32_t source, void (*progress)(void *ctx, int percent), void *ctx) {
   if (this->part_ == nullptr || slot < 0 || slot >= NUM_SLOTS || len == 0 || len > SLOT_MAX_BYTES[slot])
     return false;
   const uint32_t base = REGION_OFFSET[slot];
@@ -188,8 +179,6 @@ bool AudioSlots::write(int slot, const uint8_t *data, size_t len, uint32_t durat
   h.duration_ms = duration_ms;
   std::strncpy(h.label, label.c_str(), sizeof(h.label) - 1);
   h.source_crc = source;
-  if (etag.size() < sizeof(h.etag))  // a longer ETag is not kept: that sound is then matched by its link only
-    std::strncpy(h.etag, etag.c_str(), sizeof(h.etag) - 1);
   h.header_crc = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(&h), offsetof(Header, header_crc));
   err = esp_partition_write(this->part_, base, &h, sizeof(h));
   if (err != ESP_OK) {

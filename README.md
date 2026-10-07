@@ -71,7 +71,7 @@ times, the clock restarts, and it enters setup mode (Bluetooth after 15 seconds,
 minutes).
 
 **Your mosque:** a new clock starts with the first mosque in the list (Davis). Choose yours from the menu
-(**Location**) or on the web page. The clock downloads that mosque's year of prayer times. It also installs
+(**Location**) or on the web page. The clock downloads that mosque's year of prayer times. It also downloads
 the default sounds the first time it is online, which takes a few minutes.
 
 ### 1.2 The screen
@@ -92,9 +92,12 @@ Rem 02:37      ▸ 🔒  time remaining, and status marks
 | Padlock, bottom right | The buttons are locked (1.3) |
 | Circled, crossed-out **W** | No Wi-Fi. The athan keeps working from the stored times |
 
-Other screens: **Athan Time: Asr prayer** while the athan plays. **Wi-Fi setup:** lists `BT: press Select` /
-`BT: allowed` / `BT: joining..` and `Hotspot: on` / `Hotspot: soon`. **Loading prayer times** appears on a new
-device until its first download finishes.
+Other screens:
+- **Athan Time: Asr prayer** while the athan plays.
+- **Struck-through rows** (lines through all three rows, with `--:--` where nothing is known) until the clock is set
+  after a power-up; lines through rows 2 and 3 only until the day's prayer times are loaded. As on V2.
+- **Wi-Fi setup:** while Bluetooth setup or the hotspot is open, it shows `BT: press Select` / `BT: allowed` /
+  `BT: joining..` and `Hotspot: on` / `Hotspot: soon`.
 
 ### 1.3 Buttons
 
@@ -110,7 +113,7 @@ In the menu, **Next** moves and **Select** chooses. The menu closes by itself af
 
 | Menu item | What it does |
 |---|---|
-| **Athan** | Opens on the installed athan and plays it. Next steps through the suggested athans and plays a preview of each; the installed one always plays from the device. Select installs the one showing. Selecting the installed one downloads nothing. Installing takes up to a minute and the screen shows progress; the old sound stays until the new one has passed every check |
+| **Athan** | Opens on the selected athan and plays it. Next steps through the suggested athans and plays a preview of each; the selected one always plays from the device. Select downloads the one showing and makes it the selected athan. Selecting the selected one again downloads nothing. A download takes up to a minute and the screen shows progress; the old sound stays until the new one has passed every check |
 | **Fajr Athan** | The same, for the Fajr athan. Previews play at the Fajr volume |
 | **Tawashih** | The same, for the Pre-Fajr Tawashih |
 | **Hourly Tick** | The same, plus **Off** as the first entry (where it opens while the tick is off). Choosing a tick switches the hourly tick on |
@@ -139,7 +142,7 @@ grouped:
 - **Now:** Stop Audio, Athan Playing, Next Prayer, Today's Times, Buttons Locked, 12-hour Clock.
 - **Athan:** Volume, Fajr Volume, Pre-Fajr Tawashih, Hourly Tick, Tick Window Start / End.
 - **Athan On/Off per Prayer:** one switch per prayer.
-- **Sounds:** what is installed, the last install's status, and the link to the sounds page (1.5).
+- **Sounds:** the selected sounds, the last download's status, and the link to the sounds page (1.5).
 - **Radio:** Radio Station, Play Radio, Stop Radio, Radio Status.
 - **Radio Stations:** the ten slots (1.6).
 - **Location and Prayer Times:** Location, Refresh Prayer Times, Prayer Data (which years are stored).
@@ -152,14 +155,14 @@ The same entities show up in Home Assistant when you add the device there (ESPHo
 
 Open it from the **Change Sounds At** link on the device page, or type the address. A status bar stays at the top
 of the page, with a **Stop** button for previews. Every button reports there, so the page never reloads or jumps
-back to the top. After an install, the bar offers **Reload page** to show the new sound. For each of the four
+back to the top. After a download or upload, the bar offers **Reload page** to show the new sound. For each of the four
 sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
 
-- **Installed:** the name and length of the sound on the device.
-- **The suggested list** from this project, with **Preview** and **Install** for each entry. The installed entry is
-  marked *installed*. Preview stores nothing: the installed entry plays from the device, any other streams from
-  the internet. Install downloads the entry, checks it, and only then replaces the installed sound. Installing the
-  installed entry downloads nothing: the clock asks GitHub whether the file changed and fetches it only if it did.
+- **Selected:** the name and length of the sound stored on the clock, the one it plays.
+- **The suggested list** from this project, with **Preview** and **Download** for each entry. The selected entry is
+  marked *selected*. Preview stores nothing: the selected entry plays from the clock, any other streams from the
+  internet. Download fetches the entry, checks it, and only then replaces the selected sound. Downloading the
+  selected entry does nothing. To fetch it again, download another entry and then this one.
 - **Upload your own:** pick an MP3 file on your phone or computer and press Upload.
 
 Limits, checked before anything is replaced:
@@ -178,7 +181,7 @@ echo) loses it. The `ffmpeg … -ac 1` command above mixes both channels into on
 amplifier is wired for left only because its mono-mix mode caused audible artifacts during testing.
 
 A failed download, a file that is too big or
-too long, or a file that is not MP3 never touches the installed sound. The page says why it refused. Installing
+too long, or a file that is not MP3 never touches the selected sound. The page says why it refused. A download
 is refused while that sound is playing.
 
 ### 1.6 Radio
@@ -319,7 +322,7 @@ Make sure the dashboard image is 2026.9 or newer (`docker pull esphome/esphome:l
 the top of the yaml, for example `athan3`), or `athan.local`, Home Assistant and the dashboard will mix them up.
 In a shared dashboard config folder, also save the V3 yaml under another file name.
 
-The first boot with internet installs the default sounds, which are entry 1 of each list in
+The first boot with internet downloads the default sounds, which are entry 1 of each list in
 [docs/audio/catalog.json](docs/audio/catalog.json). Until then, an athan time is marked with three tones.
 
 Internals are in [DEVELOPER.md](DEVELOPER.md), and the design reasoning is in
@@ -370,14 +373,15 @@ V2 clocks read **daily** files from the V2 repository. Produce those with the V2
 ### 3.2 Sounds
 
 `python3 scripts/prepare_audio.py` builds the whole library from the V2 SD-card recordings
-(`../esp_athan/SDCard_files`: A → athan, F → fajr, D → tawashih, B → tick). It strips tags and cover art,
-re-encodes only the files over a limit (mono 64 kbps, ticks 48 kbps), speeds up any recording longer than the
-limit just enough to fit (pitch unchanged; `--long trim` cuts with a fade-out instead), and checks every result.
-Add `--check` to see what it would do without writing anything.
+(`../esp_athan/SDCard_files`: A → athan, F → fajr, D → tawashih, B → tick). Every file is rebuilt into one plain
+format: MP3, mono, 48 kHz (the clock's own rate, so it never resamples), constant 64 kbps, no tags, no cover art,
+no info frame. Each gets one plain gain so its decoded peak sits near −2 dBFS (no clipping, similar loudness),
+and is checked to be exactly as long as its source; nothing is ever sped up or cut, and a recording over the
+length limit is refused. Add `--check` to see what it would do without writing anything.
 
 - The files go in `docs/audio/athan/`, `fajr/`, `tawashih/` and `tick/`, named `01.mp3` … `10.mp3`.
 - Names and links go in [docs/audio/catalog.json](docs/audio/catalog.json). Each list holds up to 10 entries.
-  Entry 1 is the default that new clocks install. A `url` can be relative to `docs/audio/` (`athan/01.mp3`) or a
+  Entry 1 is the default that new clocks download. A `url` can be relative to `docs/audio/` (`athan/01.mp3`) or a
   full https link.
 - Names are plain ASCII and at most 12 characters, so they fit the screen.
 - Every file must already pass the clock's checks (1.5). Re-encode big ones with the `ffmpeg` line in 1.5; use

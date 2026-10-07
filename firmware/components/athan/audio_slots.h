@@ -44,8 +44,6 @@ class AudioSlots {
   uint32_t source(int slot) const { return this->valid(slot) ? this->header_[slot].source_crc : 0; }
   /// Written before the source was recorded (header version 1): only the label identifies the sound.
   bool legacy(int slot) const { return this->valid(slot) && this->header_[slot].version == 1; }
-  /// The server's ETag for that download ("" if it sent none), for a conditional re-download.
-  std::string etag(int slot) const;
   /// Never 0, so 0 can mean "no link".
   static uint32_t source_id(const std::string &url);
 
@@ -58,9 +56,9 @@ class AudioSlots {
   void reload(int slot);
 
   /// Worker task: erase + write + header. `progress` gets 0..100. Returns false on a flash error.
-  /// `source` is source_id() of the link (0 for an upload), `etag` the server's ETag ("" if none).
+  /// `source` is source_id() of the download link, 0 for an upload.
   bool write(int slot, const uint8_t *data, size_t len, uint32_t duration_ms, const std::string &label,
-             uint32_t source, const std::string &etag, void (*progress)(void *ctx, int percent), void *ctx);
+             uint32_t source, void (*progress)(void *ctx, int percent), void *ctx);
 
  protected:
   struct Header {
@@ -72,7 +70,6 @@ class AudioSlots {
     char label[64];
     // Version 2. A version 1 header ends here with its header_crc where source_crc now sits.
     uint32_t source_crc;
-    char etag[80];
     uint32_t header_crc;  // CRC of every field above
   };
   bool read_header_(int slot, Header *h) const;
