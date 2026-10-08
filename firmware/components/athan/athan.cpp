@@ -257,6 +257,23 @@ void AthanComponent::loop() {
       this->player_->state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING)
     this->preview_list_ = -1;
 
+  // Each pipeline's stops (its resampler went from running to stopped): hard_mute's unmute and the start of a stored
+  // sound after the radio wait for them.
+  if (this->media_speaker_ != nullptr) {
+    const bool st = this->media_speaker_->is_stopped();
+    if (st && !this->media_was_stopped_)
+      this->media_stops_++;
+    this->media_was_stopped_ = st;
+  }
+  if (this->announce_speaker_ != nullptr) {
+    const bool st = this->announce_speaker_->is_stopped();
+    if (st && !this->announce_was_stopped_)
+      this->announce_stops_++;
+    this->announce_was_stopped_ = st;
+  }
+  if (this->media_stop_pending_ && this->player_ != nullptr && this->media_chain_stopped_())
+    this->media_stop_pending_ = false;
+
   // Starts waiting for their pipeline to stop, then the format checks of what started.
   this->pump_starts_();
   this->check_formats_();
@@ -266,6 +283,17 @@ void AthanComponent::loop() {
   if (this->playing_slot_ >= 0 && this->player_ != nullptr && this->announce_pending_ == nullptr) {
     if (this->player_->state == media_player::MEDIA_PLAYER_STATE_ANNOUNCING) {
       this->playing_seen_ = true;
+      // A stored sound cannot play longer than it is. ESPHome's player ends it only once its mixer input has
+      // counted every frame played, and an I2S speaker restart (its "restarting speaker task" errors) loses frames
+      // from that count: the player then announces until other audio plays. Its length plus 5 s ends it.
+      const uint32_t len = this->slots_.duration_ms(this->playing_slot_);
+      if (len > 0 && !this->announce_stop_sent_ && millis() - this->playing_since_ > len + 5000) {
+        ESP_LOGW(TAG, "The %s sound has run 5 s past its length and the player still plays it: stopping it",
+                 SLOT_NAMES[this->playing_slot_]);
+        this->announce_stop_sent_ = true;
+        this->announce_check_slot_ = -1;
+        this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
+      }
     } else if (this->playing_seen_ || millis() - this->playing_since_ > 5000) {
       this->playing_slot_ = -1;
       this->slot_preview_ = false;
@@ -615,7 +643,21 @@ void AthanComponent::stop_media_pipeline_() {
       st != media_player::MEDIA_PLAYER_STATE_PAUSED)
     return;  // nothing on the media pipeline
   this->media_started_ = false;
+  this->media_stop_pending_ = true;
+  this->media_stop_sent_at_ = millis();
   this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(false).perform();
+}
+
+void AthanComponent::begin_drain_watch() {
+  this->drain_media_ = this->media_speaker_ != nullptr && !this->media_speaker_->is_stopped();
+  this->drain_announce_ = this->announce_speaker_ != nullptr && !this->announce_speaker_->is_stopped();
+  this->drain_media_stops_ = this->media_stops_;
+  this->drain_announce_stops_ = this->announce_stops_;
+}
+
+bool AthanComponent::audio_drained() const {
+  return (!this->drain_media_ || this->media_stops_ != this->drain_media_stops_) &&
+         (!this->drain_announce_ || this->announce_stops_ != this->drain_announce_stops_);
 }
 
 void AthanComponent::request_preview(int list, int item, uint32_t delay_ms) {
@@ -729,7 +771,11 @@ void AthanComponent::pump_starts_() {
     }
   }
   if (this->announce_pending_ != nullptr) {
-    const bool stopped = this->announce_chain_stopped_();
+    // Also after the radio or a streamed preview this sound replaces (the athan, the tawashih, a preview from flash):
+    // its last half second is still in the speaker chain, and would play under the new sound's start.
+    const bool stored_start = this->playing_slot_ >= 0 && this->announce_pending_ == this->slots_.file(this->playing_slot_);
+    const bool stopped = this->announce_chain_stopped_() &&
+                         !(stored_start && this->media_stop_pending_ && millis() - this->media_stop_sent_at_ < 3000);
     if (stopped || millis() - this->announce_pending_since_ > 3000) {
       if (!stopped)
         ESP_LOGW(TAG, "Announcement pipeline still busy after 3 s: starting the sound anyway");
@@ -755,6 +801,7 @@ void AthanComponent::pump_starts_() {
 void AthanComponent::check_stream_now_() {
   if (this->fmt_check_running_ || this->stream_url_.empty())
     return;  // one at a time
+  ESP_LOGD(TAG, "Stream check: reading the stream's first frames");
   this->fmt_check_running_ = true;
   Job job;
   job.type = JobType::CHECK_STREAM;
@@ -1311,6 +1358,11 @@ std::string AthanComponent::station_name(int station) const {
   return this->stations_[station].name;
 }
 
+// Reconnects before a station counts as not reachable (about a minute with the waits in radio_tick_()):
+// backup.qurango.net answers one request in four with HTTP 500 or a connection it closes, in runs (five in a row
+// seen from a laptop, four on the prototype, which then gave the station up).
+static const uint8_t RADIO_RETRIES = 6;
+
 void AthanComponent::radio_tick_() {
   if (this->radio_station_ < 0 || this->player_ == nullptr || this->radio_waiting_net_)
     return;
@@ -1324,18 +1376,20 @@ void AthanComponent::radio_tick_() {
     return;
   }
   // No sound: still starting (link, connection and first audio take up to about 8 s), or the stream ended or failed.
-  // A failed link leaves the player idle at once (components/speaker, ATHAN PATCH 2): try again 3, 6, 9 s later.
-  // Still PLAYING without sound (an open link that sends nothing): 20 s.
+  // A failed link leaves the player idle at once (components/speaker, ATHAN PATCH 2): the first retry follows at
+  // once (backup.qurango.net, nine of the ten stations, answers about one request in four with HTTP 500), the next
+  // ones 3.5, 6, 8.5, 11 and 13.5 s after their start. Still PLAYING without sound (an open link that sends nothing):
+  // 20 s.
   const bool idle = !this->stream_pending_ && st != media_player::MEDIA_PLAYER_STATE_PLAYING &&
                     st != media_player::MEDIA_PLAYER_STATE_PAUSED && st != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-  if (millis() - this->radio_started_ < (idle ? 3000u * (this->radio_retries_ + 1u) : 20000u))
+  if (millis() - this->radio_started_ < (idle ? 1000u + 2500u * this->radio_retries_ : 20000u))
     return;
-  if (this->radio_retries_ < 3) {
+  if (this->radio_retries_ < RADIO_RETRIES) {
     this->radio_retries_++;
-    ESP_LOGW(TAG, "Radio stream stopped, reconnecting (%u/3)", this->radio_retries_);
+    ESP_LOGW(TAG, "Radio stream stopped, reconnecting (%u/%u)", this->radio_retries_, (unsigned) RADIO_RETRIES);
     this->radio_play(this->radio_station_, this->radio_subscribed_);
     this->set_radio_status_("Radio " + std::to_string(this->radio_station_ + 1) + ": reconnecting (" +
-                            std::to_string(this->radio_retries_) + "/3)");
+                            std::to_string(this->radio_retries_) + "/" + std::to_string(RADIO_RETRIES) + ")");
     return;
   }
   int s = this->radio_station_;

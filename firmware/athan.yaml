@@ -237,6 +237,11 @@ captive_portal:
 # under esp32: for the Wi-Fi half, which this switch alone does not reach).
 network:
   enable_high_performance: false
+  # What the clock sends (logs, the web page, Home Assistant) gets 16 KB per connection instead of ESP-IDF's 5.7 KB:
+  # with 5.7 KB a burst of log lines at a station start filled it and ESPHome dropped the log connection
+  # ("unexpected disconnect from ESPHome API", reconnected in 0.2 s; Wi-Fi itself stayed up). Only the sending
+  # side: what the clock receives (the station's start burst) keeps ESP-IDF's small window.
+  tcp_send_buffer: 16384
 
 esp32_ble:
   use_psram: true
@@ -306,6 +311,17 @@ media_player:
     id: player
     name: "Speaker"
     task_stack_in_psram: true
+    # Each pipeline's reader buffer (ESPHome's default is 1 MB). Measured on the prototype, 2026-10-07/08:
+    # - A sound from flash starts by filling it in one copy, and ESP-IDF's ring buffer copies with interrupts off:
+    #   1 MB starved the I2S speaker, which restarted ("Event/record queues desynced", "Partial DMA write") and lost
+    #   count of frames, so the athan screen stayed until make_athan's 7 min timeout (every athan started over a
+    #   running speaker).
+    # - A station's server sends its first 130-260 KB at full speed, and the reader takes as much of it as fits.
+    #   Station switches every 8-15 s, the sizes in rotating 8-minute blocks: the router dropped the clock
+    #   ("not authenticated") 4 times in 83 starts at 1 MB, 6 in 88 at 128 KB, 0 in 89 at 48 KB.
+    # 48 KB is 3 s of a 128 kbps station (6 s of a 64 kbps one): a live stream cannot run further ahead than its
+    # server's burst anyway, and 12 minutes of steady play had no underrun.
+    buffer_size: 49152
     volume_min: 0.0
     volume_max: 1.0
     volume_initial: 0.5
@@ -961,15 +977,20 @@ script:
   # speaker's buffer (plus the mixer's and resampler's), which used to keep playing after the press. The I2S
   # speaker applies its volume as audio leaves that buffer, so muting it here (directly, not through the media
   # player's command queue) is silent within its 50 ms of DMA, without the pop of cutting the amp mid-sound. The
-  # pipelines stop behind it; once the buffer has drained (800 ms) the output is unmuted. The amp still goes off
-  # 5 s after idle (amp_idle_off).
+  # pipelines stop behind it, and the output is unmuted once that audio has played out: the I2S speaker stopped
+  # (500 ms after its last data), or every pipeline that was playing has stopped (audio_drained()). A fixed 800 ms
+  # ended as much as 0.3 s before the radio's audio did, on the prototype. The amp still goes off 5 s after idle.
   - id: hard_mute
     mode: restart
     then:
       - lambda: |-
           id(output_muted) = true;
           id(i2s_speaker)->set_mute_state(true);
-      - delay: 800ms
+          id(athan_core).begin_drain_watch();
+      - wait_until:
+          condition:
+            lambda: 'return id(i2s_speaker)->is_stopped() || id(athan_core).audio_drained();'
+          timeout: 2s
       - lambda: |-
           id(output_muted) = false;
           id(i2s_speaker)->set_mute_state(false);

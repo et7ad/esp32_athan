@@ -125,6 +125,10 @@ class AthanComponent : public Component {
   /// Called when a stop the owner asked for should be silent at once (a preview left while browsing, the /audio
   /// page's Stop): the yaml mutes the output while the pipelines stop (hard_mute).
   void set_hard_stop_callback(std::function<void()> cb) { this->hard_stop_cb_ = std::move(cb); }
+  /// hard_mute: called when it mutes the output. audio_drained() then says when every pipeline that was playing
+  /// has stopped and played out (its resampler stops only once its mixer input has), so the unmute leaves no tail.
+  void begin_drain_watch();
+  bool audio_drained() const;
   /// List being previewed (streaming or from flash), -1 if none.
   int preview_list() const { return this->preview_list_; }
   /// Stop a preview (and one still waiting to start) at once, silently (hard stop). The radio plays on when no
@@ -337,6 +341,18 @@ class AthanComponent : public Component {
   bool slot_preview_{false};  // the stored sound playing is a preview (stop_media() stops it, a download may start)
   bool slot_stop_sent_{false};  // STOP already sent for that preview
   bool media_started_{false};   // a stream (radio or preview) was started on the media pipeline since the last STOP
+  bool media_stop_pending_{false};  // a STOP was sent to a playing media pipeline: stored sounds wait for it
+  uint32_t media_stop_sent_at_{0};
+  // Stops of each pipeline, counted in loop() (a resampler that went from running to stopped)
+  uint32_t media_stops_{0};
+  uint32_t announce_stops_{0};
+  bool media_was_stopped_{true};
+  bool announce_was_stopped_{true};
+  // begin_drain_watch(): the pipelines that were playing, and their stop counts then
+  bool drain_media_{false};
+  bool drain_announce_{false};
+  uint32_t drain_media_stops_{0};
+  uint32_t drain_announce_stops_{0};
   int pending_preview_list_{-1};  // request_preview(): what to start, and when
   int pending_preview_item_{0};
   uint32_t pending_preview_at_{0};

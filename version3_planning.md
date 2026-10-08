@@ -245,7 +245,7 @@ fourth 3 MB region (section 16).
 
 ### 4.5 PSRAM budget (8 MB)
 
-One download at a time: up to 3 MB staging buffer, plus the media player's stream buffer (1 MB default), plus
+One download at a time: up to 3 MB staging buffer, plus the media player's reader buffers (48 KB per pipeline: ESPHome's 1 MB default starved the I2S speaker and made the router drop the clock at station starts, CLAUDE.md), plus
 Bluetooth buffers when setup mode is on (section 8). Local playback is memory-mapped and uses no PSRAM for the file.
 
 ## 5. The suggested lists on GitHub
