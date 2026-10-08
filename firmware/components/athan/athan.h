@@ -162,6 +162,9 @@ class AthanComponent : public Component {
   bool today_times(uint8_t hours[7], uint8_t minutes[7]);
   /// Today's times come from last year (this year's file not published yet).
   bool times_standin() const { return this->standin_; }
+  /// Prayer times of the selected location are stored (any year). The screen shows the stored next prayer, struck
+  /// through, until the clock is set.
+  bool has_stored_times() const { return this->store_.ready() && this->store_.has_any(this->location_); }
   /// Download the current year again (the "Refresh Prayer Times" button).
   void refresh_prayer_times();
   std::string prayer_status() const;
@@ -221,7 +224,8 @@ class AthanComponent : public Component {
   void worker_loop_();
   /// `coalesce`: a job of the same type still waiting in the queue is replaced instead of queuing another, so
   /// repeated presses cost one job.
-  void enqueue_(Job &&job, bool coalesce = false);
+  void enqueue_(Job &&job, bool coalesce = false, bool front = false);
+  bool prayer_first_(uint64_t now64) const;
   void run_job_(Job &job);
   /// `truncate`: read the first `max_len` bytes and stop (a live stream, or the start of a file) instead of
   /// refusing a longer body.
@@ -382,6 +386,7 @@ class AthanComponent : public Component {
   bool radio_waiting_net_{false};  // the radio is on but paused until the network is back (net_watch_())
   uint32_t radio_wait_since_{0};
   bool online_{false};             // network state net_watch_() saw last
+  uint64_t online_since_{0};       // when the network came up (net_watch_())
 
   // prayer times (main loop)
   std::string location_;
@@ -398,6 +403,7 @@ class AthanComponent : public Component {
   int last_doy_{-1};
   bool prayer_job_pending_{false};
   bool cur_not_published_{false};
+  bool prayer_tried_{false};       // a download of this year's (or last year's) times has run since boot
   bool force_refresh_{false};
   uint64_t next_cur_try_{0};
   uint64_t next_prev_try_{0};

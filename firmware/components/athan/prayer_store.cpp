@@ -251,6 +251,14 @@ bool PrayerStore::write(const std::string &key, int year, const std::string &tz,
   return true;
 }
 
+bool PrayerStore::has_any(const std::string &key) const {
+  std::lock_guard<std::mutex> lock(this->mutex_);
+  for (int s = 0; s < SLOTS; s++)
+    if (this->valid_[s] && key == this->header_[s].key)
+      return true;
+  return false;
+}
+
 std::string PrayerStore::years_of(const std::string &key) const {
   std::lock_guard<std::mutex> lock(this->mutex_);
   std::vector<int> years;

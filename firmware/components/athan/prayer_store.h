@@ -44,6 +44,8 @@ class PrayerStore {
   /// Store a year (worker task). Never overwrites a slot listed in `keep` unless it holds the same year.
   bool write(const std::string &key, int year, const std::string &tz, const PsramVector<uint16_t> &table,
              const std::vector<std::pair<std::string, int>> &keep);
+  /// Whether any year of a key is stored.
+  bool has_any(const std::string &key) const;
   /// "2026, 2027" for a key.
   std::string years_of(const std::string &key) const;
   /// Time zone of any stored year of `key` (the latest year), or "".

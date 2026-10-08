@@ -836,9 +836,11 @@ globals:
   - {id: schedule_seen, type: uint32_t, initial_value: "0"}
   - {id: prayer_hours, type: "uint8_t[7]", initial_value: "{5, 6, 7, 12, 15, 17, 18}"}
   - {id: prayer_minutes, type: "uint8_t[7]", initial_value: "{0, 0, 0, 0, 0, 0, 0}"}
-  - {id: next_prayer_index, type: int, initial_value: "0"}
-  - {id: next_prayer_hour, type: int, initial_value: "0"}
-  - {id: next_prayer_minute, type: int, initial_value: "0"}
+  # The next prayer survives a power cut (a restart keeps the time; a power cut loses it until SNTP answers): the
+  # screen shows it, struck through, until the clock is set again. Written when it changes, a few times a day.
+  - {id: next_prayer_index, type: int, initial_value: "0", restore_value: true}
+  - {id: next_prayer_hour, type: int, initial_value: "0", restore_value: true}
+  - {id: next_prayer_minute, type: int, initial_value: "0", restore_value: true}
   - {id: prefajr_next_hour, type: int, initial_value: "0"}
   - {id: prefajr_next_minute, type: int, initial_value: "0"}
   - {id: prefajr_triggered, type: bool, initial_value: "false"}
@@ -1929,6 +1931,7 @@ script:
           }
           // As on V2: until the clock is set the three rows are drawn and struck through (lines at y 11, 33, 55
           // cross rows 1-3); until today's prayer times are loaded, rows 2 and 3 are. Unknown values show as dashes.
+          // Row 1 shows the time as soon as SNTP has answered, also while the prayer times still download.
           const bool times_ok = time_ok && id(times_loaded);
           if (!time_ok) d.line(0, 11, 127, 11);
           if (!times_ok) { d.line(0, 33, 127, 33); d.line(0, 55, 127, 55); }
@@ -1948,7 +1951,18 @@ script:
             }
           }
           if (!times_ok) {
-            d.print(0, 22, id(font1), "Next --:--");
+            // No clock yet (after a power cut) but prayer times stored: the prayer that was next when the power went,
+            // struck through like the rest. A guess until SNTP answers, and the sign that the times are stored.
+            const int gi = id(next_prayer_index), gh = id(next_prayer_hour), gm = id(next_prayer_minute);
+            if (!time_ok && id(athan_core).has_stored_times() && gi >= 0 && gi < 7 && gh >= 0 && gh < 24 &&
+                gm >= 0 && gm < 60) {
+              int x1, y1, wn, hn;
+              d.get_text_bounds(0, 22, names[gi], id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
+              d.print(0, 22, id(font1), names[gi]);
+              draw_time(wn + std::max(1, std::min(5, 128 - wn - time_width(gh, gm))), 22, gh, gm);
+            } else {
+              d.print(0, 22, id(font1), "Next --:--");
+            }
             d.print(0, 44, id(font1), "Rem --:--");
             if (!wifi_ok) draw_nowifi();
             if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);

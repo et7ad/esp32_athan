@@ -17,6 +17,7 @@
 #include <esp_event.h>
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
+#include <esp_sntp.h>
 #include <esp_wifi.h>
 
 #include "mp3_check.h"
@@ -317,7 +318,8 @@ void AthanComponent::loop() {
     this->enqueue_(std::move(job));
   }
   // A slot without a sound (new device, or a power cut while writing) gets the list's first entry.
-  if (online && this->catalog_ready_ && !this->sound_busy_ && this->playing_slot_ < 0 && this->slots_.ready()) {
+  if (online && this->catalog_ready_ && !this->sound_busy_ && this->playing_slot_ < 0 && this->slots_.ready() &&
+      !this->prayer_first_(now64)) {
     for (int s = 0; s < NUM_SLOTS; s++) {
       if (!this->slots_.valid(s) && this->catalog_size(s) > 0 && due(now64, this->next_default_try_[s])) {
         ESP_LOGI(TAG, "Slot %s is empty: downloading the default from the list", SLOT_NAMES[s]);
@@ -364,7 +366,7 @@ void AthanComponent::worker_loop_() {
   }
 }
 
-void AthanComponent::enqueue_(Job &&job, bool coalesce) {
+void AthanComponent::enqueue_(Job &&job, bool coalesce, bool front) {
   {
     std::lock_guard<std::mutex> lock(this->jobs_mutex_);
     if (coalesce) {
@@ -375,7 +377,10 @@ void AthanComponent::enqueue_(Job &&job, bool coalesce) {
         }
       }
     }
-    this->jobs_.push_back(std::move(job));
+    if (front)
+      this->jobs_.push_front(std::move(job));
+    else
+      this->jobs_.push_back(std::move(job));
   }
   xSemaphoreGive(this->wake_);
 }
@@ -1419,6 +1424,14 @@ void AthanComponent::net_watch_() {
     return;
   }
   this->online_ = online;
+  if (online) {
+    this->online_since_ = millis_64();
+    // ESPHome starts SNTP once, at boot. Every request made without a network (a new or erased clock waits for its
+    // Wi-Fi setup, a power cut takes the router down too) doubles lwIP's retry wait, up to 150 s, so the time came
+    // up to two and a half minutes after Wi-Fi. A restart asks at once (lwIP adds a random 0-5 s).
+    if (this->time_ != nullptr && !this->time_->now().is_valid() && esp_sntp_restart())
+      ESP_LOGI(TAG, "Network up: asking for the time now");
+  }
   if (!online) {
     this->record_wifi_drop_();
     if (this->preview_list_ >= 0 && !this->slot_preview_) {
@@ -1638,7 +1651,18 @@ void AthanComponent::prayer_tick_(bool online) {
     return;
   }
   this->prayer_job_pending_ = true;
-  this->enqueue_(std::move(job));
+  // No times at all yet (a new or erased clock): ahead of whatever waits, the sound downloads included.
+  this->enqueue_(std::move(job), false, this->cur_table_.empty() && this->prev_table_.empty());
+}
+
+// A clock without prayer times (new, erased, or a new location) gets them before its sounds: the sounds are
+// 3 MB downloads plus a flash erase each, a year of prayer times about 10 KB, and the clock needs the times to be of
+// any use. The sound downloads wait until the times are loaded or their download has run once, at most 90 s after
+// the network came up (the time from SNTP decides the year).
+bool AthanComponent::prayer_first_(uint64_t now64) const {
+  if (!this->cur_table_.empty() || !this->prev_table_.empty() || this->prayer_tried_)
+    return false;
+  return now64 - this->online_since_ < 90000;
 }
 
 void AthanComponent::job_prayer_(Job &job) {
@@ -1674,6 +1698,8 @@ void AthanComponent::job_prayer_(Job &job) {
   const PrayerPurpose purpose = job.purpose;
   this->defer([this, key, year, purpose, outcome]() {
     this->prayer_job_pending_ = false;
+    if (purpose != PrayerPurpose::NEXT)
+      this->prayer_tried_ = true;
     const uint64_t ms = millis_64();
     if (outcome == O_STORED) {
       ESP_LOGI(TAG, "Prayer times %s %d stored", key.c_str(), year);
@@ -1690,7 +1716,9 @@ void AthanComponent::job_prayer_(Job &job) {
           this->cur_not_published_ = true;
           this->next_cur_try_ = ms + (this->prev_table_.empty() ? HOUR_MS / 2 : 6 * HOUR_MS);
         } else {
-          this->next_cur_try_ = ms + (outcome == O_INVALID ? HOUR_MS / 2 : 120000);
+          // A network failure is retried after 2 min, after 20 s while no times at all are loaded.
+          const bool none = this->cur_table_.empty() && this->prev_table_.empty();
+          this->next_cur_try_ = ms + (outcome == O_INVALID ? HOUR_MS / 2 : (none ? 20000 : 120000));
         }
         break;
       case PrayerPurpose::PREVIOUS:
