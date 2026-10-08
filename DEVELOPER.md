@@ -50,6 +50,7 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `play_slot(s)` → bool | Plays the mapped file on the announcement pipeline, once that pipeline has stopped (clean start). False if the slot is empty or being rewritten (the yaml then plays three click tones) |
 | `play_tone(file)`, `stop_announcements()` | The only way the yaml starts or stops the announcement pipeline: a tone waits for the sound before it to stop; never over the athan, tawashih or tick |
 | `set_hard_stop_callback(cb)` | The yaml's `hard_mute`, called when browsing leaves a playing preview, by `stop_preview()`, and for the `/audio` page's Stop |
+| `set_wifi_bg_only(on)` (yaml `wifi_bg_only:`) | Wi-Fi 802.11b/g only (`esp_wifi_set_protocol`), set in `setup()` during ESPHome's first scan and at every `WIFI_EVENT_STA_START` |
 | `set_wifi_low_latency(on)` | Wi-Fi modem sleep off (`on`) or back on. Only while Bluetooth is off: the yaml calls it after `ble.disable` has finished and before `ble.enable` (`ble_when_offline`, 15 s after Wi-Fi went) |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
 | `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The selected entry is never downloaded again ("already selected"); downloading another entry first fetches it anew |
@@ -126,17 +127,18 @@ channel count are kept for the format check after each start (boot log: `… Hz,
   a warning, and the format check catches a stale chain).
 - Stored sounds: about 300 ms after the start, the announcement resampler's `get_audio_stream_info()` must match
   the slot's scanned rate and channels; one restart otherwise.
-- Streams (MP3 only): `CHECK_STREAM` reads the first 12 KB with `http_get_(…, truncate)` and `mp3_scan()`s them
-  (the first position where frames chain, so a stream joined mid-frame is fine). The result is kept per link
-  (`formats_`, 24 entries, keyed by `AudioSlots::source_id(url)`). A link is handed to the player only once its
-  format is known: its first play waits for the check (at most 6 s, then it plays and is compared when the check
-  ends); later plays, reconnects included, start at once. A check that fails for a link the player does not have
-  yet keeps it from the player (`stream_check_failed_()`: the radio tries again, a preview stops).
-- Whenever the media resampler runs, on every pass of the loop, its format must match the link's: that covers our
-  starts and the ones ESPHome's player makes on its own (it reopens a failed link outside our starts, which is how
-  most likely why a reconnect after a Wi-Fi drop once played too fast). A mismatch is silenced at once (`hard_stop_cb_`) and
-  restarted cleanly, up to 3 times per stream, then the stream stops with an error. The playing stream is checked
-  again every 3 minutes (a station can switch format between programs), every 30 s while its format is unknown.
+- Streams: the fix is in ESPHome's own pipeline (`components/speaker`, ATHAN PATCH 1, README there). microMP3's
+  probe locks onto the first four bytes that look like a header, a live stream is joined mid-frame, and at the
+  first real frame the decoder reports `MP3_STREAM_INFO_CHANGED`; stations also change format between recordings.
+  Upstream gives the speaker the format only once, so both played at the wrong speed. The patched pipeline gives a
+  stopped speaker the new format whenever the decoder's changes (and stops a still-running speaker before the first
+  one, which covers the player's own restarts too).
+- Streams, backstop (MP3 only): `CHECK_STREAM` reads the first 12 KB with `http_get_(…, truncate)` and
+  `mp3_scan()`s them (the first position where frames chain). It runs 10 s after a start (away from the station's
+  start burst and the player's TLS handshake) and every 10 minutes. If it disagrees with the media resampler, it
+  is read once more (the station may have changed format in between, which the pipeline follows); a second
+  disagreement is silenced at once (`hard_stop_cb_`) and restarted cleanly, up to 3 times per stream, then the
+  stream stops with an error.
 
 **Download** (`DOWNLOAD_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as
@@ -167,13 +169,13 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 - **`radio_play(slot, subscribed)`:** a subscribed slot plays the link from the list in memory (or queues
   `STATION_PLAY` when no list was ever loaded), an own slot plays the slot's `text` entity (`radio_url_N`). Each play bumps `radio_token_`, so a stale answer from an older request is
   dropped.
-- **`radio_tick_()`:** sound means the media speaker runs (the player stays PLAYING while ESPHome retries a link
-  that does not open). With no sound 20 s after a start, it reconnects up to 3 times, then gives up with "station
-  not reachable". While it plays, it queues a format check every 3 minutes.
+- **`radio_tick_()`:** sound means the media speaker runs, never the player's state. A link that fails leaves the
+  player idle at once (`components/speaker`, ATHAN PATCH 2: upstream reopens it many times a second, for ever), and
+  it tries again 3, 6 and 9 s later; a link that stays open without sound gets 20 s. Then it gives up with "station
+  not reachable".
 - **`net_watch_()`** (every loop): the network gone stops a stream at once (a streamed preview ends; the radio
   waits, "waiting for Wi-Fi") and the radio starts again when it is back, or goes off after 10 minutes.
-  `radio_play()` without network waits the same way. A format check that cannot reach the server
-  (`HttpResult::NO_CONNECTION`) stops the stream unless sound already flows (`stream_unreachable_()`).
+  `radio_play()` without network waits the same way.
 - **The yaml side:**
   - `make_athan` and `run_prefajr` save `radio_active()` into `radio_resume`, stop the radio, and restart that
     slot when they finish.

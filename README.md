@@ -270,13 +270,30 @@ it opened.
 - **If Wi-Fi drops** (the router restarts, or drops the clock for a moment), the radio pauses and starts again by
   itself as soon as Wi-Fi is back; after 10 minutes without Wi-Fi it switches off. Pressing Up while Wi-Fi is down
   starts the radio once it is back.
-- **If the station itself fails** (down, or no internet behind the router), the clock tries three more times about
-  20 seconds apart, then stops and shows the reason under Radio Status.
-- **Wrong speed safeguard:** before a station or preview plays for the first time, the clock reads its real format
-  from the stream itself and remembers it. Whenever it plays, the clock compares what it is playing with that
-  format, all the time, and if they differ it mutes at once and restarts the stream, so Quran never plays sped up
-  or slowed down. The first play of each station after a restart takes about half a second longer for this. The
-  stored sounds are checked the same way.
+- **If the station itself fails** (down, or no internet behind the router), the clock tries three more times, 3, 6
+  and 9 seconds apart, then stops and shows the reason under Radio Status.
+- **Right speed, always:** stations sometimes change format between recordings (mono or stereo, 44.1 or 22 kHz),
+  and the clock joins a live stream in the middle of its data. The player follows every format change on its own,
+  so Quran never plays sped up or slowed down. As a second check, the clock reads the station's format itself 10
+  seconds after a start and every 10 minutes, and restarts the stream if what plays does not match. The stored
+  sounds are checked the same way.
+
+#### If the router keeps dropping the clock
+
+The web page's **Wi-Fi Drops** (System) lists when and why. "Not authenticated", "not associated" and
+"deauthenticated by the router" all mean the router itself gave up on the clock. The clock already uses the
+settings that help most (802.11b/g only, Wi-Fi power saving off, lower transmit power right next to the router).
+On the router, in this order:
+
+1. Don't put the clock right beside the router: a **Wi-Fi Signal** stronger than about −30 dBm is too close.
+   One or two metres away is ideal.
+2. Give the 2.4 GHz band its own network name (turn off "Smart Connect" / band steering), on a fixed channel
+   (1, 6 or 11) at 20 MHz width.
+3. Security: WPA2-PSK (AES) only, not a WPA2/WPA3 mix; management frame protection (PMF/802.11w) optional or off.
+4. Turn off, at least for 2.4 GHz: beamforming, airtime fairness, OFDMA / MU-MIMO, TWT (Wi-Fi 6 features the
+   ESP32's 802.11b/g/n radio does not use). On a TP-Link Deco: also Fast Roaming, and Mesh Technology for the clock.
+5. If drops come at a fixed interval, raise the router's group key update interval (for example to 3600 s).
+6. Update the router's firmware.
 
 #### Adding your own station
 

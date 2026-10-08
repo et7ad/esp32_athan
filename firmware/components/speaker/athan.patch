@@ -1,0 +1,114 @@
+--- a/media_player/audio_pipeline.cpp
++++ b/media_player/audio_pipeline.cpp
+@@ -378,6 +378,24 @@
+   }
+ }
+ 
++// ATHAN PATCH 1 (esp32_athan, on ESPHome 2026.9.1): a speaker applies a stream's format (sample rate, channels) when
++// it starts, and keeps converting from the format it started with while it runs. Upstream gives it the format once,
++// at the first parsed frame header, so audio plays at the wrong speed and pitch when
++//   - microMP3 locked onto a false header inside a frame (joining a live stream mid-frame): its first format is
++//     wrong, and at the first real frame it reports MP3_STREAM_INFO_CHANGED, which upstream ignores;
++//   - the stream really changes format (a radio station moving to a recording encoded differently);
++//   - a new stream starts while the speaker still runs from the one before.
++// So the format is handed over only to a stopped speaker, and handed over again whenever the decoder's format
++// changes. The decoder's next write restarts the speaker (play() starts a stopped speaker) with the new format.
++// See firmware/components/speaker/README.md.
++static void athan_stop_speaker_for_format(speaker::Speaker *spk) {
++  if (spk->is_stopped())
++    return;
++  spk->stop();
++  for (int i = 0; i < 100 && !spk->is_stopped(); i++)  // at most 1 s
++    vTaskDelay(pdMS_TO_TICKS(10));
++}
++
+ void AudioPipeline::decode_task(void *params) {
+   AudioPipeline *this_pipeline = (AudioPipeline *) params;
+ 
+@@ -480,6 +498,7 @@
+                                EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
+           } else {
+             // Send audio directly to the speaker
++            athan_stop_speaker_for_format(this_pipeline->speaker_);  // ATHAN PATCH 1
+             this_pipeline->speaker_->set_audio_stream_info(this_pipeline->current_audio_stream_info_);
+             decoder->add_sink(this_pipeline->speaker_);
+           }
+@@ -507,6 +526,22 @@
+               break;
+           }
+           xQueueSend(this_pipeline->info_error_queue_, &event, portMAX_DELAY);
++        } else if (has_stream_info && decoder->get_audio_stream_info().has_value() &&
++                   decoder->get_audio_stream_info().value() != this_pipeline->current_audio_stream_info_) {
++          // ATHAN PATCH 1: the decoder's format changed after the first header. Hand the new one to the speaker.
++          const audio::AudioStreamInfo next = decoder->get_audio_stream_info().value();
++          if (next.get_bits_per_sample() != 16 || next.get_channels() > 2) {
++            xEventGroupSetBits(this_pipeline->event_group_,
++                               EventGroupBits::DECODER_MESSAGE_ERROR | EventGroupBits::PIPELINE_COMMAND_STOP);
++          } else {
++            ESP_LOGW(TAG, "Stream format changed from %" PRId32 " Hz %d ch to %" PRId32 " Hz %d ch: speaker restarted",
++                     this_pipeline->current_audio_stream_info_.get_sample_rate(),
++                     this_pipeline->current_audio_stream_info_.get_channels(), next.get_sample_rate(),
++                     next.get_channels());
++            athan_stop_speaker_for_format(this_pipeline->speaker_);
++            this_pipeline->current_audio_stream_info_ = next;
++            this_pipeline->speaker_->set_audio_stream_info(next);
++          }
+         }
+ 
+         if (!started_playback && has_stream_info) {
+--- a/media_player/speaker_media_player.cpp
++++ b/media_player/speaker_media_player.cpp
+@@ -167,6 +167,7 @@
+           // Ensure the loaded next item doesn't start playing, clear the queue, start the file, and unpause
+           this->cancel_timeout("next_media");
+           this->media_playlist_.clear();
++          this->media_failed_ = false;  // ATHAN PATCH 2: a new link, not the one that failed
+           if (this->is_paused_) {
+             // If paused, stop the media pipeline and unpause it after confirming its stopped. This avoids playing a
+             // short segment of the paused file before starting the new one.
+@@ -251,6 +252,7 @@
+             if (this->media_pipeline_ != nullptr) {
+               this->cancel_timeout("next_media");
+               this->media_playlist_.clear();
++              this->media_failed_ = false;  // ATHAN PATCH 2
+               this->stop_and_unpause_media_();
+             }
+           }
+@@ -351,8 +353,10 @@
+ 
+   if (this->media_pipeline_state_ == AudioPipelineState::ERROR_READING) {
+     ESP_LOGE(TAG, "The media pipeline's file reader encountered an error.");
++    this->media_failed_ = true;  // ATHAN PATCH 2
+   } else if (this->media_pipeline_state_ == AudioPipelineState::ERROR_DECODING) {
+     ESP_LOGE(TAG, "The media pipeline's audio decoder encountered an error.");
++    this->media_failed_ = true;  // ATHAN PATCH 2
+   }
+ 
+   AudioPipelineState old_announcement_pipeline_state = this->announcement_pipeline_state_;
+@@ -412,7 +416,14 @@
+       } else if (this->media_pipeline_state_ == AudioPipelineState::STOPPED) {
+         if (!media_playlist_.empty()) {
+           uint32_t timeout_ms = 0;
+-          if (old_media_pipeline_state == AudioPipelineState::PLAYING) {
++          if (this->media_failed_) {
++            // ATHAN PATCH 2 (esp32_athan, on ESPHome 2026.9.1): upstream reopens a link that failed at once, for ever
++            // and many times a second (each try a DNS lookup or a connection, plus a screenful of log), while the
++            // player says PLAYING. A failed item is dropped instead: the player goes idle, and the athan component
++            // retries the radio itself, paced. See firmware/components/speaker/README.md.
++            this->media_failed_ = false;
++            this->media_playlist_.pop_front();
++          } else if (old_media_pipeline_state == AudioPipelineState::PLAYING) {
+             // Finished the current media file
+             if (!this->media_repeat_one_) {
+               // Pop item off the playlist if repeat is disabled
+--- a/media_player/speaker_media_player.h
++++ b/media_player/speaker_media_player.h
+@@ -124,6 +124,8 @@
+ 
+   optional<media_player::MediaPlayerSupportedFormat> media_format_;
+   AudioPipelineState media_pipeline_state_{AudioPipelineState::STOPPED};
++  // ATHAN PATCH 2: the media playlist's current item failed (reader or decoder error); it is dropped, not reopened.
++  bool media_failed_{false};
+   bool media_repeat_one_{false};
+   uint32_t media_playlist_delay_ms_{0};
+ 

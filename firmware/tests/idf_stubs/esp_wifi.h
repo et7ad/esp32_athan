@@ -20,3 +20,9 @@ typedef struct {
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap_info);
 esp_err_t esp_wifi_set_max_tx_power(int8_t power);
 esp_err_t esp_wifi_get_max_tx_power(int8_t *power);
+typedef enum { WIFI_IF_STA = 0, WIFI_IF_AP = 1 } wifi_interface_t;
+#define WIFI_PROTOCOL_11B 0x1
+#define WIFI_PROTOCOL_11G 0x2
+#define WIFI_PROTOCOL_11N 0x4
+esp_err_t esp_wifi_set_protocol(wifi_interface_t ifx, uint8_t protocol_bitmap);
+esp_err_t esp_wifi_get_protocol(wifi_interface_t ifx, uint8_t *protocol_bitmap);

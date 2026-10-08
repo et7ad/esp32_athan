@@ -16,6 +16,7 @@ CONF_MEDIA_SPEAKER = "media_speaker"
 CONF_ANNOUNCEMENT_SPEAKER = "announcement_speaker"
 CONF_DATA_URL = "data_url"
 CONF_RADIO_URLS = "radio_urls"
+CONF_WIFI_BG_ONLY = "wifi_bg_only"
 
 athan_ns = cg.esphome_ns.namespace("athan")
 AthanComponent = athan_ns.class_("AthanComponent", cg.Component)
@@ -42,6 +43,8 @@ CONFIG_SCHEMA = cv.All(
                 CONF_DATA_URL,
                 default="https://raw.githubusercontent.com/et7ad/esp32_athan/main/docs",
             ): cv.url,
+            # Wi-Fi 802.11b/g only, without 802.11n (ESPHome offers this switch only on the ESP8266).
+            cv.Optional(CONF_WIFI_BG_ONLY, default=False): cv.boolean,
             # Own links of radio slots 1..10 (template text entities), in slot order.
             cv.Optional(CONF_RADIO_URLS, default=[]): cv.All(
                 cv.ensure_list(cv.use_id(text.Text)), cv.Length(max=10)
@@ -65,6 +68,7 @@ async def to_code(config):
     clock = await cg.get_variable(config[CONF_TIME_ID])
     cg.add(var.set_time(clock))
     cg.add(var.set_data_url(config[CONF_DATA_URL].rstrip("/")))
+    cg.add(var.set_wifi_bg_only(config[CONF_WIFI_BG_ONLY]))
     for text_id in config[CONF_RADIO_URLS]:
         cg.add(var.add_radio_url(await cg.get_variable(text_id)))
     # HTTPS downloads with certificate checks (raw.githubusercontent.com).

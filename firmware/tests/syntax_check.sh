@@ -57,6 +57,18 @@ for p in "$B"/esphome/components/athan/*.cpp; do
   if [ -n "$out" ]; then echo "$out" | sed "s|$B/||"; fail=1; else echo "   $f.cpp ok"; fi
 done
 
+echo "== components/speaker (ESPHome's own, with the ATHAN PATCH blocks: components/speaker/README.md)"
+PY="$(dirname "$(command -v "$ESPHOME")")/python"
+[ -x "$PY" ] || PY=python3
+PKG=$("$PY" -c "import esphome, os; print(os.path.dirname(esphome.__file__))")
+"$PY" "$HERE/check_speaker_override.py" "$PKG" || fail=1
+for p in "$B"/esphome/components/speaker/media_player/*.cpp; do
+  f=$(basename "$p" .cpp)
+  out=$("$CXX" "${FLAGS[@]}" -Wno-unused-parameter "$p" 2>&1 \
+        | grep -E "components/speaker/media_player/[^:]+:[0-9]+:[0-9]+: error" || true)
+  if [ -n "$out" ]; then echo "$out" | sed "s|$B/||"; fail=1; else echo "   media_player/$f.cpp ok"; fi
+done
+
 echo "== athan.yaml lambdas (main.cpp)"
 # Stand-in artefacts: the mixer/resampler headers need audio libraries that are not stubbed, and the Bluetooth
 # headers need large ESP-IDF unions. Both are ESPHome's own generated wiring, not lambdas.

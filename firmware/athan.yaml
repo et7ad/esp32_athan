@@ -345,6 +345,10 @@ athan:
   announcement_speaker: announce_resampler
   time_id: sntp_time
   data_url: ${data_url}
+  # Wi-Fi 802.11b/g only, without 802.11n's aggregated bursts and block acknowledgments: the setting that cured ESP
+  # devices being dropped by TP-Link routers ("Force WiFi B/G", 2026-10-07 research). 54 Mbps is far more than a
+  # 128 kbps station needs. false = ESP-IDF's default 802.11b/g/n.
+  wifi_bg_only: true
   # Own links of radio slots 1..10 (the text entities below), used when a slot does not follow the project list
   radio_urls: [radio_url_1, radio_url_2, radio_url_3, radio_url_4, radio_url_5,
                radio_url_6, radio_url_7, radio_url_8, radio_url_9, radio_url_10]
@@ -353,7 +357,10 @@ external_components:
   - source:
       type: local
       path: components
-    components: [athan]
+    # speaker: ESPHome 2026.9.1's own component with two marked fixes (components/speaker/README.md): a stream's
+    # format reaches the speaker again whenever it changes (wrong speed and pitch otherwise), and a link that fails
+    # is not reopened in a tight loop. Keep its version equal to build_firmware.sh's ESPHOME_VERSION.
+    components: [athan, speaker]
 
 output:
   - platform: gpio

@@ -62,6 +62,9 @@ class AthanComponent : public Component {
   void set_announcement_speaker(speaker::Speaker *s) { this->announce_speaker_ = s; }
   void set_time(time::RealTimeClock *time) { this->time_ = time; }
   void set_data_url(const std::string &url) { this->data_url_ = url; }
+  /// Wi-Fi 802.11b/g only, without 802.11n (its aggregated bursts and block acknowledgments): the setting that
+  /// cured ESP devices being dropped by TP-Link routers. Applied before every association.
+  void set_wifi_bg_only(bool on) { this->wifi_bg_only_ = on; }
   void add_radio_url(text::Text *t) { this->radio_urls_.push_back(t); }
 
   void setup() override;
@@ -258,6 +261,7 @@ class AthanComponent : public Component {
   speaker::Speaker *announce_speaker_{nullptr};
   time::RealTimeClock *time_{nullptr};
   std::string data_url_;
+  bool wifi_bg_only_{false};
   std::vector<text::Text *> radio_urls_;
 
   AudioSlots slots_;
@@ -337,28 +341,15 @@ class AthanComponent : public Component {
   int pending_preview_item_{0};
   uint32_t pending_preview_at_{0};
 
-  // Clean starts (pump_starts_()): what waits for its pipeline to stop, and the format checks after a start.
-  bool stream_pending_{false};      // waits for its pipeline to stop, and for its link's format if not known yet
+  // Clean starts (pump_starts_()): what waits for its pipeline to stop, and the backstop format checks after a start.
+  bool stream_pending_{false};      // waits for its pipeline to stop
   std::string stream_url_;          // the media pipeline's current (or pending) stream
-  uint32_t stream_id_{0};           // AudioSlots::source_id(stream_url_): the key of its known format
   uint32_t stream_pending_since_{0};
+  uint32_t stream_token_{0};        // +1 per stream start: a check of an older start is ignored
   uint8_t stream_restarts_{0};      // restarts for a wrong format, per stream (at most 3)
-  bool stream_confirmed_{false};    // "format confirmed" logged for this start
   bool fmt_check_running_{false};   // a CHECK_STREAM is queued or running (one at a time)
-  uint32_t fmt_next_check_{0};      // next check of the playing stream: every 3 min, sooner while unknown
-  // Formats read by CHECK_STREAM from each link's own chained frames (radio slots, previews). A link is handed to
-  // the player only once its format is known (its first play waits for the check, at most 6 s), so the format
-  // can be compared the moment sound flows, also after the starts ESPHome's player makes on its own.
-  struct KnownFormat {
-    uint32_t id{0};
-    uint32_t rate{0};  // 0: not an MP3 (Opus, FLAC: their own headers are reliable), nothing to compare
-    uint8_t channels{0};
-    uint32_t used{0};  // millis() of the last use: the least recently used entry is replaced
-  };
-  KnownFormat formats_[24];
-  KnownFormat *find_format_(uint32_t id);
-  void remember_format_(uint32_t id, uint32_t rate, uint8_t channels);
-  void stream_check_failed_(bool unreachable);
+  bool fmt_reverify_{false};        // the last check disagreed with what plays: one more before acting
+  uint32_t fmt_next_check_{0};      // next check of the playing stream (10 s after a start, then every 10 min)
   audio::AudioFile *announce_pending_{nullptr};
   uint32_t announce_pending_since_{0};
   bool announce_stop_sent_{false};

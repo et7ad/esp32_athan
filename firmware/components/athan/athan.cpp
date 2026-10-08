@@ -38,8 +38,21 @@ static bool due(uint64_t now, uint64_t at) { return now >= at; }
 // The reason and signal of the last Wi-Fi disconnect, from ESP-IDF's event task (record_wifi_drop_() reads them).
 static std::atomic<uint8_t> s_wifi_reason{0};
 static std::atomic<int8_t> s_wifi_rssi{0};
+// 802.11b/g only (set_wifi_bg_only()). Set when the station starts, before ESPHome's scan and association; ESP-IDF
+// keeps it until Wi-Fi is deinitialised, and every later start (ESPHome restarts Wi-Fi for its fallback hotspot)
+// sets it again.
+static std::atomic<bool> s_wifi_bg_only{false};
+static bool apply_wifi_protocol() {
+  if (!s_wifi_bg_only)
+    return false;
+  return esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G) == ESP_OK;
+}
 static void on_wifi_event(void *, esp_event_base_t base, int32_t id, void *data) {
-  if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED && data != nullptr) {
+  if (base != WIFI_EVENT)
+    return;
+  if (id == WIFI_EVENT_STA_START) {
+    apply_wifi_protocol();
+  } else if (id == WIFI_EVENT_STA_DISCONNECTED && data != nullptr) {
     const auto *d = static_cast<const wifi_event_sta_disconnected_t *>(data);
     s_wifi_reason = d->reason;
     s_wifi_rssi = d->rssi;
@@ -163,11 +176,14 @@ void AthanComponent::setup() {
   this->slots_.begin();
   this->refresh_slot_view_();
   this->store_.begin();
-  // The reason of each Wi-Fi drop, for the web page (ESPHome only logs it). The wifi component, set up before this
-  // one, created the default event loop.
-  if (esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &on_wifi_event, nullptr,
-                                          nullptr) != ESP_OK)
+  // Wi-Fi events: the reason of each drop for the web page (ESPHome only logs it), and 802.11b/g at every station
+  // start. The wifi component, set up before this one, created the default event loop and has started the station,
+  // whose scan is still running: the protocol is set here once too, before the first association.
+  if (esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &on_wifi_event, nullptr, nullptr) != ESP_OK)
     ESP_LOGW(TAG, "Wi-Fi drop reasons will not be recorded");
+  s_wifi_bg_only = this->wifi_bg_only_;
+  if (this->wifi_bg_only_)
+    ESP_LOGI(TAG, "Wi-Fi: 802.11b/g only%s", apply_wifi_protocol() ? "" : " (from the next station start)");
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
     this->sound_status_ = "Ready";
@@ -654,10 +670,11 @@ void AthanComponent::stop_media() {
 // chain starts. A stream or file started while the previous one still plays or is stopping reuses the running
 // chain with the OLD format: a mono stream after a stereo one plays at double speed and pitch, a 22 kHz one after
 // 44 kHz at half. Every start therefore waits until its pipeline's first speaker has stopped (pump_starts_()).
-// The decoder can also misread the first bytes of a stream (a radio station sends its stream from any byte, not
-// from a frame), and ESPHome's player reopens a failed link by itself, outside these starts. So a stream's real
-// format is read first, from its own chained frames (CHECK_STREAM, remembered per link), and whatever plays is
-// compared with it all the time (check_formats_()): a mismatch is silenced at once and restarted.
+// The pipeline itself (components/speaker, ATHAN PATCH 1) hands the speaker the stream's format again whenever the
+// decoder's format changes: a false first header when a live stream is joined mid-frame, or a station moving to a
+// recording in another format. As a backstop, CHECK_STREAM reads the stream's first frames itself (10 s after a
+// start, then every 10 min) and compares them with what plays (check_formats_()); a confirmed mismatch is silenced
+// at once and restarted.
 
 bool AthanComponent::media_chain_stopped_() const {
   const auto st = this->player_->state;
@@ -675,37 +692,10 @@ void AthanComponent::start_stream_(const std::string &url) {
     return;
   this->stop_media_pipeline_();  // the stream before it, if any
   this->stream_url_ = url;
-  this->stream_id_ = AudioSlots::source_id(url);
   this->stream_pending_ = true;
   this->stream_pending_since_ = millis();
   this->stream_restarts_ = 0;
-  KnownFormat *f = this->find_format_(this->stream_id_);
-  if (f != nullptr)
-    f->used = millis();
-  else
-    this->check_stream_now_();  // first play of this link: its format before the player gets it
-  this->pump_starts_();  // at once when nothing plays and the format is known
-}
-
-AthanComponent::KnownFormat *AthanComponent::find_format_(uint32_t id) {
-  for (auto &f : this->formats_)
-    if (f.id == id && id != 0)
-      return &f;
-  return nullptr;
-}
-
-void AthanComponent::remember_format_(uint32_t id, uint32_t rate, uint8_t channels) {
-  KnownFormat *slot = this->find_format_(id);
-  if (slot == nullptr) {
-    slot = &this->formats_[0];
-    for (auto &f : this->formats_)
-      if (f.id == 0 || f.used < slot->used)
-        slot = &f;
-  }
-  slot->id = id;
-  slot->rate = rate;
-  slot->channels = channels;
-  slot->used = millis();
+  this->pump_starts_();  // at once when nothing plays
 }
 
 void AthanComponent::start_announcement_(audio::AudioFile *file) {
@@ -725,20 +715,16 @@ void AthanComponent::pump_starts_() {
   if (this->player_ == nullptr)
     return;
   if (this->stream_pending_) {
-    const uint32_t waited = millis() - this->stream_pending_since_;
-    // The link's format first (its check is usually done in under a second; a slow server still plays after 6 s
-    // and is compared when the check ends), then a stopped chain (at most 4 s).
-    const bool format_ready = this->find_format_(this->stream_id_) != nullptr || waited >= 6000;
     const bool stopped = this->media_chain_stopped_();
-    if (format_ready && (stopped || waited >= 4000)) {
+    if (stopped || millis() - this->stream_pending_since_ > 4000) {
       if (!stopped)
-        ESP_LOGW(TAG, "Media pipeline still busy: starting the stream anyway");
-      if (this->find_format_(this->stream_id_) == nullptr)
-        ESP_LOGW(TAG, "Stream format not known yet: playing, and comparing once it is");
+        ESP_LOGW(TAG, "Media pipeline still busy after 4 s: starting the stream anyway");
       this->stream_pending_ = false;
       this->media_started_ = true;
-      this->stream_confirmed_ = false;
-      this->fmt_next_check_ = millis() + 3 * 60 * 1000;  // the regular re-check
+      this->stream_token_++;
+      this->fmt_reverify_ = false;
+      // The backstop check 10 s in: away from the station's start burst and the player's own TLS handshake.
+      this->fmt_next_check_ = millis() + 10000;
       this->player_->make_call().set_media_url(this->stream_url_).set_announcement(false).perform();
     }
   }
@@ -768,12 +754,12 @@ void AthanComponent::pump_starts_() {
 
 void AthanComponent::check_stream_now_() {
   if (this->fmt_check_running_ || this->stream_url_.empty())
-    return;  // one at a time: when it ends, a stream still waiting for its format gets its own
+    return;  // one at a time
   this->fmt_check_running_ = true;
   Job job;
   job.type = JobType::CHECK_STREAM;
   job.url = this->stream_url_;
-  job.token = this->stream_id_;
+  job.token = this->stream_token_;
   this->enqueue_(std::move(job), true);
 }
 
@@ -792,60 +778,57 @@ void AthanComponent::job_check_stream_(Job &job) {
       channels = info.channels;
     }
   }
-  const bool answered = r == HttpResult::OK;  // rate 0 then: not an MP3 (Opus, FLAC)
-  const bool unreachable = r == HttpResult::NO_CONNECTION;
-  const uint32_t id = job.token;
-  this->defer([this, id, answered, unreachable, rate, channels]() {
+  const uint32_t token = job.token;
+  this->defer([this, token, rate, channels]() {
     this->fmt_check_running_ = false;
-    if (answered)
-      this->remember_format_(id, rate, channels);
-    else if (id == this->stream_id_)
-      this->stream_check_failed_(unreachable);
-    // A stream started meanwhile may still wait for its own format.
-    if (this->stream_pending_ && this->find_format_(this->stream_id_) == nullptr)
-      this->check_stream_now_();
+    if (token != this->stream_token_ || rate == 0)
+      return;  // another start since, failed, or not an MP3 (Opus, FLAC: their own headers are reliable)
+    if (this->stream_pending_ || this->media_speaker_ == nullptr || !this->media_speaker_->is_running()) {
+      this->fmt_next_check_ = millis() + 5000;  // nothing sounds yet to compare with
+      return;
+    }
+    const auto &info = this->media_speaker_->get_audio_stream_info();
+    if (info.get_sample_rate() == rate && info.get_channels() == channels) {
+      this->fmt_reverify_ = false;
+      ESP_LOGD(TAG, "Stream format confirmed: %u Hz, %u ch", (unsigned) rate, (unsigned) channels);
+      return;
+    }
+    if (!this->fmt_reverify_) {
+      // The station may have changed format between our read and now (the pipeline follows such a change on its
+      // own): read it once more before restarting anything.
+      this->fmt_reverify_ = true;
+      this->fmt_next_check_ = millis();
+      ESP_LOGW(TAG, "Stream plays as %u Hz %u ch, the check read %u Hz %u ch: checking again",
+               (unsigned) info.get_sample_rate(), (unsigned) info.get_channels(), (unsigned) rate,
+               (unsigned) channels);
+      return;
+    }
+    this->fmt_reverify_ = false;
+    if (this->hard_stop_cb_)
+      this->hard_stop_cb_();  // not one more moment at the wrong speed
+    if (this->stream_restarts_ < 3) {
+      this->stream_restarts_++;
+      ESP_LOGW(TAG, "Stream plays as %u Hz %u ch but is %u Hz %u ch: restarting it (%u/3)",
+               (unsigned) info.get_sample_rate(), (unsigned) info.get_channels(), (unsigned) rate,
+               (unsigned) channels, (unsigned) this->stream_restarts_);
+      this->stop_media_pipeline_();
+      this->stream_pending_ = true;
+      this->stream_pending_since_ = millis();
+    } else {
+      ESP_LOGE(TAG, "Stream still plays at the wrong format after 3 restarts: stopping it");
+      this->stop_media();
+    }
   });
 }
 
 void AthanComponent::check_formats_() {
-  // Stream: whenever it sounds (after our starts and after the player's own), its format must be the one its
-  // frames say, else it plays at the wrong speed. Compared on every pass, so a wrong start is silenced at once.
+  // Stream: the backstop check while it sounds, 10 s after a start and then every 10 minutes (the pipeline itself
+  // follows format changes; job_check_stream_() compares and acts).
   if (!this->stream_pending_ && this->media_started_ && this->media_speaker_ != nullptr &&
-      this->media_speaker_->is_running()) {
-    const KnownFormat *f = this->find_format_(this->stream_id_);
-    if (f != nullptr && f->rate != 0) {
-      const uint32_t rate = f->rate;
-      const uint8_t channels = f->channels;
-      const auto &info = this->media_speaker_->get_audio_stream_info();
-      if (info.get_sample_rate() != rate || info.get_channels() != channels) {
-        if (this->hard_stop_cb_)
-          this->hard_stop_cb_();  // not one more moment at the wrong speed
-        if (this->stream_restarts_ < 3) {
-          this->stream_restarts_++;
-          ESP_LOGW(TAG, "Stream plays as %u Hz %u ch but is %u Hz %u ch: restarting it (%u/3)",
-                   (unsigned) info.get_sample_rate(), (unsigned) info.get_channels(), (unsigned) rate,
-                   (unsigned) channels, (unsigned) this->stream_restarts_);
-          this->stop_media_pipeline_();
-          this->stream_pending_ = true;
-          this->stream_pending_since_ = millis();
-        } else {
-          ESP_LOGE(TAG, "Stream still plays at the wrong format after 3 restarts: stopping it");
-          this->stop_media();
-        }
-        return;
-      }
-      if (!this->stream_confirmed_) {
-        this->stream_confirmed_ = true;
-        ESP_LOGD(TAG, "Stream format confirmed: %u Hz, %u ch", (unsigned) rate, (unsigned) channels);
-      }
-    }
-    // Checked again every 3 min (a station can switch format mid-stream), every 30 s while not known.
-    if (f == nullptr || f->rate != 0) {
-      if (!this->fmt_check_running_ && static_cast<int32_t>(millis() - this->fmt_next_check_) >= 0) {
-        this->fmt_next_check_ = millis() + (f == nullptr ? 30000 : 3 * 60 * 1000);
-        this->check_stream_now_();
-      }
-    }
+      this->media_speaker_->is_running() && !this->fmt_check_running_ &&
+      static_cast<int32_t>(millis() - this->fmt_next_check_) >= 0) {
+    this->fmt_next_check_ = millis() + 10 * 60 * 1000;
+    this->check_stream_now_();
   }
   // Stored sound: compared with the format read from its own frames at boot.
   if (this->announce_check_slot_ >= 0 && this->announce_pending_ == nullptr && this->announce_speaker_ != nullptr &&
@@ -1337,12 +1320,15 @@ void AthanComponent::radio_tick_() {
   const bool sound = this->media_speaker_ != nullptr ? this->media_speaker_->is_running()
                                                      : st == media_player::MEDIA_PLAYER_STATE_PLAYING;
   if (sound) {
-    this->radio_retries_ = 0;  // its format is compared in check_formats_()
+    this->radio_retries_ = 0;
     return;
   }
-  // No sound: still starting (link, connection, first audio take up to about 8 s), or the stream dropped or never
-  // opened.
-  if (millis() - this->radio_started_ < 20000)
+  // No sound: still starting (link, connection and first audio take up to about 8 s), or the stream ended or failed.
+  // A failed link leaves the player idle at once (components/speaker, ATHAN PATCH 2): try again 3, 6, 9 s later.
+  // Still PLAYING without sound (an open link that sends nothing): 20 s.
+  const bool idle = !this->stream_pending_ && st != media_player::MEDIA_PLAYER_STATE_PLAYING &&
+                    st != media_player::MEDIA_PLAYER_STATE_PAUSED && st != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
+  if (millis() - this->radio_started_ < (idle ? 3000u * (this->radio_retries_ + 1u) : 20000u))
     return;
   if (this->radio_retries_ < 3) {
     this->radio_retries_++;
@@ -1421,30 +1407,6 @@ void AthanComponent::tune_tx_power_() {
     return;
   if (esp_wifi_set_max_tx_power(want) == ESP_OK)
     ESP_LOGI(TAG, "Wi-Fi transmit power %d dBm (router heard at %d dBm)", want / 4, (int) ap.rssi);
-}
-
-// The format check of the current link failed. A link the player does not have yet (its first play) never gets
-// to it: the player would retry a failing link many times a second, without a format to compare it with. One the
-// player has keeps playing while sound flows (the check is tried again); if it cannot be reached at all (no
-// internet, DNS, refused) and nothing sounds, it is stopped. The radio tries again from radio_tick_ (20 s after its
-// start, 3 times).
-void AthanComponent::stream_check_failed_(bool unreachable) {
-  const bool sounding = this->media_speaker_ != nullptr && this->media_speaker_->is_running();
-  if (this->stream_pending_) {
-    this->stream_pending_ = false;
-  } else if (sounding || !unreachable) {
-    return;
-  } else {
-    this->stop_media_pipeline_();
-  }
-  if (this->preview_list_ >= 0 && !this->slot_preview_) {
-    ESP_LOGW(TAG, "Preview link not reachable: stopped");
-    this->stop_media();
-    this->set_sound_status_("Preview: the link is not reachable (no internet?)");
-  } else if (this->radio_station_ >= 0) {
-    ESP_LOGW(TAG, "Radio link not reachable: trying again");
-    this->set_radio_status_("Radio " + std::to_string(this->radio_station_ + 1) + ": not reachable, trying again");
-  }
 }
 
 // ==============================================================================================================
