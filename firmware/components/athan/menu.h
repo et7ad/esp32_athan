@@ -44,8 +44,15 @@ enum class RowStyle : uint8_t {
   TOGGLES,
 };
 
+/// A small icon before a row's short name in the menu's left pane (menu_view.cpp draws it). It groups related rows.
+enum class RowIcon : uint8_t { NONE, CLOCK, SPEAKER, LOCK, EXIT };
+
 struct MenuRow {
+  /// The full name: the right pane's header.
   const char *title{""};
+  /// The name in the left pane (the list), shorter where the full one does not fit; nullptr = the title.
+  const char *short_title{nullptr};
+  RowIcon icon{RowIcon::NONE};
   RowKind kind{RowKind::CHOICE};
   RowStyle style{RowStyle::LIST};
   /// Left/Right go round from the last item to the first. Off for volumes: no jump from 100 % to 0 %.

@@ -1,6 +1,7 @@
 #include "menu_view.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -14,14 +15,14 @@ using display::TextAlign;
 
 namespace {
 
-// Two panes: the rows by name on the left (a ring, the one on screen in the middle), a line, the row's items on the
-// right. Right pane, top to bottom (y of text baselines): the item around y 20, its marks at 31, dots at 46, the
-// caption at 60 (two lines: 52 and 61).
+// Two panes: the rows by short name on the left (five at a time, a ring, the one on screen in the middle), a line,
+// then on the right the row's full title (small) and its item. Right pane, top to bottom (y of text baselines): the
+// title at 6, the item around y 23, its marks at 34, dots at 49, the caption at 61 (two lines: 53 and 62).
 const int W = 128;
-const int LW = 50;                           // left pane width
-const int PX = LW + 2, PW = W - PX;          // right pane: x 52..127
-const int PC = PX + PW / 2;                  // its centre
-const int ROW_H = 9, VISIBLE = 7, MIDDLE = 3;  // left pane: 7 rows of 9 px, the one on screen 4th
+const int LW = 54;                             // left pane width
+const int PX = LW + 3, PW = W - PX;            // right pane: x 57..127
+const int PC = PX + PW / 2;                    // its centre
+const int ROW_H = 13, VISIBLE = 5, MIDDLE = 2;  // left pane: 5 rows of 13 px, the one on screen 3rd
 const int CAP_L = 14, CAP_M = 10, CAP_S = 5;   // capital heights of the large, medium and small fonts
 
 int width_of(Display &d, display::BaseFont *f, const std::string &s) {
@@ -81,6 +82,35 @@ void check_mark(Display &d, int x, int y, Color c = display::COLOR_ON) {  // 9 x
 
 void play_mark(Display &d, int x, int y) { d.filled_triangle(x, y, x, y + 8, x + 6, y + 4); }  // 7 x 9
 
+// The left pane's icons, about 9 rows tall from y (the medium font's capitals are 10). Returns the width.
+int row_icon(Display &d, RowIcon icon, int x, int y, Color c) {
+  switch (icon) {
+    case RowIcon::CLOCK:  // a dial with two hands
+      d.circle(x + 3, y + 5, 3, c);
+      d.vertical_line(x + 3, y + 3, 3, c);
+      d.horizontal_line(x + 3, y + 5, 2, c);
+      return 7;
+    case RowIcon::SPEAKER:  // the body, the cone, one sound wave
+      d.filled_rectangle(x, y + 4, 2, 3, c);
+      d.vertical_line(x + 2, y + 3, 5, c);
+      d.vertical_line(x + 3, y + 2, 7, c);
+      d.vertical_line(x + 5, y + 3, 5, c);
+      return 6;
+    case RowIcon::LOCK:  // a padlock
+      d.rectangle(x + 1, y + 1, 5, 4, c);
+      d.draw_pixel_at(x + 1, y + 1, c == display::COLOR_ON ? display::COLOR_OFF : display::COLOR_ON);
+      d.draw_pixel_at(x + 5, y + 1, c == display::COLOR_ON ? display::COLOR_OFF : display::COLOR_ON);
+      d.filled_rectangle(x, y + 4, 7, 5, c);
+      d.draw_pixel_at(x + 3, y + 6, c == display::COLOR_ON ? display::COLOR_OFF : display::COLOR_ON);
+      return 7;
+    case RowIcon::EXIT:  // an arrow back
+      arrow_left(d, x, y + 1, 7, c);
+      return 4;
+    default:
+      return 0;
+  }
+}
+
 // Words of s on lines at most w pixels wide (a word wider than w gets a line of its own).
 std::vector<std::string> wrap_words(Display &d, display::BaseFont *f, const std::string &s, int w) {
   std::vector<std::string> out;
@@ -120,6 +150,10 @@ void dots(Display &d, int n, int item, int y, int cx, int track) {
     d.horizontal_line(x0, y, track);
     d.filled_rectangle(x0 + item * (track - 5) / (n - 1), y - 1, 5, 3);
   }
+}
+
+bool only_digits_and_dots(const std::string &s) {
+  return !s.empty() && s.find_first_not_of("0123456789.") == std::string::npos;
 }
 
 }  // namespace
@@ -203,29 +237,27 @@ static uint32_t drawn_fingerprint = 0;  // of the last menu screen sent to the d
 
 bool menu_changed(Menu &menu) { return menu.is_open() && fingerprint(frame_of(menu)) != drawn_fingerprint; }
 
-// The left pane: the rows round the one on screen, which always sits in the middle, highlighted. A dotted line marks
-// where the list starts again (between Exit and Radio).
+// The left pane: five rows round the one on screen, which always sits in the middle, highlighted; each by its short
+// name in the medium font after its icon. A dotted line marks where the list starts again (between Exit and Radio).
 static void draw_rows(Display &d, Menu &menu, const MenuFonts &f) {
   const int n = menu.num_rows();
   for (int k = 0; k < VISIBLE; k++) {
     const int off = k - MIDDLE;
     if (2 * std::abs(off) >= n + (off > 0 ? 1 : 0))
       continue;  // fewer rows than lines: each row once
-    const int r = menu.ring_row(off), y = k * ROW_H + 1;
+    const int r = menu.ring_row(off), y = k * ROW_H - 1;
     const bool sel = off == 0;
     const Color c = sel ? display::COLOR_OFF : display::COLOR_ON;
     const MenuRow &row = menu.row_at(r);
     if (sel)
-      rounded_fill(d, 0, y, LW, ROW_H, 1);
-    if (row.exit) {
-      arrow_left(d, 3, y + 2, 5, c);
-      d.print(9, y + 7, f.small, c, TextAlign::BASELINE_LEFT, row.title);
-    } else {
-      d.print(3, y + 7, f.small, c, TextAlign::BASELINE_LEFT, row.title);
-    }
+      rounded_fill(d, 0, y, LW, ROW_H + 1, 2);  // one row deeper than the pitch: the tail of a j or g
+    int x = 3;
+    if (row.icon != RowIcon::NONE)
+      x = 1 + row_icon(d, row.icon, 1, y + 2, c) + 2;
+    d.print(x, y + 11, f.medium, c, TextAlign::BASELINE_LEFT, row.short_title ? row.short_title : row.title);
     if (r == 0 && k > 0 && k - 1 != MIDDLE && !sel) {
-      for (int x = 1; x < LW - 1; x += 2)
-        d.draw_pixel_at(x, y);
+      for (int px = 1; px < LW - 1; px += 2)
+        d.draw_pixel_at(px, y);
     }
   }
   d.vertical_line(LW + 1, 0, 64);
@@ -263,6 +295,12 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   drawn_fingerprint = fingerprint(fr);
   draw_rows(d, menu, f);
 
+  // The right pane's header: the row's full title, small, in capitals.
+  std::string title = fr.title;
+  for (auto &ch : title)
+    ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+  d.print(PC, 6, f.small, TextAlign::BASELINE_CENTER, title.c_str());
+
   if (fr.item < 0) {  // nothing to show yet: say why ("Loading list...")
     const auto lines = wrap_words(d, f.medium, fr.cap.empty() ? std::string("Empty") : fr.cap, PW - 4);
     for (size_t i = 0; i < lines.size() && i < 3; i++)
@@ -273,10 +311,10 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   // Exit: the clock it returns to (label: the time, caption: the next prayer) and which keys go back.
   if (fr.exit) {
     display::BaseFont *tf = width_of(d, f.large, fr.text) <= PW - 2 ? f.large : f.medium;
-    d.print(PC, 26, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
+    d.print(PC, 29, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
     if (!fr.cap.empty())
-      d.print(PC, 40, f.small, TextAlign::BASELINE_CENTER, fr.cap.c_str());
-    rounded_frame(d, PX + 3, 48, PW - 6, 14);
+      d.print(PC, 41, f.small, TextAlign::BASELINE_CENTER, fr.cap.c_str());
+    rounded_frame(d, PX + 2, 48, PW - 4, 14);
     const int hw = width_of(d, f.small, "or Select"), x0 = PC - (hw + 18) / 2;
     arrow_left(d, x0, 52, 5);
     arrow_right(d, x0 + 7, 52, 5);
@@ -292,13 +330,13 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
     if (cap.size() > 2)
       cap.resize(2);
   }
-  const int cap_y = cap.size() == 2 ? 52 : 60;
+  const int cap_y = cap.size() == 2 ? 53 : 61;
   auto draw_caption = [&]() {
     for (size_t i = 0; i < cap.size(); i++)
       d.print(PC, cap_y + static_cast<int>(i) * 9, f.small, TextAlign::BASELINE_CENTER, cap[i].c_str());
   };
 
-  if (!fr.all.empty() && draw_choices(d, fr, f.medium, PC, 24, PW - 2)) {
+  if (!fr.all.empty() && draw_choices(d, fr, f.medium, PC, 27, PW - 2)) {
     draw_caption();
     return;
   }
@@ -308,19 +346,19 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   if (!fr.shorts.empty()) {
     const size_t colon = fr.text.find(':');
     const std::string name = colon == std::string::npos ? fr.text : fr.text.substr(0, colon);
-    d.print(PC, 19, f.medium, TextAlign::BASELINE_CENTER, name.c_str());
+    d.print(PC, 20, f.medium, TextAlign::BASELINE_CENTER, name.c_str());
     d.print(PC, 34, f.medium, TextAlign::BASELINE_CENTER, fr.ons[fr.item] ? "On" : "Off");
-    const int n = static_cast<int>(fr.shorts.size()), col = PW / n, top = 44;
+    const int n = static_cast<int>(fr.shorts.size()), col = PW / n;
     for (int i = 0; i < n; i++) {
       const std::string s = fr.shorts[i].substr(0, 1);
-      const int cx = PX + col * i + col / 2, tw = std::max(5, width_of(d, f.small, s));
-      d.print(cx, top + 5, f.small, TextAlign::BASELINE_CENTER, s.c_str());
+      const int cx = PX + col * i + col / 2, tw = std::max(5, width_of(d, f.medium, s));
+      d.print(cx, 50, f.medium, TextAlign::BASELINE_CENTER, s.c_str());
       if (fr.ons[i])
-        d.filled_rectangle(cx - 2, top + 8, 5, 5);
+        d.filled_rectangle(cx - 2, 53, 5, 5);
       else
-        d.rectangle(cx - 2, top + 8, 5, 5);
+        d.rectangle(cx - 2, 53, 5, 5);
       if (i == fr.item)
-        rounded_frame(d, cx - tw / 2 - 3, top - 2, tw + 7, 16);
+        rounded_frame(d, cx - tw / 2 - 3, 38, tw + 7, 23);
     }
     return;
   }
@@ -329,15 +367,22 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   if (fr.n == 1) {
     if (tabbed) {
       const size_t tab = fr.cap.find('\t');
-      display::BaseFont *tf = width_of(d, f.medium, fr.text) <= PW - 2 ? f.medium : f.small;
-      d.print(PC, 24, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
-      d.print(PC, 42, f.small, TextAlign::BASELINE_CENTER, fr.cap.substr(0, tab).c_str());
-      d.print(PC, 54, f.small, TextAlign::BASELINE_CENTER, fr.cap.substr(tab + 1).c_str());
+      display::BaseFont *tf = f.small;
+      if (width_of(d, f.medium, fr.text) <= PW - 2)
+        tf = f.medium;
+      else if (f.numbers != nullptr && only_digits_and_dots(fr.text) && width_of(d, f.numbers, fr.text) <= PW - 2)
+        tf = f.numbers;  // an IP address
+      d.print(PC, 22, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
+      for (int part = 0; part < 2; part++) {
+        const std::string s = part == 0 ? fr.cap.substr(0, tab) : fr.cap.substr(tab + 1);
+        display::BaseFont *pf = width_of(d, f.medium, s) <= PW ? f.medium : f.small;  // athan.local: 70 of 71
+        d.print(PC, part == 0 ? 41 : 58, pf, TextAlign::BASELINE_CENTER, s.c_str());
+      }
       return;
     }
     const int bw = std::min(PW - 2, width_of(d, f.medium, fr.text) + 12);
-    rounded_fill(d, PC - bw / 2, 15, bw, 19, 2);
-    d.print(PC, 29, f.medium, display::COLOR_OFF, TextAlign::BASELINE_CENTER, fr.text.c_str());
+    rounded_fill(d, PC - bw / 2, 16, bw, 19, 2);
+    d.print(PC, 30, f.medium, display::COLOR_OFF, TextAlign::BASELINE_CENTER, fr.text.c_str());
     draw_caption();
     return;
   }
@@ -364,7 +409,7 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
     }
   }
   const bool two = nl == 2;
-  const int vmid = two ? 15 : 20, amid = two ? 22 : vmid;
+  const int vmid = two ? 17 : 23, amid = two ? 26 : vmid;
   if (fr.has_left)
     arrow_left(d, PX + 1, amid - 3, 7);
   if (fr.has_right)
@@ -372,7 +417,7 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   for (int i = 0; i < nl; i++)
     d.print(PC, vmid + cap_h / 2 + i * 14, font, TextAlign::BASELINE_CENTER, lines[i].c_str());
 
-  const int my = two ? 38 : 31;
+  const int my = two ? 40 : 34;
   const int mw = (fr.in_use ? 9 : 0) + (fr.playing ? 7 : 0) + (fr.in_use && fr.playing ? 4 : 0);
   int x = PC - mw / 2;
   if (fr.in_use) {
@@ -384,12 +429,12 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
 
   if (fr.style == RowStyle::LEVEL && fr.n > 1) {
     const int bx = PX + 6, bw = PW - 12;  // a bar filled up to the level
-    d.rectangle(bx, 42, bw, 5);
+    d.rectangle(bx, 45, bw, 5);
     const int fill = fr.item * (bw - 2) / (fr.n - 1);
     if (fill > 0)
-      d.filled_rectangle(bx + 1, 43, fill, 3);
+      d.filled_rectangle(bx + 1, 46, fill, 3);
   } else if (cap.size() <= 1) {
-    dots(d, fr.n, fr.item, two ? 53 : 46, PC, PW - 10);
+    dots(d, fr.n, fr.item, two ? 54 : 49, PC, PW - 10);
   }
   draw_caption();
 }

@@ -30,7 +30,7 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Stand-in mark (9.2) | Shape open | A small hollow square, top right with the status marks (the timetable screen, 2026-10-08); "[estimated]" on the web page |
 | Wi-Fi setup screen (8.1) | Text open | `Wi-Fi setup:` / `BT: press Select` (or `allowed`, `joining..`) / `Hotspot: on` or `soon`. On that screen a Select press only authorises Bluetooth |
 | Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock**. All ten slots are listed (an empty one says "No link here"). On the clock, Up plays the slot chosen last, or stops the radio |
-| Buttons (3.1, 6.2) | Two buttons, Next and Select; a list menu | **One 5-way switch** (Up, Down, Left, Right, Select; owner's choice 2026-10-06). Clock screen: Left/Right = volume of what plays, Up = radio, Down = relay, Select = menu; Up/Down/Select stop the athan, tawashih, tick or a preview. The menu is two wheels (Up/Down rows, going round, with an Exit row; Left/Right items) in two panes, the rows by name on the left (2026-10-08); Tick Window became the rows Tick From and Tick Until. Power-up: Select held = forget Wi-Fi, any direction held = unlock (README 1.3, CLAUDE.md "Keys and the menu") |
+| Buttons (3.1, 6.2) | Two buttons, Next and Select; a list menu | **One 5-way switch** (Up, Down, Left, Right, Select; owner's choice 2026-10-06). Clock screen: Left/Right = volume of what plays, Up = radio, Down = relay, Select = menu; Up/Down/Select stop the athan, tawashih, tick or a preview. The menu is two wheels (Up/Down rows, going round, with an Exit row; Left/Right items) in two panes, five rows by short name and icon on the left, the full title on the right (2026-10-09); Tick Window became the rows Tick From and Tick Until. Power-up: Select held = forget Wi-Fi, any direction held = unlock (README 1.3, CLAUDE.md "Keys and the menu") |
 | USB-C (3.1, 3.4) | 16-pin with USB data; flashing and logs over the charging cable | **6-pin power-only USB-C** (owner's choice 2026-10-05, with 5.1 kΩ CC resistors). The first flash and serial logs go through J6, a populated 1×6 UART header (GND, IO0, EN, TXD0, RXD0, 3V3; jumper 1–2 = download mode) with a 3.3 V USB-serial adapter; the firmware logs on UART0. Later updates go over Wi-Fi |
 | Empty slot | Download the default again at the next boot | Downloaded again automatically while online, at most every 30 min per slot (a missing default is not hammered) |
 
@@ -682,8 +682,8 @@ directly (Seeed schematic v1.2), so the amp breakout can take its 5 V from there
     The 5-way switch: each direction does what its name says as the owner faces the clock (else swap the pins in
     the yaml); every menu row works from Up/Down/Left/Right/Select; quick browsing never restarts the board;
     Left/Right change the volume of a playing athan and radio without stopping them; Up toggles the radio, Down
-    the relay; both power-up gestures work; the menu's row names and the timetable (Tiny5 pixel font) are readable
-    on the real OLED; the menu goes round and Exit returns with Select, Left or Right.
+    the relay; both power-up gestures work; the timetable and the menu's titles and captions (Tiny5 pixel font) and
+    the menu's icons are readable on the real OLED; the menu goes round and Exit returns with Select, Left or Right.
 10. OTA from a GitHub Release (redirected asset URL) works; an ESP8266 device does not see it.
 11. 5 V current at full volume measured; no brownout resets; no audible Wi-Fi buzz.
 12. Prayer times: the generator script builds a yearly file for every published year, and they pass the device's checks.

@@ -772,11 +772,11 @@ font:
     size: 14
   - file: "gfonts://Roboto"
     id: font3
-    size: 10
-    glyphs: "AMP0123456789"   # AM/PM, and the radio slot number next to the play mark
-  # Small text of the menu (the previews of the neighbours, the captions) and the volume pop-up's label. A pixel font
-  # at its native 8 px: every stroke sits on whole pixels, so it is crisp on the one-colour OLED, where Roboto
-  # scaled to 10 px came out ragged.
+    size: 11
+    glyphs: "AMP0123456789.:"   # AM/PM next to the time, the next prayer's time (bottom box), the menu's IP address
+  # Small text: the menu's titles and captions, the clock screen's weekday, timetable and next prayer, the radio slot
+  # number. A pixel font at its native 8 px: every stroke sits on whole pixels, so it is crisp on the one-colour OLED,
+  # where Roboto scaled to 10 px came out ragged.
   - file: "gfonts://Tiny5"
     id: font4
     size: 8
@@ -784,7 +784,7 @@ font:
   # The time on the clock screen (the timetable), digits only.
   - file: "gfonts://Roboto"
     id: font5
-    size: 32
+    size: 26
     glyphs: "0123456789:-"
 
 time:
@@ -1266,9 +1266,19 @@ script:
             };
             return r;
           };
+          // The left pane shows each row's short_title (after its icon) where the full title is too wide; the right
+          // pane's header shows the full title.
           menu.add_row(sound_row("Athan", 0));
-          menu.add_row(sound_row("Fajr Athan", 1));
-          menu.add_row(sound_row("Tawashih", 2));
+          {
+            MenuRow r = sound_row("Fajr Athan", 1);
+            r.short_title = "Fajr";
+            menu.add_row(std::move(r));
+          }
+          {
+            MenuRow r = sound_row("Tawashih", 2);
+            r.short_title = "Tawsh";
+            menu.add_row(std::move(r));
+          }
 
           {
             MenuRow r;
@@ -1286,12 +1296,19 @@ script:
             menu.add_row(std::move(r));
           }
 
-          menu.add_row(sound_row("Hourly Tick", 3));
+          {
+            MenuRow r = sound_row("Hourly Tick", 3);
+            r.short_title = "Tick";
+            r.icon = athan::RowIcon::CLOCK;   // with Tick From and Tick Until
+            menu.add_row(std::move(r));
+          }
 
           // Tick From / Tick Until: the hourly tick's window [from, until), at once; equal = all day.
           for (int w = 0; w < 2; w++) {
             MenuRow r;
             r.title = w == 0 ? "Tick From" : "Tick Until";
+            r.short_title = w == 0 ? "From" : "Until";
+            r.icon = athan::RowIcon::CLOCK;
             r.kind = RowKind::VALUE;
             r.count = []() { return 24; };
             r.label = hour_text;
@@ -1316,6 +1333,8 @@ script:
             static const int prayer_of[5] = {0, 3, 4, 5, 6};
             MenuRow r;
             r.title = "Athan On/Off";
+            r.short_title = "On/Off";
+            r.icon = athan::RowIcon::SPEAKER;   // which athans sound
             r.kind = RowKind::ACTION;
             r.style = athan::RowStyle::TOGGLES;   // all five at once, the ones off struck through
             r.short_label = [](int i) { return std::string(shorts[i]); };
@@ -1333,6 +1352,8 @@ script:
           {
             MenuRow r;
             r.title = "Volume";
+            r.short_title = "Vol";   // "Volume" after the speaker is wider than the list
+            r.icon = athan::RowIcon::SPEAKER;
             r.kind = RowKind::VALUE;
             r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
@@ -1350,6 +1371,8 @@ script:
           {
             MenuRow r;
             r.title = "Fajr Volume";
+            r.short_title = "Fajr";
+            r.icon = athan::RowIcon::SPEAKER;
             r.kind = RowKind::VALUE;
             r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
@@ -1370,6 +1393,7 @@ script:
           {
             MenuRow r;
             r.title = "Location";
+            r.short_title = "Masjid";
             r.style = athan::RowStyle::CHOICES;   // side by side while the names fit
             r.count = []() { return (int) id(web_location_select).size(); };
             r.label = [](int i) -> std::string {
@@ -1444,6 +1468,8 @@ script:
           {
             MenuRow r;
             r.title = "Lock Buttons";
+            r.short_title = "Lock";
+            r.icon = athan::RowIcon::LOCK;
             r.kind = RowKind::ACTION;
             r.count = []() { return 1; };
             r.label = [](int) { return std::string("Lock now"); };
@@ -1479,6 +1505,7 @@ script:
             static const char *const names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
             MenuRow r;
             r.title = "Exit";
+            r.icon = athan::RowIcon::EXIT;
             r.kind = RowKind::ACTION;
             r.exit = true;
             r.count = []() { return 1; };
@@ -1882,14 +1909,14 @@ script:
           // The menu draws itself (components/athan/menu_view.h).
           auto &menu = id(athan_core).menu();
           if (menu.is_open()) {
-            athan::draw_menu(d, menu, {id(font1), id(font2), id(font4)});
+            athan::draw_menu(d, menu, {id(font1), id(font2), id(font4), id(font3)});
             d.display();
             return;
           }
 
           static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
           static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-          static const char *days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+          static const char *days_uc[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
           using display::TextAlign;
           char line[48];
           auto text_w = [&](display::BaseFont *f, const char *s) -> int {
@@ -1925,11 +1952,11 @@ script:
               return;
             }
             const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
-            d.print(64, 22, id(font4), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
+            d.print(64, 24, id(font2), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
             snprintf(line, sizeof(line), "%d%%", pct);
-            d.print(64, 41, id(font1), display::TextAlign::BASELINE_CENTER, line);
-            d.rectangle(22, 45, 84, 4);
-            d.filled_rectangle(22, 45, 84 * pct / 100, 4);
+            d.print(64, 43, id(font1), display::TextAlign::BASELINE_CENTER, line);
+            d.rectangle(22, 46, 84, 4);
+            d.filled_rectangle(22, 46, 84 * pct / 100, 4);
           };
           auto finish = [&]() {
             draw_toast();
@@ -1951,29 +1978,47 @@ script:
             finish();
             return;
           }
-          // ---- the clock screen: the time, the day's five prayers (the next one highlighted), and a bottom row with
-          // the time left to the next prayer, or "ATHAN TIME" inverted, joined to its prayer's column, while it plays.
+          // ---- the clock screen: the time; the weekday with the status marks and the date; the day's five prayers,
+          // the next one in a box; and a framed box at the bottom: the next prayer small and its time a size up, the
+          // time left large ("in 2h 20m"). While the athan plays the box turns white with the prayer's name and ATHAN TIME,
+          // joined to its column. Sunrise and Doha have no column: while one of them is next, Dhuhr gets an outline.
           // As on V2, what is not known yet is struck through: the time stays "--:--" until SNTP answers, the times
-          // and the bottom row until today's times are loaded. After a power cut (times stored, no time yet) the
-          // last day's times and the prayer that was next show, struck through: a guess, and the sign they are stored.
+          // and the box until today's times are loaded. After a power cut (times stored, no time yet) the last day's
+          // times and the prayer that was next show, struck through: a guess, and the sign they are stored.
           const bool times_ok = time_ok && id(times_loaded);
           const bool athan = time_ok && id(athan_playing);
           const bool guess = !time_ok && id(athan_core).has_stored_times();
+          const int npi = id(next_prayer_index);
           // The time, large, top left (AM/PM after it with the 12-hour clock)
           if (time_ok) hhmm(line, sizeof(line), now.hour, now.minute);
           else snprintf(line, sizeof(line), "--:--");
-          d.print(0, 24, id(font5), TextAlign::BASELINE_LEFT, line);
-          if (time_ok && id(clock_12h))
-            d.print(text_w(id(font5), line) + 1, 24, id(font3), TextAlign::BASELINE_LEFT, now.hour < 12 ? "AM" : "PM");
-          // Top right: the date; under it, right to left, the marks: times borrowed from last year (a hollow
-          // square), no Wi-Fi, buttons locked, the radio slot playing.
-          if (time_ok) snprintf(line, sizeof(line), "%s %d %s", days[(now.day_of_week + 6) % 7], now.day_of_month, months[now.month - 1]);
-          else snprintf(line, sizeof(line), "--- -- ---");
-          d.print(127, 8, id(font4), TextAlign::BASELINE_RIGHT, line);
+          d.print(0, 20, id(font5), TextAlign::BASELINE_LEFT, line);
+          int time_end = text_w(id(font5), line);
+          if (time_ok && id(clock_12h)) {
+            const char *ap = now.hour < 12 ? "AM" : "PM";
+            d.print(time_end + 1, 20, id(font3), TextAlign::BASELINE_LEFT, ap);
+            time_end += 1 + text_w(id(font3), ap);
+          }
+          // Top right: the weekday small, the status marks to its left (times borrowed from last year: a hollow
+          // square; no Wi-Fi; buttons locked; the radio slot playing), the date in the medium font under them. With
+          // no room beside the time for the marks, the weekday hides.
           {
-            const int base = 22;
+            const int base = 8;
+            const char *wd = time_ok ? days_uc[(now.day_of_week + 6) % 7] : "---";
+            const int r = id(athan_core).radio_active();
+            char num[4];
+            snprintf(num, sizeof(num), "%d", r + 1);
+            const bool standin = times_ok && id(athan_core).times_standin();
+            const int marks = (standin ? 9 : 0) + (!wifi_ok ? 13 : 0) + (id(buttons_locked) ? 11 : 0) +
+                              (r >= 0 ? text_w(id(font4), num) + 3 + 9 : 0);
+            const int ww = text_w(id(font4), wd);
+            const bool show_wd = 127 - ww - 4 - marks >= time_end + 3;
             int x = 127;
-            if (times_ok && id(athan_core).times_standin()) { d.rectangle(x - 5, base - 5, 5, 5); x -= 9; }
+            if (show_wd) {
+              d.print(127, 7, id(font4), TextAlign::BASELINE_RIGHT, wd);
+              x = 127 - ww - 4;
+            }
+            if (standin) { d.rectangle(x - 5, base - 5, 5, 5); x -= 9; }
             if (!wifi_ok) {   // three arcs and a dot, struck through: 9 x 7
               const int wx = x - 9, wy = base - 7;
               d.horizontal_line(wx + 2, wy, 5); d.draw_pixel_at(wx + 1, wy + 1, display::COLOR_ON); d.draw_pixel_at(wx + 7, wy + 1, display::COLOR_ON);
@@ -1988,65 +2033,102 @@ script:
               d.filled_rectangle(lx, ly + 3, 7, 5); d.draw_pixel_at(lx + 3, ly + 5, display::COLOR_OFF);
               x -= 11;
             }
-            const int r = id(athan_core).radio_active();
-            if (r >= 0) {   // the play mark and the slot number (1-10)
-              snprintf(line, sizeof(line), "%d", r + 1);
-              d.print(x, base, id(font4), TextAlign::BASELINE_RIGHT, line);
-              x -= text_w(id(font4), line) + 2;
+            if (r >= 0) {   // the play mark, a pixel of space, the slot number (1-10)
+              d.print(x, base, id(font4), TextAlign::BASELINE_RIGHT, num);
+              x -= text_w(id(font4), num) + 3;
               d.filled_triangle(x - 4, base - 6, x - 4, base, x + 1, base - 3);
             }
+            if (time_ok) snprintf(line, sizeof(line), "%d %s", now.day_of_month, months[now.month - 1]);
+            else snprintf(line, sizeof(line), "-- ---");
+            d.print(127, 19, id(font2), TextAlign::BASELINE_RIGHT, line);
           }
           // The timetable: Fajr, Dhuhr, Asr, Maghrib, Isha in columns of 25 px. The next prayer (the one calling while
-          // the athan plays) in a box; an athan switched off is struck through.
+          // the athan plays) in a box 27 px wide; an athan switched off is struck through.
+          const bool early = !athan && (npi == 1 || npi == 2);   // Sunrise or Doha next: Dhuhr only outlined
           {
             static const int idx[5] = {0, 3, 4, 5, 6};
             static const char *shorts[5] = {"Fajr", "Dhuhr", "Asr", "Magh", "Isha"};
-            const int hi = athan ? id(current_athan_prayer_index) : id(next_prayer_index);
+            const int hi = athan ? id(current_athan_prayer_index) : early ? 3 : npi;
             const bool known = times_ok || guess;
             for (int k = 0; k < 5; k++) {
               const int pi = idx[k], cx = 2 + k * 25 + 12;
               const bool nx = pi == hi;
-              const Color c = nx ? display::COLOR_OFF : display::COLOR_ON;
-              if (nx) rounded_fill(cx - 12, 30, 25, athan ? 34 : 23, athan);
-              d.print(cx, 41, id(font4), c, TextAlign::BASELINE_CENTER, shorts[k]);
+              const Color c = nx && !early ? display::COLOR_OFF : display::COLOR_ON;
+              if (nx && early) {
+                d.horizontal_line(cx - 11, 22, 23); d.horizontal_line(cx - 11, 40, 23);   // an outline, corners cut
+                d.vertical_line(cx - 13, 24, 15); d.vertical_line(cx + 13, 24, 15);
+                d.draw_pixel_at(cx - 12, 23, display::COLOR_ON); d.draw_pixel_at(cx + 12, 23, display::COLOR_ON);
+                d.draw_pixel_at(cx - 12, 39, display::COLOR_ON); d.draw_pixel_at(cx + 12, 39, display::COLOR_ON);
+              } else if (nx) {
+                rounded_fill(cx - 13, 22, 27, athan ? 42 : 19, athan);
+              }
+              d.print(cx, 30, id(font4), c, TextAlign::BASELINE_CENTER, shorts[k]);
               if (known) hhmm(line, sizeof(line), id(prayer_hours)[pi], id(prayer_minutes)[pi]);
               else snprintf(line, sizeof(line), "--:--");
-              d.print(cx, 51, id(font4), c, TextAlign::BASELINE_CENTER, line);
-              if (!times_ok) d.horizontal_line(cx - 11, 48, 23, c);
+              d.print(cx, 39, id(font4), c, TextAlign::BASELINE_CENTER, line);
+              if (!times_ok) d.horizontal_line(cx - 11, 36, 23, c);
               if (!id(athan_enabled)[pi]) {
                 const int w = text_w(id(font4), shorts[k]);
-                d.horizontal_line(cx - w / 2 - 1, 38, w + 2, c);
+                d.horizontal_line(cx - w / 2 - 1, 27, w + 2, c);
               }
             }
           }
-          // The bottom row
-          if (athan) {
-            rounded_fill(0, 54, 128, 10, false);
-            d.print(64, 62, id(font4), display::COLOR_OFF, TextAlign::BASELINE_CENTER, "ATHAN TIME");
+          // The box at the bottom (rows 42-63)
+          if (athan) {   // white, the prayer's name large with ATHAN over TIME small beside it
+            rounded_fill(0, 42, 128, 22, false);
+            const char *nm = names[std::max(0, std::min(6, id(current_athan_prayer_index)))];
+            const int sw = std::max(text_w(id(font4), "ATHAN"), text_w(id(font4), "TIME"));
+            const int gw = text_w(id(font1), nm) + 5 + sw, x = 64 - gw / 2;
+            d.print(x, 60, id(font1), display::COLOR_OFF, TextAlign::BASELINE_LEFT, nm);
+            d.print(x + gw - sw, 51, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "ATHAN");
+            d.print(x + gw - sw, 59, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "TIME");
             finish();
             return;
           }
-          d.horizontal_line(2, 54, 124); d.horizontal_line(2, 63, 124);   // a frame with rounded corners
-          d.vertical_line(0, 56, 6); d.vertical_line(127, 56, 6);
-          d.draw_pixel_at(1, 55, display::COLOR_ON); d.draw_pixel_at(126, 55, display::COLOR_ON); d.draw_pixel_at(1, 62, display::COLOR_ON); d.draw_pixel_at(126, 62, display::COLOR_ON);
+          d.horizontal_line(2, 42, 124); d.horizontal_line(2, 63, 124);   // a frame with rounded corners
+          d.vertical_line(0, 44, 18); d.vertical_line(127, 44, 18);
+          d.draw_pixel_at(1, 43, display::COLOR_ON); d.draw_pixel_at(126, 43, display::COLOR_ON);
+          d.draw_pixel_at(1, 62, display::COLOR_ON); d.draw_pixel_at(126, 62, display::COLOR_ON);
           {
-            const int npi = id(next_prayer_index);
+            // left: the next prayer small, its time a size up (font3; AM/PM small after it) on the countdown's
+            // baseline
             const bool named = (times_ok || guess) && npi >= 0 && npi < 7;
-            if (!named) {
-              snprintf(line, sizeof(line), "Next prayer in --");
-            } else if (!times_ok) {
-              snprintf(line, sizeof(line), "%s in --", names[npi]);
-            } else {
-              int rem = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
-              if (rem < 0) rem += 1440;
-              if (rem < 60) snprintf(line, sizeof(line), "%s in %d min", names[npi], rem);
-              else snprintf(line, sizeof(line), "%s in %dh %02dm", names[npi], rem / 60, rem % 60);
+            const char *nm = named ? names[npi] : "Next";
+            char tm[8];
+            if (named) hhmm(tm, sizeof(tm), id(next_prayer_hour), id(next_prayer_minute));
+            else snprintf(tm, sizeof(tm), "--:--");
+            const char *ap = named && id(clock_12h) ? (id(next_prayer_hour) < 12 ? "AM" : "PM") : "";
+            d.print(3, 50, id(font4), TextAlign::BASELINE_LEFT, nm);
+            d.print(3, 60, id(font3), TextAlign::BASELINE_LEFT, tm);
+            int tw = text_w(id(font3), tm);
+            if (ap[0]) {
+              d.print(3 + tw + 2, 60, id(font4), TextAlign::BASELINE_LEFT, ap);
+              tw += 2 + text_w(id(font4), ap);
             }
-            const int tw = text_w(id(font4), line), tx = 64 - tw / 2;
-            d.print(tx, 62, id(font4), TextAlign::BASELINE_LEFT, line);
-            if (!times_ok) d.horizontal_line(tx - 2, 59, tw + 4);
-            else if (npi != 1 && npi != 2 && !id(athan_enabled)[npi])   // its athan is off: the name struck
-              d.horizontal_line(tx - 1, 59, text_w(id(font4), names[npi]) + 2);
+            const int sw = std::max(text_w(id(font4), nm), tw);
+            // right: the time left, large: "in 2h 20m", "in 27 min"; when too wide (12-hour times, long waits)
+            // "in 2h20m", and a wait of ten hours or more there without "in"
+            char big[24];
+            int rem = 0;
+            if (times_ok) {
+              rem = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
+              if (rem < 0) rem += 1440;
+            }
+            for (int form = 0; form < 3; form++) {
+              const char *in = form < 2 ? "in " : "";
+              if (!times_ok) snprintf(big, sizeof(big), "in --");
+              else if (rem < 60) snprintf(big, sizeof(big), "%s%d min", in, rem);
+              else snprintf(big, sizeof(big), form == 0 ? "%s%dh %02dm" : "%s%dh%02dm", in, rem / 60, rem % 60);
+              if (!times_ok || 3 + sw + 4 + text_w(id(font1), big) <= 125) break;
+            }
+            const int bw = text_w(id(font1), big);
+            d.print(125, 60, id(font1), TextAlign::BASELINE_RIGHT, big);
+            if (!times_ok) {
+              d.horizontal_line(2, 56, sw + 2);
+              d.horizontal_line(125 - bw - 2, 53, bw + 4);
+            } else if (npi != 1 && npi != 2 && !id(athan_enabled)[npi]) {   // its athan is off: the name struck
+              d.horizontal_line(2, 47, text_w(id(font4), nm) + 2);
+            }
           }
           finish();
 
