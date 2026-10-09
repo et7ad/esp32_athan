@@ -36,11 +36,9 @@ void Menu::key(MenuKey k) {
   switch (k) {
     case MenuKey::UP:
     case MenuKey::DOWN: {
-      const int r = this->row_ + (k == MenuKey::UP ? -1 : 1);
-      if (r < 0 || r >= this->num_rows()) {
-        this->close();  // past the first or the last row: back to the clock
-        return;
-      }
+      const int r = this->ring_row(k == MenuKey::UP ? -1 : 1);  // round: Up on the first row is the last
+      if (r == this->row_)
+        return;  // a single row
       const MenuRow &old = this->rows_[this->row_];
       if (old.leave)
         old.leave();
@@ -102,6 +100,10 @@ void Menu::enter_(int r) {
 
 void Menu::move_(int step) {
   const MenuRow &row = this->rows_[this->row_];
+  if (row.exit) {
+    this->close();  // Exit: Left and Right leave like Select
+    return;
+  }
   const int n = this->count();
   if (n == 0)
     return;
@@ -125,7 +127,7 @@ void Menu::move_(int step) {
 
 void Menu::select_() {
   const MenuRow &row = this->rows_[this->row_];
-  if (row.kind == RowKind::VALUE || this->item_ < 0) {
+  if (row.exit || row.kind == RowKind::VALUE || this->item_ < 0) {
     this->close();  // nothing to take: Select means done
     return;
   }

@@ -35,8 +35,12 @@ reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
    5. Applies the volume and draws the screen.
 3. `AthanComponent::loop()` runs a 1 s tick:
    1. Fetches the catalog and the station list when due.
-   2. Downloads the default into an empty slot (catalog entry 0; per slot at most every 30 min).
-   3. Runs `prayer_tick_()` and `radio_tick_()`.
+   2. Downloads the default into an empty slot (catalog entry 0; per slot at most every 30 min). While the location
+      has no prayer times at all, this waits until their download has run once (`prayer_first_()`, at most 90 s after
+      the network came up): a year of times is about 10 KB, a sound 3 MB plus a flash erase, on the same worker.
+   3. Runs `prayer_tick_()` (its job goes to the front of the queue while no times are loaded) and `radio_tick_()`.
+   `net_watch_()` restarts SNTP when the network comes up and the clock has no time: ESPHome starts SNTP once at
+   boot, and each request made without a network doubles lwIP's retry wait (15 s up to 150 s).
 4. The yaml's 1 s interval watches `schedule_version()` and reruns `load_today` when it changes (new day, new
    data, new location).
 
@@ -58,7 +62,10 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `sound_busy()`, `sound_status()` | One download/upload at a time |
 | `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists |
 | `has_custom(list)` | The slot holds a sound that is not a list entry: an upload (source 0), or a download the loaded list no longer has. Shown as "Custom" in the menu and on `/audio` |
-| `menu_size(l, off)`, `menu_item(l, off, i)`, `menu_index(l, off, item)` | The OLED sound list: `MENU_OFF` (tick only), `MENU_CUSTOM` (while `has_custom`), then the entries. `MENU_NONE` for an index with nothing there |
+| `menu_size(l, off)`, `menu_item(l, off, i)`, `menu_index(l, off, item)` | The OLED sound list: `MENU_OFF` (tick only), `MENU_RANDOM` (tawashih, first), `MENU_CUSTOM` (while `has_custom`), then the entries. `MENU_NONE` for an index with nothing there |
+| `tawashih_random()`, `set_tawashih_random(on)` | The Random tawashih (default, saved as a preference). On frees the stored tawashih (`CLEAR_SLOT` once nothing plays from it); a download or upload started after the choice turns it off |
+| `play_random_tawashih()`, `tawashih_streaming()`, `stop_tawashih()` | Pre-Fajr with Random: streams a random entry (not the last one), one retry with another entry if it fails at once; false without internet or list |
+| `has_stored_times()` | The location has stored prayer times: the timetable shows the last day's times and the next prayer (saved globals) struck through until the clock is set |
 | `request_preview(l, item, ms)` | How the menu and `/audio` start previews: stops the current preview at once (one STOP), starts the new one (`preview_catalog` or `preview_stored`) after `ms` without another request. Menu Left/Right use 500 ms, reaching a sound row 800 ms, `/audio` 300 ms. Keeps fast browsing to one stream and a few media commands (CLAUDE.md, "Never send media player commands in bursts") |
 | `preview_stored(list)` | Plays the stored sound from flash as a preview (the Custom item; `/audio/preview?entry=-1`) |
 | `preview_catalog(l, e)` | Nothing stored. The selected entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
@@ -140,6 +147,28 @@ channel count are kept for the format check after each start (boot log: `… Hz,
   disagreement is silenced at once (`hard_stop_cb_`) and restarted cleanly, up to 3 times per stream, then the
   stream stops with an error.
 
+**After the radio**: `stop_media_pipeline_()` sets `media_stop_pending_`, cleared once the media chain has stopped.
+A stored sound (`play_slot()`: the athan, the tawashih, a preview from flash) waits for it in `pump_starts_()` (at
+most 3 s): the radio's last half second is still in the resampler, mixer and I2S buffers and would play under the
+new sound's start. Tones and the tick do not wait (the tick plays over the radio).
+
+**End of a sound**: ESPHome's mixer ends a source only when the I2S speaker has reported all of its frames played
+(`pending_playback_frames_`). When the I2S speaker restarts on its own ("Event/record queues desynced", "Partial DMA
+write broke buffer alignment": its writer missed the 50 ms of DMA), the frames it held are dropped but stay counted
+(`frames_in_pipeline_`); the next sound's mixer input starts with that count as its delay and never empties, and
+the player keeps announcing until other audio plays. On the prototype every athan started over a running speaker
+did this, and the athan screen stayed to `make_athan`'s 7 min timeout. The cause: the announcement reader fills its
+ring buffer from flash in one `xRingbufferSend`, which ESP-IDF copies inside a critical section; at ESPHome's 1 MB
+`buffer_size` that is far longer than 50 ms with interrupts off. `buffer_size` 128 KB fixed it (0 restarts in 6
+starts, 3 of 3 before); athan.yaml now uses 48 KB, for the Wi-Fi (CLAUDE.md). As a bound, the end tracking in `loop()` stops a stored sound still announced 5 s
+past its length (`AudioSlots::duration_ms`).
+
+**Instant stops**: `hard_mute` mutes the I2S speaker and calls `begin_drain_watch()`, which notes the pipelines
+whose resampler runs. `loop()` counts each resampler's stops (`media_stops_`, `announce_stops_`); `audio_drained()`
+is true once each noted pipeline has stopped. A resampler stops only after its mixer input has, which stops once its
+frames have played (or the I2S speaker stopped), so the unmute (`audio_drained()` or the I2S speaker stopped, at most
+2 s) leaves no tail and does not cut what starts next.
+
 **Download** (`DOWNLOAD_URL`):
 1. Download into PSRAM. A `Content-Length` over the limit is refused before reading, and the read aborts as
    soon as it passes the limit. The selected entry is not downloaded at all (`selected_entry()`).
@@ -162,7 +191,7 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
   (retry every 1 min on failure), and kept in RAM only.
 - **Stations** `docs/radio/stations.json` (≤ 16 KB): 10 `{name, url}`, kept in memory (`stations_`). Fetched at
   boot and every 6 h (retry every 1 min until a first copy exists, then every 30 min), and early when a
-  subscribed station gives up after 3 reconnects (at most every 10 min, `stations_fetched_at_`). `radio_play()`
+  subscribed station gives up after 6 reconnects (about a minute) (at most every 10 min, `stations_fetched_at_`). `radio_play()`
   uses the copy in memory at once; only without any copy it queues `STATION_PLAY` (fetch, then play; a waiting
   one is replaced, not doubled, `enqueue_(job, true)`). The yaml labels the Radio Station select options from it
   (fixed buffers, rewritten in place; the select is synced by index).
@@ -241,16 +270,16 @@ to 00:00–23:59.
 | `fajr_volume_feedback` | Fajr volume changed (menu or web): tone at the new Fajr level, then `apply_playing_volume`; while a Fajr sound plays it just takes the new level |
 | `amp_wake` | Amp on ahead of a sound and starts `amp_idle_off`, so a sound that never starts (no radio link, empty tawashih or tick slot) cannot leave it on |
 | `amp_idle_off` | Amp off 5 s after the player goes idle |
-| `hard_mute` | Instant silence for a stop the owner asked for: mutes the I2S speaker (applied as audio leaves its 500 ms buffer, so silent within its 50 ms of DMA), unmutes 800 ms later. Volume changes meanwhile wait (`output_muted`, `volume_pending`) |
+| `hard_mute` | Instant silence for a stop the owner asked for: mutes the I2S speaker (applied as audio leaves its 500 ms buffer, so silent within its 50 ms of DMA), unmutes once the stopped audio has played out ("Instant stops" above, at most 2 s). Volume changes meanwhile wait (`output_muted`, `volume_pending`) |
 | `silence_audio` | Stop everything, cancel the radio resume (locked keys, web Stop Audio) |
 | `radio_start` | Play `radio_slot` |
-| `make_athan` | Regular or Fajr slot, Fajr volume at Fajr, LED on, waits for the end (≤ 7 min), resumes the radio |
+| `make_athan` | Regular or Fajr slot, Fajr volume at Fajr, LED on, waits for the end (at most 5 s past the sound's length; ≤ 7 min), resumes the radio |
 | `run_prefajr` | Relay on, tawashih at the Fajr volume, resume the radio; `prefajr_relay_off` turns the relay off `prefajr_relay_min` after the tawashih (or `prefajr_relay_min` + 7 min after the start, if it was stopped) |
 | `play_tick` | Tick over the ducked radio |
 | `check_update` | `update.check`, then sets `update_check_state` for the menu |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
 | `sync_web_state` (1 s interval) | Publish entities only on change; unchanged values are compared in a buffer, without allocating |
-| `update_display` | The whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each) |
+| `update_display` | The whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`), the date and status marks, the five prayers with the next one (the calling one during the athan) in a box, and a framed bottom row with the time left, inverted to "ATHAN TIME" and joined to its column while the athan plays |
 
 **Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 10 s
 OLED watchdog (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
@@ -258,6 +287,13 @@ came back).
 
 **Keys and the menu:** CLAUDE.md "Keys and the menu". Navigation is `components/athan/menu.h` (host-tested in
 `firmware/tests/test_menu.cpp`), drawing `menu_view.h`, the rows script `menu_setup`. No row numbers anywhere.
+The rows go round (`ring_row()`); the last, Exit (`MenuRow::exit`), closes on Select, Left or Right. Two panes: the
+rows by name on the left (the one on screen in the middle, a dotted line where the list starts again), the row's
+item on the right. Layouts (`RowStyle`): LIST (item as large as it fits, two lines of the medium font when too wide,
+arrows, marks under it, dots), CHOICES (all items side by side when they fit, the cursor's one in reversed colours:
+`print(..., COLOR_OFF, ...)` over a filled box), LEVEL (bar), TOGGLES (each item's initial with a box, filled when
+on, the cursor's one framed). A single item is a button, or with a tab in its caption the label and the two parts on
+lines of their own (Info). The exit row previews the clock (label: the time, caption: the next prayer).
 
 **Wi-Fi:**
 - No network is compiled in: `wifi: ap:` (AthanFallbackHotspot / athan404, `ap_timeout: 3min`) +
@@ -271,7 +307,8 @@ came back).
   Radio Stations, Location and Prayer Times, System.
 - `/audio` (custom handler): `GET /audio` renders the page. Its sticky status bar is an iframe named `st` showing
   `GET /audio/status?g=`, and every form posts into it (`target="st"`), so an action never reloads or scrolls the
-  page. `POST /audio/download|preview|stop?list=&entry=&g=` queue an action and redirect to the bar.
+  page. `POST /audio/download|preview|stop|random?list=&entry=&g=` queue an action and redirect to the bar
+  (`random`: the Random tawashih).
   `POST /audio/upload?slot=&g=` is a multipart upload. The bar refreshes itself every 2 s while a download or
   upload is busy. `g` is `sounds_changed_` when the page was drawn: once a slot changed, the bar offers
   **Reload page**. Plain HTML, no JavaScript.

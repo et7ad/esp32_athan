@@ -57,6 +57,9 @@ class AudioSlots {
   void invalidate(int slot);
   /// Main loop: re-read the header after a write and re-validate the data.
   void reload(int slot);
+  /// Worker task: empty the slot for good (erases its header sector; the audio stays but is never read). The main
+  /// loop has invalidated it first.
+  bool clear(int slot);
 
   /// Worker task: erase + write + header. `progress` gets 0..100. Returns false on a flash error.
   /// `source` is source_id() of the download link, 0 for an upload.

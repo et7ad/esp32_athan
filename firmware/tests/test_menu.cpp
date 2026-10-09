@@ -68,7 +68,7 @@ static MenuRow make_row(const char *title, RowKind kind, TestRow *t, bool wrap =
   return r;
 }
 
-static void test_rows_and_ends() {
+static void test_rows_go_round() {
   TestRow a{{10, 11, 12}, 11}, b{{20, 21}, -1};
   Menu m;
   m.add_row(make_row("A", RowKind::CHOICE, &a));
@@ -82,26 +82,57 @@ static void test_rows_and_ends() {
   m.open();
   CHECK(m.is_open() && m.row() == 0 && m.item() == 1, "opens on the first row's item in use (got %d)", m.item());
   CHECK(called("A show 1 e"), "entering a row shows its item");
-  CHECK(m.row_above() == -1 && m.row_below() == 1, "the clock above the first row");
+  CHECK(m.ring_row(-1) == 1 && m.ring_row(1) == 1 && m.ring_row(0) == 0, "the ring: the last row above the first");
 
   calls.clear();
   m.key(MenuKey::DOWN);
   CHECK(m.row() == 1 && m.item() == 0, "Down: next row, first item when none is in use");
   CHECK(calls.size() == 2 && calls[0] == "A leave" && calls[1] == "B show 0 e", "leave, then show");
-  CHECK(m.row_below() == -1, "the clock below the last row");
 
   calls.clear();
   m.key(MenuKey::DOWN);
-  CHECK(!m.is_open(), "Down past the last row closes");
+  CHECK(m.is_open() && m.row() == 0, "Down on the last row: the first row, the menu stays open");
+  CHECK(calls.size() == 2 && calls[0] == "B leave" && calls[1] == "A show 1 e", "going round leaves and shows");
+
+  calls.clear();
+  m.key(MenuKey::UP);
+  CHECK(m.is_open() && m.row() == 1 && !called("close"), "Up on the first row: the last row");
+
+  calls.clear();
+  m.close();
   CHECK(calls.size() == 2 && calls[0] == "B leave" && calls[1] == "close", "close leaves the row once");
   calls.clear();
   m.close();
   CHECK(calls.empty(), "closing twice does nothing");
 
-  m.open();
+  TestRow only{{1, 2}, 1};
+  Menu one;
+  one.add_row(make_row("O", RowKind::CHOICE, &only));
+  one.open();
   calls.clear();
-  m.key(MenuKey::UP);
-  CHECK(!m.is_open() && called("A leave") && called("close"), "Up on the first row closes");
+  one.key(MenuKey::UP);
+  one.key(MenuKey::DOWN);
+  CHECK(one.is_open() && calls.empty(), "a single row: Up/Down do nothing");
+}
+
+static void test_exit() {
+  // The Exit row: Select, Left and Right all close the menu, without apply().
+  TestRow a{{1, 2}, 1}, x{{0}, -1};
+  Menu m;
+  m.add_row(make_row("A", RowKind::CHOICE, &a));
+  MenuRow rx = make_row("X", RowKind::ACTION, &x);
+  rx.exit = true;
+  m.add_row(rx);
+  m.set_on_close([]() { log_call("close"); });
+  for (MenuKey k : {MenuKey::SELECT, MenuKey::LEFT, MenuKey::RIGHT}) {
+    m.open();
+    m.key(MenuKey::UP);  // round: the Exit row sits above the first row
+    CHECK(m.row() == 1, "Up from the first row reaches Exit");
+    calls.clear();
+    m.key(k);
+    CHECK(!m.is_open() && !called("X apply 0"), "Exit: key %d closes without applying", static_cast<int>(k));
+    CHECK(calls.size() == 2 && calls[0] == "X leave" && calls[1] == "close", "Exit: leave, then close once");
+  }
 }
 
 static void test_choice() {
@@ -166,7 +197,7 @@ static void test_action_and_small_rows() {
   m.key(MenuKey::DOWN);
   calls.clear();
   m.key(MenuKey::RIGHT);
-  CHECK(m.item() == 0 && calls.empty(), "a single item: Left/Right do nothing");
+  CHECK(m.item() == 0 && calls.empty() && m.is_open(), "a single item: Left/Right do nothing");
   CHECK(m.item_left() == -1 && m.item_right() == -1, "a single item has no neighbours");
 }
 
@@ -221,7 +252,8 @@ static void test_hook_closes() {
 }
 
 int main() {
-  test_rows_and_ends();
+  test_rows_go_round();
+  test_exit();
   test_choice();
   test_value();
   test_action_and_small_rows();

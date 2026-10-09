@@ -27,15 +27,15 @@ Implemented: everything in sections 4–10. Where the build differs from the pla
 | Location | Index persisted | The **key** is persisted (`selected_location_key`), so the Location list may be reordered or extended freely |
 | Generator (9.2, 9.3) | One script writes the V3 yearly file and the V2 daily files | Every script here writes **only** the V3 yearly file (one positional list per day). V2 daily files are produced in the V2 repository with its own scripts. `make_yearly_json.py` converts years that exist only as V2 daily files |
 | Built-in tones (4.1) | `audio_file` | `media_player: files:` from `firmware/sounds/click.mp3` and `volume.mp3` (V2's C3 and C2), added by the builder |
-| Stand-in mark (9.2) | Shape open | A small hollow square after the next prayer's time; "[estimated]" on the web page |
+| Stand-in mark (9.2) | Shape open | A small hollow square, top right with the status marks (the timetable screen, 2026-10-08); "[estimated]" on the web page |
 | Wi-Fi setup screen (8.1) | Text open | `Wi-Fi setup:` / `BT: press Select` (or `allowed`, `joining..`) / `Hotspot: on` or `soon`. On that screen a Select press only authorises Bluetooth |
 | Radio menu (7) | Select plays or stops | Select plays or stops **and returns to the clock**. All ten slots are listed (an empty one says "No link here"). On the clock, Up plays the slot chosen last, or stops the radio |
-| Buttons (3.1, 6.2) | Two buttons, Next and Select; a list menu | **One 5-way switch** (Up, Down, Left, Right, Select; owner's choice 2026-10-06). Clock screen: Left/Right = volume of what plays, Up = radio, Down = relay, Select = menu; Up/Down/Select stop the athan, tawashih, tick or a preview. The menu is two wheels (Up/Down rows, Left/Right items) with small previews of the neighbours; Tick Window became the rows Tick From and Tick Until. Power-up: Select held = forget Wi-Fi, any direction held = unlock (README 1.3, CLAUDE.md "Keys and the menu") |
+| Buttons (3.1, 6.2) | Two buttons, Next and Select; a list menu | **One 5-way switch** (Up, Down, Left, Right, Select; owner's choice 2026-10-06). Clock screen: Left/Right = volume of what plays, Up = radio, Down = relay, Select = menu; Up/Down/Select stop the athan, tawashih, tick or a preview. The menu is two wheels (Up/Down rows, going round, with an Exit row; Left/Right items) in two panes, the rows by name on the left (2026-10-08); Tick Window became the rows Tick From and Tick Until. Power-up: Select held = forget Wi-Fi, any direction held = unlock (README 1.3, CLAUDE.md "Keys and the menu") |
 | USB-C (3.1, 3.4) | 16-pin with USB data; flashing and logs over the charging cable | **6-pin power-only USB-C** (owner's choice 2026-10-05, with 5.1 kΩ CC resistors). The first flash and serial logs go through J6, a populated 1×6 UART header (GND, IO0, EN, TXD0, RXD0, 3V3; jumper 1–2 = download mode) with a 3.3 V USB-serial adapter; the firmware logs on UART0. Later updates go over Wi-Fi |
 | Empty slot | Download the default again at the next boot | Downloaded again automatically while online, at most every 30 min per slot (a missing default is not hammered) |
 
-Menu rows as built (16): Radio, Athan, Fajr Athan, Tawashih, Pre-Fajr, Hourly Tick, Tick From, Tick Until,
-Athan On/Off, Volume, Fajr Volume, Location, Clock, Update, Lock Buttons, Info. No Cancel item: Up from the first
+Menu rows as built (16): Radio, Athan, Fajr Athan, Tawashih (Random first), Pre-Fajr, Hourly Tick, Tick From,
+Tick Until, Athan On/Off, Volume, Fajr Volume, Location, Clock, Update, Lock Buttons, Info. No Cancel item: Up from the first
 row or Down from the last returns to the clock.
 
 Still open: the sound files and their names in `docs/audio/catalog.json` (placeholders now), the F8 choice in
@@ -239,7 +239,8 @@ fourth 3 MB region (section 16).
 
 ### 4.4 First boot and missing files
 
-- A new device has empty slots. Once Wi-Fi is up, it downloads entry 1 of each list in the catalog (section 5).
+- A new device has empty slots. Once Wi-Fi is up, it downloads its prayer times first (about 10 KB), then entry 1 of
+  each list in the catalog (section 5).
 - If a slot is empty or invalid at playback time (first boot without internet, or after the power-cut case above),
   the device plays the built-in tone three times and logs it, so the prayer time is still marked audibly.
 
@@ -522,7 +523,9 @@ published yet.
 
 #### Time
 
-- After a power-up the clock comes from SNTP, as today. Once set it runs on the module's crystal (drift around a
+- After a power-up the clock comes from SNTP, as today, within seconds of Wi-Fi (SNTP is restarted when the network
+  comes up). A software restart (update, Restart button) should keep it: ESP-IDF keeps the time in the RTC across
+  software restarts (to confirm on the prototype). Once set it runs on the module's crystal (drift around a
   second a day) and is re-synced whenever the internet is there, so internet outages after that do not matter.
 - After a power cut *with* no internet, the device has no time until the internet returns. The RTC in section 16
   removes that last dependency.
@@ -679,7 +682,8 @@ directly (Seeed schematic v1.2), so the amp breakout can take its 5 V from there
     The 5-way switch: each direction does what its name says as the owner faces the clock (else swap the pins in
     the yaml); every menu row works from Up/Down/Left/Right/Select; quick browsing never restarts the board;
     Left/Right change the volume of a playing athan and radio without stopping them; Up toggles the radio, Down
-    the relay; both power-up gestures work; the small previews (Tiny5 pixel font) are readable on the real OLED.
+    the relay; both power-up gestures work; the menu's row names and the timetable (Tiny5 pixel font) are readable
+    on the real OLED; the menu goes round and Exit returns with Select, Left or Right.
 10. OTA from a GitHub Release (redirected asset URL) works; an ESP8266 device does not see it.
 11. 5 V current at full volume measured; no brownout resets; no audible Wi-Fi buzz.
 12. Prayer times: the generator script builds a yearly file for every published year, and they pass the device's checks.

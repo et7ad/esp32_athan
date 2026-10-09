@@ -1,6 +1,7 @@
 #pragma once
-// The device menu as two wheels: Up/Down turn the wheel of rows (Radio, Athan, Fajr Athan, ... Info), Left/Right
-// turn the items of the row on screen. Past either end of the row wheel is the clock: the menu closes.
+// The device menu as two wheels: Up/Down turn the wheel of rows (Radio, Athan, Fajr Athan, ... Info, Exit), Left/Right
+// turn the items of the row on screen. The row wheel goes round (Down on the last row is the first); the way back to
+// the clock is a row of its own (MenuRow::exit), Select on an item that closes, or the yaml's timeout.
 //
 // Rows are defined in athan.yaml (script menu_setup), each in one place: its title, its items, and what Left/Right
 // and Select do there. This class only keeps the cursor and calls those hooks, so every key takes one path and
@@ -29,11 +30,28 @@ enum class RowKind : uint8_t {
   ACTION,
 };
 
+/// How a row lays out its items in the menu's right pane (menu_view.cpp). Navigation is the same for all.
+enum class RowStyle : uint8_t {
+  /// The item large, arrows where Left/Right lead, dots (or a slider) for where it sits.
+  LIST,
+  /// All items side by side when they fit across the pane (Pre-Fajr: Off On), the one under the cursor highlighted;
+  /// otherwise as LIST.
+  CHOICES,
+  /// A level (volumes): the item large and a bar for where it sits.
+  LEVEL,
+  /// On/off items (Athan On/Off): the one under the cursor and its state, and every item by the first letter of its
+  /// short name with a box under it, filled when on.
+  TOGGLES,
+};
+
 struct MenuRow {
   const char *title{""};
   RowKind kind{RowKind::CHOICE};
+  RowStyle style{RowStyle::LIST};
   /// Left/Right go round from the last item to the first. Off for volumes: no jump from 100 % to 0 %.
   bool wrap{true};
+  /// The way back to the clock (Exit): Select, Left and Right all close the menu; apply is not called.
+  bool exit{false};
   /// Number of items now (0 while a list is still loading). Required.
   std::function<int()> count;
   /// Text of item i. Required.
@@ -43,8 +61,11 @@ struct MenuRow {
   /// The item playing now (the radio station), -1 if none: play mark.
   std::function<int()> playing;
   /// A status line under item i (download progress, what an Info item is), "" for none. With i = -1: why the row
-  /// has no items ("Loading list...").
+  /// has no items ("Loading list..."). A tab splits it into two lines ("athan.local\tV3.0.0").
   std::function<std::string(int)> caption;
+  /// TOGGLES: item i's short name (its first letter is drawn), and whether it is on (a filled box).
+  std::function<std::string(int)> short_label;
+  std::function<bool(int)> on;
   /// Stable identity of the item at position i, and the position of an identity now (-1 if gone). With both, the
   /// cursor stays on its item when the list changes under it (a list loads, "Custom" goes after a download).
   /// Without them the cursor keeps its position.
@@ -83,9 +104,11 @@ class Menu {
   /// from 3 items (with 2, the same item would sit on both sides).
   int item_left() const { return this->neighbour_(-1); }
   int item_right() const { return this->neighbour_(1); }
-  /// Rows above and below; -1 past the ends, which is the clock.
-  int row_above() const { return this->row_ - 1; }
-  int row_below() const { return this->row_ + 1 < this->num_rows() ? this->row_ + 1 : -1; }
+  /// The row `offset` rows from the one on screen, going round (-1: the row above; the last row is above the first).
+  int ring_row(int offset) const {
+    const int n = this->num_rows();
+    return n == 0 ? -1 : ((this->row_ + offset) % n + n) % n;
+  }
 
  protected:
   void enter_(int r);

@@ -142,6 +142,16 @@ void AudioSlots::reload(int slot) {
   this->valid_[slot] = this->check_slot_(slot);
 }
 
+bool AudioSlots::clear(int slot) {
+  if (this->part_ == nullptr || slot < 0 || slot >= NUM_SLOTS)
+    return false;
+  this->valid_[slot] = false;
+  const esp_err_t err = esp_partition_erase_range(this->part_, REGION_OFFSET[slot], HEADER_SECTOR);
+  if (err != ESP_OK)
+    ESP_LOGE(TAG, "Erase failed: %s", esp_err_to_name(err));
+  return err == ESP_OK;
+}
+
 bool AudioSlots::write(int slot, const uint8_t *data, size_t len, uint32_t duration_ms, const std::string &label,
                        uint32_t source, void (*progress)(void *ctx, int percent), void *ctx) {
   if (this->part_ == nullptr || slot < 0 || slot >= NUM_SLOTS || len == 0 || len > SLOT_MAX_BYTES[slot])

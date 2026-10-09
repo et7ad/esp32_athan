@@ -392,8 +392,9 @@ output:
 #   Clock screen: Left/Right = volume of what plays (never stops it). Up = radio on/off (the slot chosen last).
 #     Down = relay on/off. Select = menu. While the athan, the tawashih, the tick or a preview plays, Up, Down and
 #     Select stop it (the radio plays on).
-#   Menu: Up/Down = rows, Left/Right = the row's items, Select = take it, or done. The rows are script menu_setup;
-#     navigation is components/athan/menu.h, drawing menu_view.h.
+#   Menu: Up/Down = rows (they go round; the last row, Exit, returns to the clock with Select, Left or Right),
+#     Left/Right = the row's items, Select = take it, or done. The rows are script menu_setup; navigation is
+#     components/athan/menu.h, drawing menu_view.h.
 #   Buttons locked: every key only silences.
 # Debounce on each key: a press is reported at once and contact bounce for 40 ms after it is ignored, so one press
 # is one event (bounce read as extra presses multiplied previews and media commands).
@@ -780,6 +781,11 @@ font:
     id: font4
     size: 8
     glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°"
+  # The time on the clock screen (the timetable), digits only.
+  - file: "gfonts://Roboto"
+    id: font5
+    size: 32
+    glyphs: "0123456789:-"
 
 time:
   - platform: sntp
@@ -834,10 +840,11 @@ globals:
   - {id: current_athan_prayer_index, type: int, initial_value: "0"}
   - {id: times_loaded, type: bool, initial_value: "false"}
   - {id: schedule_seen, type: uint32_t, initial_value: "0"}
-  - {id: prayer_hours, type: "uint8_t[7]", initial_value: "{5, 6, 7, 12, 15, 17, 18}"}
-  - {id: prayer_minutes, type: "uint8_t[7]", initial_value: "{0, 0, 0, 0, 0, 0, 0}"}
-  # The next prayer survives a power cut (a restart keeps the time; a power cut loses it until SNTP answers): the
-  # screen shows it, struck through, until the clock is set again. Written when it changes, a few times a day.
+  # Today's times and the next prayer survive a power cut (a restart keeps the time; a power cut loses it until SNTP
+  # answers): the screen shows them, struck through, until the clock is set again. Written when they change: the
+  # times once a day, the next prayer a few times.
+  - {id: prayer_hours, type: "uint8_t[7]", initial_value: "{5, 6, 7, 12, 15, 17, 18}", restore_value: true}
+  - {id: prayer_minutes, type: "uint8_t[7]", initial_value: "{0, 0, 0, 0, 0, 0, 0}", restore_value: true}
   - {id: next_prayer_index, type: int, initial_value: "0", restore_value: true}
   - {id: next_prayer_hour, type: int, initial_value: "0", restore_value: true}
   - {id: next_prayer_minute, type: int, initial_value: "0", restore_value: true}
@@ -1064,6 +1071,7 @@ script:
           duration: 0.3s
       - lambda: |-
           id(athan_core).stop_preview();
+          id(athan_core).stop_tawashih();   // the random one (streamed)
           id(athan_core).stop_announcements();
           id(athan_playing) = false;
           id(prefajr_playing) = false;
@@ -1128,8 +1136,8 @@ script:
   # ---------------- device menu ----------------
   # The OLED menu's rows, top to bottom, each defined once (navigation: components/athan/menu.h, drawing:
   # menu_view.h). Kinds: CHOICE = Left/Right show the choices, Select takes the one shown (on the one in use: closes
-  # the menu). VALUE = Left/Right change it at once, Select closes. ACTION = Select runs the item shown. Up past the
-  # first row or Down past the last returns to the clock, as does 60 s without a press.
+  # the menu). VALUE = Left/Right change it at once, Select closes. ACTION = Select runs the item shown. Up/Down go
+  # round the rows; the last row, Exit, returns to the clock (Select, Left or Right), as does 60 s without a press.
   - id: menu_setup
     then:
       - lambda: |-
@@ -1175,9 +1183,10 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Sound rows: "Off" (tick only), "Custom" (an uploaded sound), then the suggested list. They open on the
-          // sound in use; a pause on an item plays a preview (from flash for the stored one). Select on another
-          // entry downloads it (its progress shows under it, the check mark moves when it is stored).
+          // Sound rows: "Off" (tick only), "Random" (tawashih only, first: one list entry a day, streamed, nothing
+          // stored), "Custom" (an uploaded sound), then the suggested list. They open on the sound in use; a pause on
+          // an item plays a preview (from flash for the stored one). Select on another entry downloads it (its
+          // progress shows under it, the check mark moves when it is stored).
           auto sound_row = [](const char *title, int slot) {
             const bool off = slot == 3;
             auto pos_of = [=](int item) {
@@ -1193,14 +1202,19 @@ script:
             r.label = [=](int i) -> std::string {
               const int it = id(athan_core).menu_item(slot, off, i);
               if (it == athan::MENU_OFF) return "Off";
+              if (it == athan::MENU_RANDOM) return "Random";
               if (it == athan::MENU_CUSTOM) return "Custom";
               return id(athan_core).catalog_name(slot, it);
             };
             r.active = [=]() {
               if (off && !id(htick_enabled)) return pos_of(athan::MENU_OFF);
+              if (slot == 2 && id(athan_core).tawashih_random()) return pos_of(athan::MENU_RANDOM);
               return pos_of(id(athan_core).has_custom(slot) ? athan::MENU_CUSTOM : id(athan_core).selected_entry(slot));
             };
             r.caption = [=](int i) -> std::string {
+              if (slot == 2 && id(menu_download_slot) != slot && i >= 0 &&
+                  id(athan_core).menu_item(slot, off, i) == athan::MENU_RANDOM)
+                return "New one each day, streamed";   // also before the list has loaded
               if (!id(athan_core).catalog_ready())
                 return wifi::global_wifi_component->is_connected() ? "Loading list..." : "No internet";
               if (i < 0) return "List is empty";
@@ -1232,6 +1246,14 @@ script:
                 return false;
               }
               if (off) id(htick_enabled) = true;
+              if (it == athan::MENU_RANDOM) {
+                id(athan_core).set_tawashih_random(true);   // frees the stored tawashih
+                return false;
+              }
+              if (slot == 2 && it == athan::MENU_CUSTOM) {
+                id(athan_core).set_tawashih_random(false);   // the uploaded one, still stored
+                return false;
+              }
               if (it >= 0) {
                 id(menu_download_slot) = slot;
                 id(athan_core).download_from_catalog(slot, it);
@@ -1251,6 +1273,7 @@ script:
           {
             MenuRow r;
             r.title = "Pre-Fajr";
+            r.style = athan::RowStyle::CHOICES;   // Off  On, side by side
             r.count = []() { return 2; };
             r.label = [](int i) { return std::string(i ? "On" : "Off"); };
             r.active = []() { return id(prefajr_enabled) ? 1 : 0; };
@@ -1273,10 +1296,11 @@ script:
             r.count = []() { return 24; };
             r.label = hour_text;
             r.active = [w]() { return w == 0 ? id(htick_start_hour) : id(htick_end_hour); };
-            r.caption = [hour_text](int) -> std::string {
+            r.caption = [hour_text, w](int) -> std::string {
               const int a = id(htick_start_hour), b = id(htick_end_hour);
               if (a == b) return "All day";
-              return hour_text(a) + " to " + hour_text(b) + " (" + std::to_string((b - a + 24) % 24) + " h)";
+              return (w == 0 ? "until " + hour_text(b) : "from " + hour_text(a)) + ", " +
+                     std::to_string((b - a + 24) % 24) + " h";
             };
             r.apply = [w](int i) {
               (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = i;
@@ -1288,10 +1312,14 @@ script:
           // Athan On/Off: Select switches the prayer shown.
           {
             static const char *const names[5] = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
+            static const char *const shorts[5] = {"Fajr", "Dhuhr", "Asr", "Magh", "Isha"};
             static const int prayer_of[5] = {0, 3, 4, 5, 6};
             MenuRow r;
             r.title = "Athan On/Off";
             r.kind = RowKind::ACTION;
+            r.style = athan::RowStyle::TOGGLES;   // all five at once, the ones off struck through
+            r.short_label = [](int i) { return std::string(shorts[i]); };
+            r.on = [](int i) { return id(athan_enabled)[prayer_of[i]]; };
             r.count = []() { return 5; };
             r.label = [](int i) { return std::string(names[i]) + (id(athan_enabled)[prayer_of[i]] ? ": On" : ": Off"); };
             r.apply = [](int i) {
@@ -1306,6 +1334,7 @@ script:
             MenuRow r;
             r.title = "Volume";
             r.kind = RowKind::VALUE;
+            r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
             r.count = []() { return 11; };
             r.label = [](int i) { return std::to_string(i * 10) + "%"; };
@@ -1322,6 +1351,7 @@ script:
             MenuRow r;
             r.title = "Fajr Volume";
             r.kind = RowKind::VALUE;
+            r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
             r.count = []() { return 11; };
             r.label = [](int i) { return std::to_string(i * 10) + "%"; };
@@ -1340,6 +1370,7 @@ script:
           {
             MenuRow r;
             r.title = "Location";
+            r.style = athan::RowStyle::CHOICES;   // side by side while the names fit
             r.count = []() { return (int) id(web_location_select).size(); };
             r.label = [](int i) -> std::string {
               auto k = id(web_location_select).at(i);
@@ -1366,6 +1397,7 @@ script:
           {
             MenuRow r;
             r.title = "Clock";
+            r.style = athan::RowStyle::CHOICES;
             r.count = []() { return 2; };
             r.label = [](int i) { return std::string(i ? "12-hour" : "24-hour"); };
             r.active = []() { return id(clock_12h) ? 1 : 0; };
@@ -1428,20 +1460,44 @@ script:
             MenuRow r;
             r.title = "Info";
             r.kind = RowKind::ACTION;
-            r.count = []() { return 3; };
-            r.label = [](int i) -> std::string {
-              if (i == 1) return "athan.local";
-              if (i == 2) return "V${project_version}";
+            r.count = []() { return 1; };
+            // One screen: the IP address, and under it the web page's name and the firmware version side by side.
+            r.label = [](int) -> std::string {
               auto ips = network::get_ip_addresses();
               char ip[48] = "No Wi-Fi";
               if (wifi::global_wifi_component->is_connected() && ips[0].is_set()) ips[0].str_to(ip);
               return ip;
             };
-            r.caption = [](int i) -> std::string {
-              static const char *const what[3] = {"IP address", "Web page", "Firmware"};
-              return (i >= 0 && i < 3) ? what[i] : "";
-            };
+            r.caption = [](int) -> std::string { return "athan.local\tV${project_version}"; };
             r.apply = [](int) { return true; };
+            menu.add_row(std::move(r));
+          }
+
+          // Exit, last: one Up from Radio (the rows go round). Select, Left and Right return to the clock; the right
+          // pane previews it: the time (label) and the next prayer (caption).
+          {
+            static const char *const names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
+            MenuRow r;
+            r.title = "Exit";
+            r.kind = RowKind::ACTION;
+            r.exit = true;
+            r.count = []() { return 1; };
+            r.label = [](int) -> std::string {
+              auto now = id(sntp_time).now();
+              char b[8];
+              if (!now.is_valid()) return "--:--";
+              if (id(clock_12h)) snprintf(b, sizeof(b), "%d:%02d", (now.hour % 12) ? now.hour % 12 : 12, now.minute);
+              else snprintf(b, sizeof(b), "%02d:%02d", now.hour, now.minute);
+              return b;
+            };
+            r.caption = [](int) -> std::string {
+              const int i = id(next_prayer_index), h = id(next_prayer_hour), m = id(next_prayer_minute);
+              if (!id(sntp_time).now().is_valid() || !id(times_loaded) || i < 0 || i > 6) return "";
+              char b[24];
+              if (id(clock_12h)) snprintf(b, sizeof(b), "%s %d:%02d", names[i], (h % 12) ? h % 12 : 12, m);
+              else snprintf(b, sizeof(b), "%s %02d:%02d", names[i], h, m);
+              return b;
+            };
             menu.add_row(std::move(r));
           }
 
@@ -1551,10 +1607,15 @@ script:
       - script.execute: apply_fajr_volume
       - delay: 100ms
       - lambda: |-
-          if (!id(athan_core).play_slot(2)) ESP_LOGW("prefajr", "No tawashih selected");
+          // Random: a list entry streamed (another than last time); without internet nothing plays (the relay
+          // still switches). Otherwise the tawashih stored on the clock.
+          if (id(athan_core).tawashih_random()) id(athan_core).play_random_tawashih();
+          else if (!id(athan_core).play_slot(2)) ESP_LOGW("prefajr", "No tawashih selected");
       - wait_until:
           condition:
-            lambda: 'return !id(athan_core).slot_playing() && id(player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;'
+            lambda: |-
+              return !id(athan_core).slot_playing() && !id(athan_core).tawashih_streaming() &&
+                     id(player).state != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
           timeout: 7min
       - lambda: |-
           id(prefajr_playing) = false;
@@ -1765,7 +1826,8 @@ script:
             static const char *slot_names[4] = {"Athan", "Fajr", "Tawashih", "Tick"};
             int pos = 0;
             for (int i = 0; i < 4 && pos < (int) sizeof(buf) - 1; i++) {
-              const std::string l = id(athan_core).slot_label(i);
+              const std::string l = (i == 2 && id(athan_core).tawashih_random()) ? std::string("Random")
+                                                                                  : id(athan_core).slot_label(i);
               pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%s: %s", i ? "; " : "", slot_names[i],
                               l.empty() ? "none" : l.c_str());
             }
@@ -1827,56 +1889,30 @@ script:
 
           static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
           static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-
-          auto time_width = [&](int h, int m) -> int {
-            char b[8]; int x1, y1, w = 0, w2 = 0, hh;
-            if (id(clock_12h)) {
-              int h12 = h % 12; if (h12 == 0) h12 = 12;
-              snprintf(b, sizeof(b), "%d:%02d", h12, m);
-              d.get_text_bounds(0, 0, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
-              d.get_text_bounds(0, 0, (h < 12) ? "AM" : "PM", id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &w2, &hh);
-              return w + 1 + w2;
-            }
-            snprintf(b, sizeof(b), "%02d:%02d", h, m);
-            d.get_text_bounds(0, 0, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
+          static const char *days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+          using display::TextAlign;
+          char line[48];
+          auto text_w = [&](display::BaseFont *f, const char *s) -> int {
+            int x1, y1, w, h;
+            d.get_text_bounds(0, 0, s, f, TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
             return w;
           };
-          auto draw_time = [&](int x, int y, int h, int m) -> int {
-            char b[8]; int x1, y1, w, hh;
-            if (id(clock_12h)) {
-              int h12 = h % 12; if (h12 == 0) h12 = 12;
-              snprintf(b, sizeof(b), "%d:%02d", h12, m);
-              d.print(x, y, id(font1), b);
-              d.get_text_bounds(x, y, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
-              x += w + 1;
-              const char *ap = (h < 12) ? "AM" : "PM";
-              d.print(x, y + 9, id(font3), ap);
-              d.get_text_bounds(x, y, ap, id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
-              return x + w;
+          // "05:57", or "5:57" with the 12-hour clock (AM/PM only next to the big time)
+          auto hhmm = [&](char *b, size_t n, int h, int m) {
+            if (id(clock_12h)) snprintf(b, n, "%d:%02d", (h % 12) ? h % 12 : 12, m);
+            else snprintf(b, n, "%02d:%02d", h, m);
+          };
+          // A filled box with its corners cut by 2 pixels (only the top ones with top_only).
+          auto rounded_fill = [&](int x, int y, int w, int h, bool top_only) {
+            d.filled_rectangle(x, y, w, h);
+            const int xs[2] = {x, x + w - 1}, dx[2] = {1, -1};
+            for (int i = 0; i < 2; i++) {
+              d.draw_pixel_at(xs[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i], y + 1, display::COLOR_OFF);
+              if (top_only) continue;
+              d.draw_pixel_at(xs[i], y + h - 1, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y + h - 1, display::COLOR_OFF);
+              d.draw_pixel_at(xs[i], y + h - 2, display::COLOR_OFF);
             }
-            snprintf(b, sizeof(b), "%02d:%02d", h, m);
-            d.print(x, y, id(font1), b);
-            d.get_text_bounds(x, y, b, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &w, &hh);
-            return x + w;
           };
-          auto draw_lock = [&](int x, int y) { d.circle(x + 3, y + 2, 2); d.filled_rectangle(x, y + 4, 7, 5); };
-          // Radio playing: the play mark and the slot number (1-10), right-aligned before the lock (and the
-          // no-Wi-Fi mark), so "10" fits too.
-          auto draw_radio = [&]() {
-            const int r = id(athan_core).radio_active();
-            if (r < 0) return;
-            char num[4];
-            snprintf(num, sizeof(num), "%d", r + 1);
-            int x1, y1, wn, hn;
-            d.get_text_bounds(0, 0, num, id(font3), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
-            const int right = wifi_ok ? (id(buttons_locked) ? 119 : 127) : (id(buttons_locked) ? 94 : 103);
-            const int x = right - (7 + 1 + wn) + 1;   // mark 7 px wide, 1 px gap, then the number
-            d.filled_triangle(x, 55, x, 63, x + 6, 59);
-            d.print(x + 8, 63, id(font3), display::TextAlign::BASELINE_LEFT, num);
-          };
-          auto draw_nowifi = [&]() { d.circle(116, 52, 10); d.print(107, 41, id(font1), "W"); d.line(105, 43, 125, 63); };
-          char line[48];
-
           // Pop-up over the clock for 2 s after Left/Right (volume) or Down (relay): script show_toast.
           auto draw_toast = [&]() {
             const int k = id(toast_kind);
@@ -1900,7 +1936,6 @@ script:
             d.display();
           };
 
-          // ---- normal screen ----
           const bool time_ok = now.is_valid();
           // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (README "Wi-Fi setup").
           // The hotspot's name is too wide for the screen; it is in the README.
@@ -1916,92 +1951,102 @@ script:
             finish();
             return;
           }
-          if (time_ok && id(athan_playing)) {
-            d.print(0, 0, id(font1), "Athan Time:");
-            snprintf(line, sizeof(line), "%s prayer", names[id(current_athan_prayer_index)]);
-            d.print(0, 22, id(font1), line);
-            int x1, y1, wd, hd;
-            snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
-            d.get_text_bounds(0, 44, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
-            int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
-            int x = draw_time(0, 44, now.hour, now.minute);
-            d.print(x + gap, 44, id(font1), line);
-            finish();
-            return;
-          }
-          // As on V2: until the clock is set the three rows are drawn and struck through (lines at y 11, 33, 55
-          // cross rows 1-3); until today's prayer times are loaded, rows 2 and 3 are. Unknown values show as dashes.
-          // Row 1 shows the time as soon as SNTP has answered, also while the prayer times still download.
+          // ---- the clock screen: the time, the day's five prayers (the next one highlighted), and a bottom row with
+          // the time left to the next prayer, or "ATHAN TIME" inverted, joined to its prayer's column, while it plays.
+          // As on V2, what is not known yet is struck through: the time stays "--:--" until SNTP answers, the times
+          // and the bottom row until today's times are loaded. After a power cut (times stored, no time yet) the
+          // last day's times and the prayer that was next show, struck through: a guess, and the sign they are stored.
           const bool times_ok = time_ok && id(times_loaded);
-          if (!time_ok) d.line(0, 11, 127, 11);
-          if (!times_ok) { d.line(0, 33, 127, 33); d.line(0, 55, 127, 55); }
-          // Line 1: time and date
+          const bool athan = time_ok && id(athan_playing);
+          const bool guess = !time_ok && id(athan_core).has_stored_times();
+          // The time, large, top left (AM/PM after it with the 12-hour clock)
+          if (time_ok) hhmm(line, sizeof(line), now.hour, now.minute);
+          else snprintf(line, sizeof(line), "--:--");
+          d.print(0, 24, id(font5), TextAlign::BASELINE_LEFT, line);
+          if (time_ok && id(clock_12h))
+            d.print(text_w(id(font5), line) + 1, 24, id(font3), TextAlign::BASELINE_LEFT, now.hour < 12 ? "AM" : "PM");
+          // Top right: the date; under it, right to left, the marks: times borrowed from last year (a hollow
+          // square), no Wi-Fi, buttons locked, the radio slot playing.
+          if (time_ok) snprintf(line, sizeof(line), "%s %d %s", days[(now.day_of_week + 6) % 7], now.day_of_month, months[now.month - 1]);
+          else snprintf(line, sizeof(line), "--- -- ---");
+          d.print(127, 8, id(font4), TextAlign::BASELINE_RIGHT, line);
           {
-            int x1, y1, wd, hd;
-            if (time_ok) {
-              snprintf(line, sizeof(line), "%02d%s", now.day_of_month, months[now.month - 1]);
-              d.get_text_bounds(0, 0, line, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
-              int gap = std::max(2, std::min(10, 128 - time_width(now.hour, now.minute) - wd));
-              int x = draw_time(0, 0, now.hour, now.minute);
-              d.print(x + gap, 0, id(font1), line);
-            } else {
-              d.print(0, 0, id(font1), "--:--");
-              d.get_text_bounds(0, 0, "--:--", id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wd, &hd);
-              d.print(wd + 10, 0, id(font1), "-----");
+            const int base = 22;
+            int x = 127;
+            if (times_ok && id(athan_core).times_standin()) { d.rectangle(x - 5, base - 5, 5, 5); x -= 9; }
+            if (!wifi_ok) {   // three arcs and a dot, struck through: 9 x 7
+              const int wx = x - 9, wy = base - 7;
+              d.horizontal_line(wx + 2, wy, 5); d.draw_pixel_at(wx + 1, wy + 1, display::COLOR_ON); d.draw_pixel_at(wx + 7, wy + 1, display::COLOR_ON);
+              d.draw_pixel_at(wx, wy + 2, display::COLOR_ON); d.draw_pixel_at(wx + 8, wy + 2, display::COLOR_ON); d.horizontal_line(wx + 3, wy + 2, 3);
+              d.draw_pixel_at(wx + 2, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 6, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 4, wy + 5, display::COLOR_ON);
+              d.line(wx, wy + 6, wx + 8, wy - 1);
+              x -= 13;
+            }
+            if (id(buttons_locked)) {   // a padlock: 7 x 8
+              const int lx = x - 7, ly = base - 8;
+              d.rectangle(lx + 1, ly, 5, 4); d.draw_pixel_at(lx + 1, ly, display::COLOR_OFF); d.draw_pixel_at(lx + 5, ly, display::COLOR_OFF);
+              d.filled_rectangle(lx, ly + 3, 7, 5); d.draw_pixel_at(lx + 3, ly + 5, display::COLOR_OFF);
+              x -= 11;
+            }
+            const int r = id(athan_core).radio_active();
+            if (r >= 0) {   // the play mark and the slot number (1-10)
+              snprintf(line, sizeof(line), "%d", r + 1);
+              d.print(x, base, id(font4), TextAlign::BASELINE_RIGHT, line);
+              x -= text_w(id(font4), line) + 2;
+              d.filled_triangle(x - 4, base - 6, x - 4, base, x + 1, base - 3);
             }
           }
-          if (!times_ok) {
-            // No clock yet (after a power cut) but prayer times stored: the prayer that was next when the power went,
-            // struck through like the rest. A guess until SNTP answers, and the sign that the times are stored.
-            const int gi = id(next_prayer_index), gh = id(next_prayer_hour), gm = id(next_prayer_minute);
-            if (!time_ok && id(athan_core).has_stored_times() && gi >= 0 && gi < 7 && gh >= 0 && gh < 24 &&
-                gm >= 0 && gm < 60) {
-              int x1, y1, wn, hn;
-              d.get_text_bounds(0, 22, names[gi], id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
-              d.print(0, 22, id(font1), names[gi]);
-              draw_time(wn + std::max(1, std::min(5, 128 - wn - time_width(gh, gm))), 22, gh, gm);
-            } else {
-              d.print(0, 22, id(font1), "Next --:--");
+          // The timetable: Fajr, Dhuhr, Asr, Maghrib, Isha in columns of 25 px. The next prayer (the one calling while
+          // the athan plays) in a box; an athan switched off is struck through.
+          {
+            static const int idx[5] = {0, 3, 4, 5, 6};
+            static const char *shorts[5] = {"Fajr", "Dhuhr", "Asr", "Magh", "Isha"};
+            const int hi = athan ? id(current_athan_prayer_index) : id(next_prayer_index);
+            const bool known = times_ok || guess;
+            for (int k = 0; k < 5; k++) {
+              const int pi = idx[k], cx = 2 + k * 25 + 12;
+              const bool nx = pi == hi;
+              const Color c = nx ? display::COLOR_OFF : display::COLOR_ON;
+              if (nx) rounded_fill(cx - 12, 30, 25, athan ? 34 : 23, athan);
+              d.print(cx, 41, id(font4), c, TextAlign::BASELINE_CENTER, shorts[k]);
+              if (known) hhmm(line, sizeof(line), id(prayer_hours)[pi], id(prayer_minutes)[pi]);
+              else snprintf(line, sizeof(line), "--:--");
+              d.print(cx, 51, id(font4), c, TextAlign::BASELINE_CENTER, line);
+              if (!times_ok) d.horizontal_line(cx - 11, 48, 23, c);
+              if (!id(athan_enabled)[pi]) {
+                const int w = text_w(id(font4), shorts[k]);
+                d.horizontal_line(cx - w / 2 - 1, 38, w + 2, c);
+              }
             }
-            d.print(0, 44, id(font1), "Rem --:--");
-            if (!wifi_ok) draw_nowifi();
-            if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
-            draw_radio();
+          }
+          // The bottom row
+          if (athan) {
+            rounded_fill(0, 54, 128, 10, false);
+            d.print(64, 62, id(font4), display::COLOR_OFF, TextAlign::BASELINE_CENTER, "ATHAN TIME");
             finish();
             return;
           }
-          // Line 2: next prayer and its time
-          const char *npn = names[id(next_prayer_index)];
+          d.horizontal_line(2, 54, 124); d.horizontal_line(2, 63, 124);   // a frame with rounded corners
+          d.vertical_line(0, 56, 6); d.vertical_line(127, 56, 6);
+          d.draw_pixel_at(1, 55, display::COLOR_ON); d.draw_pixel_at(126, 55, display::COLOR_ON); d.draw_pixel_at(1, 62, display::COLOR_ON); d.draw_pixel_at(126, 62, display::COLOR_ON);
           {
-            int x1, y1, wn, hn;
-            d.get_text_bounds(0, 22, npn, id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wn, &hn);
-            int gap = std::max(1, std::min(5, 128 - wn - time_width(id(next_prayer_hour), id(next_prayer_minute))));
-            d.print(0, 22, id(font1), npn);
-            int xe = draw_time(wn + gap, 22, id(next_prayer_hour), id(next_prayer_minute));
-            // Stand-in mark (times from last year until this year's timetable is published): a small hollow square
-            if (id(athan_core).times_standin()) d.rectangle(std::min(xe + 2, 123), 24, 4, 4);
-          }
-          // Line 3: time remaining
-          {
-            int total = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
-            if (total < 0) total += 1440;
-            snprintf(line, sizeof(line), "Rem %02d:%02d", total / 60, total % 60);
-            d.print(0, 44, id(font1), line);
-          }
-          if (!wifi_ok) draw_nowifi();
-          if (id(buttons_locked)) draw_lock(wifi_ok ? 121 : 96, 55);
-          draw_radio();
-          // Muted next prayer: strike through the last two letters of its name
-          {
-            int npi = id(next_prayer_index);
-            if (npi != 1 && npi != 2 && !id(athan_enabled)[npi]) {
-              int x1, y1, wf, hf, wh, hh;
-              std::string nm(npn), head = nm.substr(0, nm.size() - 2);
-              d.get_text_bounds(0, 22, nm.c_str(), id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wf, &hf);
-              d.get_text_bounds(0, 22, head.c_str(), id(font1), display::TextAlign::TOP_LEFT, &x1, &y1, &wh, &hh);
-              int sy = 22 + hf / 2 + 2;
-              d.line(wh, sy, wf - 1, sy);
+            const int npi = id(next_prayer_index);
+            const bool named = (times_ok || guess) && npi >= 0 && npi < 7;
+            if (!named) {
+              snprintf(line, sizeof(line), "Next prayer in --");
+            } else if (!times_ok) {
+              snprintf(line, sizeof(line), "%s in --", names[npi]);
+            } else {
+              int rem = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
+              if (rem < 0) rem += 1440;
+              if (rem < 60) snprintf(line, sizeof(line), "%s in %d min", names[npi], rem);
+              else snprintf(line, sizeof(line), "%s in %dh %02dm", names[npi], rem / 60, rem % 60);
             }
+            const int tw = text_w(id(font4), line), tx = 64 - tw / 2;
+            d.print(tx, 62, id(font4), TextAlign::BASELINE_LEFT, line);
+            if (!times_ok) d.horizontal_line(tx - 2, 59, tw + 4);
+            else if (npi != 1 && npi != 2 && !id(athan_enabled)[npi])   // its athan is off: the name struck
+              d.horizontal_line(tx - 1, 59, text_w(id(font4), names[npi]) + 2);
           }
           finish();
 

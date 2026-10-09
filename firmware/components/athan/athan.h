@@ -25,6 +25,7 @@
 #include "esphome/components/text/text.h"
 #include "esphome/components/time/real_time_clock.h"
 #include "esphome/core/component.h"
+#include "esphome/core/preferences.h"
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -45,6 +46,7 @@ static const int MAX_ENTRIES = 10;
 static const int MENU_NONE = -3;    // nothing there (list not loaded yet)
 static const int MENU_OFF = -2;     // "Off", first in the tick list
 static const int MENU_CUSTOM = -1;  // the slot's own sound when it is not in the suggested list (an upload)
+static const int MENU_RANDOM = -4;  // "Random", in the tawashih list: one entry a day, streamed, nothing stored
 
 struct NamedUrl {
   std::string name;
@@ -95,14 +97,29 @@ class AthanComponent : public Component {
   /// The slot holds a sound that is not in the suggested list: an upload, or a download the list no longer has.
   /// Menus show it as "Custom", so it can be previewed and kept.
   bool has_custom(int slot) const;
-  /// A device-menu sound list: "Off" first for the tick (`with_off`), then "Custom" while has_custom(), then the
-  /// suggested entries. menu_item() says what sits at `index` (an entry, MENU_OFF, MENU_CUSTOM or MENU_NONE);
-  /// menu_index() is the reverse (0 when `item` is not in the list).
+  /// A device-menu sound list: "Off" first for the tick (`with_off`), "Random" first in the tawashih list, then
+  /// "Custom" while has_custom(), then the suggested entries. menu_item() says what sits at
+  /// `index` (an entry, MENU_OFF, MENU_RANDOM, MENU_CUSTOM or MENU_NONE); menu_index() is the reverse (0 when
+  /// `item` is not in the list).
   int menu_size(int slot, bool with_off) const;
   int menu_item(int slot, bool with_off, int index) const;
   int menu_index(int slot, bool with_off, int item) const;
   bool sound_busy() const { return this->sound_busy_.load(); }
   std::string sound_status() const;
+
+  // ---------------- random tawashih ----------------
+  /// Pre-Fajr plays a random entry of the tawashih list, a new one each day, streamed (nothing stored). The default.
+  /// Saved across restarts. Turning it on frees the stored tawashih (its slot is emptied once nothing plays from it);
+  /// a tawashih downloaded or uploaded later turns it off.
+  bool tawashih_random() const { return this->tawashih_random_.load(); }
+  void set_tawashih_random(bool on);
+  /// Pre-Fajr with Random: streams a random list entry (another than last time). False when it cannot start (no
+  /// internet, list not loaded): nothing plays then.
+  bool play_random_tawashih();
+  /// The random tawashih is starting or playing.
+  bool tawashih_streaming() const { return this->tawashih_stream_; }
+  /// Stops the random tawashih (Up/Down/Select while it plays). Nothing else.
+  void stop_tawashih();
 
   // ---------------- suggested lists ----------------
   void fetch_catalog();
@@ -181,7 +198,7 @@ class AthanComponent : public Component {
   Menu &menu() { return this->menu_; }
 
   // ---------------- used by the /audio web page (httpd task) ----------------
-  enum class WebAction : uint8_t { DOWNLOAD, PREVIEW, STOP };
+  enum class WebAction : uint8_t { DOWNLOAD, PREVIEW, STOP, RANDOM };
   void web_action(WebAction action, int list, int entry);
   bool upload_begin(int slot, const std::string &filename);
   void upload_data(const uint8_t *data, size_t len);
@@ -200,7 +217,8 @@ class AthanComponent : public Component {
     DOWNLOAD_URL,
     COMMIT_BUFFER,
     PRAYER_YEAR,
-    CHECK_STREAM
+    CHECK_STREAM,
+    CLEAR_SLOT
   };
   enum class PrayerPurpose : uint8_t { CURRENT, PREVIOUS, NEXT };
   // NO_CONNECTION: the server was not reached at all (no network, DNS, refused, TLS); FAILED: any other error.
@@ -287,6 +305,7 @@ class AthanComponent : public Component {
   };
   SlotView slot_view_[NUM_SLOTS];
   void refresh_slot_view_();
+  void job_clear_slot_(Job &job);
   // The last Wi-Fi drops (main loop; the reason comes from an ESP-IDF event handler).
   struct WifiDrop {
     char when[6];
@@ -327,6 +346,17 @@ class AthanComponent : public Component {
   std::atomic<bool> stations_ready_{false};
   std::atomic<bool> stations_pending_{false};
   std::atomic<bool> sound_busy_{false};
+  // Random tawashih (set_tawashih_random()). gen_ counts the times it was chosen: a tawashih download or upload
+  // started before the last choice (job_gen_ older) does not turn it off when it is stored, and is freed instead.
+  std::atomic<bool> tawashih_random_{true};
+  ESPPreferenceObject random_pref_;
+  std::atomic<uint32_t> tawashih_gen_{0};
+  std::atomic<uint32_t> tawashih_job_gen_{0};  // set on the web server's task too (an upload)
+  bool clear_tawashih_{false};       // free the tawashih slot as soon as nothing plays from it
+  bool tawashih_stream_{false};      // the random tawashih is starting or playing (media pipeline)
+  bool tawashih_retried_{false};
+  uint32_t tawashih_started_{0};
+  int tawashih_last_{-1};            // entry played last time (not repeated the next day)
   std::atomic<uint32_t> sounds_changed_{0};  // +1 after every download/upload that changed a slot (/audio reload hint)
   // Retry deadlines in 64-bit milliseconds (millis_64()): a 32-bit deadline goes stale after 24.8 days.
   uint64_t next_catalog_try_{0};

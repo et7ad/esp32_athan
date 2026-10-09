@@ -1,14 +1,21 @@
 #pragma once
-// Draws the device menu (menu.h) on the 128x64 OLED.
+// Draws the device menu (menu.h) on the 128x64 OLED as two panes.
 //
-//       Fajr Athan: Mishary          the row above, small (above the first row: "Home")
-//            Tawashih                the row on screen
-//   hary   Nasr Eddin v   Afas       the item, large, with a check mark; the items left and right of it, small
-//            . . # . .               position in the row (or a caption: download progress, what an Info item is)
-//         Pre-Fajr: Off              the row below, small
+//    Info          |                     the left pane: the rows by name, a ring (Up/Down go round), the row on screen
+//   < Exit         |       Abdul         always in the middle, highlighted; a dotted line where the list starts again
+//   . . . . . . .  |  <    Basit    >    the right pane: the row's item, as large as it fits (two lines of the medium
+//  [ Athan       ] |        v            font when one is too narrow), arrows where Left/Right lead, the check mark
+//    Fajr Athan    |   . # . . . . .     (in use) and play mark (playing) under it, then dots, a level bar or the
+//    Tawashih      |                     caption (small font, up to two lines)
+//    Pre-Fajr      |
 //
-// Small = a pixel font at its native size (Tiny5, 8 px), crisp on the one-colour OLED. Check mark: the item in
-// use. Play mark: the radio station playing.
+// Other row styles (menu.h RowStyle) in the right pane: CHOICES side by side when they fit (Off  On), TOGGLES as the
+// prayer and its state with every prayer's initial and a box (filled = on) under them, LEVEL with a bar. A single item
+// is a button for Select (Update, Lock), or with a tab in its caption the label and the caption's two parts on lines
+// of their own (Info). The exit row (MenuRow::exit) previews the clock: its label (the time), its caption (the next
+// prayer), and which keys go back.
+//
+// Small = a pixel font at its native size (Tiny5, 8 px), crisp on the one-colour OLED.
 
 #include <string>
 

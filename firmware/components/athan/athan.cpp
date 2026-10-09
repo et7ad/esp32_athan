@@ -17,6 +17,7 @@
 #include <esp_event.h>
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
+#include <esp_random.h>
 #include <esp_sntp.h>
 #include <esp_wifi.h>
 
@@ -145,6 +146,8 @@ class AudioWebHandler : public AsyncWebHandler {
         this->parent_->web_action(AthanComponent::WebAction::PREVIEW, a, b);
       else if (url == "/audio/stop")
         this->parent_->web_action(AthanComponent::WebAction::STOP, 0, 0);
+      else if (url == "/audio/random")
+        this->parent_->web_action(AthanComponent::WebAction::RANDOM, 0, 0);
       // /audio/upload: the file already arrived through handleUpload().
       // Every form posts into the page's status bar (an iframe), so the answer is the bar, not the page.
       request->redirect("/audio/status?g=" + std::to_string(std::strtoul(request->arg("g").c_str(), nullptr, 10)));
@@ -175,6 +178,11 @@ class AudioWebHandler : public AsyncWebHandler {
 // ==============================================================================================================
 void AthanComponent::setup() {
   this->slots_.begin();
+  this->random_pref_ = global_preferences->make_preference<bool>(fnv1_hash("athan_tawashih_random"));
+  bool random = true;  // the default: a new clock streams a random tawashih and stores none
+  if (!this->random_pref_.load(&random))
+    random = true;
+  this->tawashih_random_ = random;
   this->refresh_slot_view_();
   this->store_.begin();
   // Wi-Fi events: the reason of each drop for the web page (ESPHome only logs it), and 802.11b/g at every station
@@ -231,6 +239,7 @@ void AthanComponent::loop() {
       switch (a.first) {
         case WebAction::DOWNLOAD: this->download_from_catalog(a.second.first, a.second.second); break;
         case WebAction::PREVIEW: this->request_preview(a.second.first, a.second.second, 300); break;
+        case WebAction::RANDOM: this->set_tawashih_random(true); break;
         case WebAction::STOP:
           if (this->hard_stop_cb_ && this->preview_list_ >= 0)
             this->hard_stop_cb_();  // silent at once
@@ -275,6 +284,20 @@ void AthanComponent::loop() {
   if (this->media_stop_pending_ && this->player_ != nullptr && this->media_chain_stopped_())
     this->media_stop_pending_ = false;
 
+  // The random tawashih is over once its stream has started and the media chain has stopped again. A link that
+  // fails at once (backup servers answer with errors now and then) gets one more try with another entry.
+  if (this->tawashih_stream_ && !this->stream_pending_ && millis() - this->tawashih_started_ > 3000 &&
+      this->media_chain_stopped_()) {
+    this->tawashih_stream_ = false;
+    if (!this->tawashih_retried_ && millis() - this->tawashih_started_ < 15000) {
+      this->tawashih_retried_ = true;
+      ESP_LOGW(TAG, "Pre-Fajr Tawashih did not play: trying another one");
+      this->play_random_tawashih();
+    } else {
+      this->tawashih_retried_ = false;
+    }
+  }
+
   // Starts waiting for their pipeline to stop, then the format checks of what started.
   this->pump_starts_();
   this->check_formats_();
@@ -317,10 +340,25 @@ void AthanComponent::loop() {
     job.type = JobType::STATIONS;
     this->enqueue_(std::move(job));
   }
-  // A slot without a sound (new device, or a power cut while writing) gets the list's first entry.
+  // Random was chosen for the tawashih: free the stored one once nothing plays from it or writes it.
+  if (this->clear_tawashih_ && this->tawashih_random_ && !this->sound_busy_ && this->playing_slot_ != SLOT_TAWASHIH &&
+      this->slots_.valid(SLOT_TAWASHIH) && !this->sound_busy_.exchange(true)) {
+    this->clear_tawashih_ = false;
+    this->slots_.invalidate(SLOT_TAWASHIH);
+    Job job;
+    job.type = JobType::CLEAR_SLOT;
+    job.slot = SLOT_TAWASHIH;
+    this->enqueue_(std::move(job));
+  } else if (this->clear_tawashih_ && (!this->tawashih_random_ || !this->slots_.valid(SLOT_TAWASHIH))) {
+    this->clear_tawashih_ = false;
+  }
+  // A slot without a sound (new device, or a power cut while writing) gets the list's first entry; the tawashih
+  // not while Random streams it.
   if (online && this->catalog_ready_ && !this->sound_busy_ && this->playing_slot_ < 0 && this->slots_.ready() &&
       !this->prayer_first_(now64)) {
     for (int s = 0; s < NUM_SLOTS; s++) {
+      if (s == SLOT_TAWASHIH && this->tawashih_random_)
+        continue;
       if (!this->slots_.valid(s) && this->catalog_size(s) > 0 && due(now64, this->next_default_try_[s])) {
         ESP_LOGI(TAG, "Slot %s is empty: downloading the default from the list", SLOT_NAMES[s]);
         this->next_default_try_[s] = now64 + HOUR_MS / 2;  // a failed default (404, too big) is not hammered
@@ -394,6 +432,7 @@ void AthanComponent::run_job_(Job &job) {
     case JobType::COMMIT_BUFFER: this->job_commit_(job.slot, job.data, job.len, job.label); break;
     case JobType::PRAYER_YEAR: this->job_prayer_(job); break;
     case JobType::CHECK_STREAM: this->job_check_stream_(job); break;
+    case JobType::CLEAR_SLOT: this->job_clear_slot_(job); break;
   }
 }
 
@@ -610,7 +649,7 @@ void AthanComponent::preview_stored(int slot) {
 }
 
 bool AthanComponent::begin_preview_(int list) {
-  if (this->playing_slot_ >= 0 && !this->slot_preview_) {
+  if ((this->playing_slot_ >= 0 && !this->slot_preview_) || this->tawashih_stream_) {
     this->set_sound_status_("A sound is playing: preview after it");  // never cut the athan or the tick
     return false;
   }
@@ -668,7 +707,7 @@ bool AthanComponent::audio_drained() const {
 void AthanComponent::request_preview(int list, int item, uint32_t delay_ms) {
   if (list < 0 || list >= NUM_LISTS)
     return;
-  if (this->playing_slot_ >= 0 && !this->slot_preview_) {
+  if ((this->playing_slot_ >= 0 && !this->slot_preview_) || this->tawashih_stream_) {
     this->set_sound_status_("A sound is playing: preview after it");  // never cut the athan or the tick
     return;
   }
@@ -703,6 +742,7 @@ void AthanComponent::stop_preview() {
 void AthanComponent::stop_media() {
   this->pending_preview_list_ = -1;
   this->stream_pending_ = false;
+  this->tawashih_stream_ = false;
   this->preview_list_ = -1;
   this->radio_token_++;
   this->radio_station_ = -1;
@@ -914,6 +954,79 @@ void AthanComponent::play_tone(audio::AudioFile *file) {
   this->start_announcement_(file);
 }
 
+// ---------------- random tawashih ----------------
+void AthanComponent::set_tawashih_random(bool on) {
+  if (on)
+    this->tawashih_gen_++;
+  if (on == this->tawashih_random_.load()) {
+    if (on && this->slots_.valid(SLOT_TAWASHIH))
+      this->clear_tawashih_ = true;
+    return;
+  }
+  this->tawashih_random_ = on;
+  bool v = on;
+  this->random_pref_.save(&v);
+  ESP_LOGI(TAG, "Tawashih: %s", on ? "random, one a day (streamed)" : "the stored one");
+  if (on && this->slots_.valid(SLOT_TAWASHIH))
+    this->clear_tawashih_ = true;  // freed in loop() once nothing plays from it
+  this->refresh_slot_view_();
+  this->sounds_changed_++;
+}
+
+bool AthanComponent::play_random_tawashih() {
+  if (!network::is_connected() || this->player_ == nullptr) {
+    ESP_LOGW(TAG, "Pre-Fajr Tawashih: no internet, the random tawashih cannot stream");
+    return false;
+  }
+  std::string url, name;
+  int pick = -1;
+  {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    const int n = static_cast<int>(this->catalog_[SLOT_TAWASHIH].size());
+    if (n == 0) {
+      ESP_LOGW(TAG, "Pre-Fajr Tawashih: the list is not loaded, nothing to stream");
+      return false;
+    }
+    pick = static_cast<int>(esp_random() % n);
+    if (n > 1 && pick == this->tawashih_last_)
+      pick = (pick + 1 + static_cast<int>(esp_random() % (n - 1))) % n;  // another than last time
+    url = this->catalog_[SLOT_TAWASHIH][pick].url;
+    name = this->catalog_[SLOT_TAWASHIH][pick].name;
+  }
+  this->tawashih_last_ = pick;
+  this->preview_list_ = -1;
+  this->pending_preview_list_ = -1;
+  this->radio_station_ = -1;  // run_prefajr paused the radio; it resumes it afterwards
+  this->radio_token_++;
+  this->tawashih_stream_ = true;
+  this->tawashih_started_ = millis();
+  this->start_stream_(url);
+  ESP_LOGI(TAG, "Pre-Fajr Tawashih: %s (random)", name.c_str());
+  this->set_sound_status_("Pre-Fajr Tawashih: " + name);
+  return true;
+}
+
+void AthanComponent::stop_tawashih() {
+  if (!this->tawashih_stream_)
+    return;
+  this->tawashih_stream_ = false;
+  this->stream_pending_ = false;
+  this->stop_media_pipeline_();
+}
+
+void AthanComponent::job_clear_slot_(Job &job) {
+  const int slot = job.slot;
+  const bool ok = this->slots_.clear(slot);
+  this->defer([this, slot, ok]() {
+    this->slots_.reload(slot);
+    this->refresh_slot_view_();
+    this->sounds_changed_++;
+    this->sound_busy_ = false;
+    if (ok)
+      this->set_sound_status_(std::string(SLOT_NAMES[slot]) + " freed: Random streams one a day");
+  });
+}
+
 void AthanComponent::stop_announcements() {
   if (this->announce_pending_ != nullptr && this->playing_slot_ >= 0 &&
       this->announce_pending_ == this->slots_.file(this->playing_slot_)) {
@@ -959,24 +1072,30 @@ bool AthanComponent::has_custom(int slot) const {
 }
 
 int AthanComponent::menu_size(int slot, bool with_off) const {
-  return (with_off ? 1 : 0) + (this->has_custom(slot) ? 1 : 0) + this->catalog_size(slot);
+  return (with_off ? 1 : 0) + (slot == SLOT_TAWASHIH ? 1 : 0) + (this->has_custom(slot) ? 1 : 0) +
+         this->catalog_size(slot);
 }
 
 int AthanComponent::menu_item(int slot, bool with_off, int index) const {
   if (with_off && index-- == 0)
     return MENU_OFF;
+  if (slot == SLOT_TAWASHIH && index-- == 0)
+    return MENU_RANDOM;
   if (this->has_custom(slot) && index-- == 0)
     return MENU_CUSTOM;
   return (index >= 0 && index < this->catalog_size(slot)) ? index : MENU_NONE;
 }
 
 int AthanComponent::menu_index(int slot, bool with_off, int item) const {
+  const int random = slot == SLOT_TAWASHIH ? 1 : 0;
   const int custom = this->has_custom(slot) ? 1 : 0;
   const int base = with_off ? 1 : 0;
+  if (item == MENU_RANDOM)
+    return random ? base : 0;
   if (item == MENU_CUSTOM)
-    return custom ? base : 0;
+    return custom ? base + random : 0;
   if (item >= 0 && item < this->catalog_size(slot))
-    return base + custom + item;
+    return base + random + custom + item;
   return 0;  // MENU_OFF, or not in the list
 }
 
@@ -1010,6 +1129,11 @@ void AthanComponent::download_from_catalog(int slot, int entry) {
     e = this->catalog_[slot][entry];
   }
   if (entry == this->selected_entry(slot)) {
+    if (slot == SLOT_TAWASHIH && this->tawashih_random_) {
+      this->set_tawashih_random(false);  // still stored (not freed yet): it is simply used again
+      this->set_sound_status_(e.name + " selected");
+      return;
+    }
     // Never downloaded again. To refresh it from the server, download another entry, then this one.
     this->set_sound_status_(e.name + " is already selected");
     return;
@@ -1023,6 +1147,8 @@ void AthanComponent::download_from_catalog(int slot, int entry) {
     return;
   }
   this->stop_slot_preview_();  // stopped long before the download ends and the slot is rewritten
+  if (slot == SLOT_TAWASHIH)
+    this->tawashih_job_gen_ = this->tawashih_gen_.load();
   Job job;
   job.type = JobType::DOWNLOAD_URL;
   job.slot = slot;
@@ -1122,6 +1248,12 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
     if (ok && this->slots_.valid(slot)) {
       this->set_sound_status_(std::string(source != 0 ? "Downloaded " : "Uploaded ") + label + " (" +
                               fmt_duration(info.duration_ms) + ")");
+      if (slot == SLOT_TAWASHIH) {
+        if (this->tawashih_job_gen_ == this->tawashih_gen_)
+          this->set_tawashih_random(false);  // the owner chose this one
+        else
+          this->clear_tawashih_ = true;  // Random was chosen while it downloaded
+      }
     } else {
       this->set_sound_status_("Saving failed: the " + std::string(SLOT_NAMES[slot]) +
                               " slot is empty, the default will be downloaded again");
@@ -1133,6 +1265,8 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
 // ---------------- upload from the /audio page (web server task) ----------------
 bool AthanComponent::upload_begin(int slot, const std::string &filename) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  if (slot == SLOT_TAWASHIH)
+    this->tawashih_job_gen_ = this->tawashih_gen_.load();
   if (this->upload_.buf != nullptr)
     heap_caps_free(this->upload_.buf);
   this->upload_ = Upload{};
@@ -1437,6 +1571,10 @@ void AthanComponent::net_watch_() {
     if (this->preview_list_ >= 0 && !this->slot_preview_) {
       this->stop_media();  // a streamed preview
       this->set_sound_status_("Preview stopped: no Wi-Fi");
+    }
+    if (this->tawashih_stream_) {
+      ESP_LOGW(TAG, "Network lost: Pre-Fajr Tawashih stopped");
+      this->stop_tawashih();
     }
     if (this->radio_station_ >= 0) {
       ESP_LOGW(TAG, "Network lost: radio paused until it is back");
@@ -1848,20 +1986,32 @@ PsramString AthanComponent::render_audio_page() {
   h += "<p class=\"hint\">Preview plays the selected sound from the clock and any other from the internet. "
        "Download fetches the entry then replaces the sound on the clock. "
        "An uploaded sound shows as Custom until a download replaces it.</p>";
+  const bool random = this->tawashih_random_.load();
   for (int s = 0; s < NUM_SLOTS; s++) {
     const SlotView &v = views[s];
-    const int selected = v.selected;
+    const bool rnd = s == SLOT_TAWASHIH && random;  // the tawashih streams a random entry, nothing stored
+    const int selected = rnd ? -1 : v.selected;
     h += "<h2 id=\"s" + std::to_string(s) + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>Selected: ";
-    if (v.valid)
+    if (rnd)
+      h += "<b>Random</b> (a different entry each day, streamed at Pre-Fajr: nothing stored on the clock)";
+    else if (v.valid)
       h += "<b>" + html_escape(v.label) + "</b> (" + fmt_duration(v.duration_ms) + ")";
     else
       h += "<i>none</i>";
     h += "</p>";
-    const bool custom = v.custom;
+    const bool custom = v.custom && !rnd;
     if (lists[s].empty() && !custom) {
       h += "<p class=\"hint\">Suggested list not loaded yet (no internet?).</p>";
     } else {
       h += "<table>";
+      if (s == SLOT_TAWASHIH) {
+        h += "<tr><td>Random: one a day, streamed";
+        if (rnd)
+          h += "<span class=\"ok\">selected</span></td><td></td></tr>";
+        else
+          h += "</td><td><form method=\"post\" target=\"st\" action=\"/audio/random?g=" + g +
+               "\"><button>Use</button></form></td></tr>";
+      }
       if (custom) {
         // The uploaded sound, first: it can be previewed like the others, and it stays until a download replaces it.
         h += "<tr><td>Custom: " + html_escape(v.label) + "<span class=\"ok\">selected</span></td><td>";
