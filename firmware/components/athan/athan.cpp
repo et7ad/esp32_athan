@@ -671,6 +671,20 @@ bool AthanComponent::preview_from_flash_(int list, const std::string &name) {
   return true;
 }
 
+// A preview from flash that play_slot() queued while its pipeline was still busy (the streamed preview before it
+// stopping, a tone): forget it so it never starts. A STOP now would reach nothing and count as sent, and the preview
+// would start a moment later, after the menu or the /audio page had moved on, with nothing left to stop it.
+bool AthanComponent::cancel_pending_slot_preview_() {
+  if (!this->slot_preview_ || this->playing_slot_ < 0 || this->announce_pending_ == nullptr ||
+      this->announce_pending_ != this->slots_.file(this->playing_slot_))
+    return false;  // nothing waiting, or what waits is a tone over a preview that already plays
+  this->announce_pending_ = nullptr;
+  this->playing_slot_ = -1;
+  this->slot_preview_ = false;
+  this->slot_stop_sent_ = false;
+  return true;
+}
+
 void AthanComponent::stop_slot_preview_() {
   // playing_slot_ stays set until the player has really stopped (loop()), so the slot is not rewritten under it.
   if (this->slot_preview_ && this->playing_slot_ >= 0 && !this->slot_stop_sent_ && this->player_ != nullptr) {
@@ -717,11 +731,7 @@ void AthanComponent::request_preview(int list, int item, uint32_t delay_ms) {
       this->hard_stop_cb_();  // the old preview goes quiet at once, not after its buffered half second
     this->preview_list_ = -1;
     this->stream_pending_ = false;  // a preview stream still waiting to start
-    if (this->slot_preview_ && this->announce_pending_ != nullptr) {
-      this->announce_pending_ = nullptr;  // a preview from flash still waiting to start
-      this->playing_slot_ = -1;
-      this->slot_preview_ = false;
-    }
+    this->cancel_pending_slot_preview_();  // a preview from flash still waiting to start
     this->stop_media_pipeline_();
     this->stop_slot_preview_();
   }
@@ -742,6 +752,7 @@ void AthanComponent::stop_preview() {
 void AthanComponent::stop_media() {
   this->pending_preview_list_ = -1;
   this->stream_pending_ = false;
+  this->cancel_pending_slot_preview_();  // a preview from flash still waiting for its pipeline: it must not start later
   this->tawashih_stream_ = false;
   this->preview_list_ = -1;
   this->radio_token_++;

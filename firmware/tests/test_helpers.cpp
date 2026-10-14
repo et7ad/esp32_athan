@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "../components/athan/day_window.h"
 #include "../components/athan/mp3_check.h"
 #include "../components/athan/tz_posix.h"
 
@@ -113,8 +114,29 @@ static void test_mp3(const char *path, long expected_ms) {
               info.sample_rate, info.channels, info.frames);
 }
 
+// The tick's and the night's windows: hours, prayers (today's times), across midnight, the menu's choices.
+static void test_day_window() {
+  const uint8_t h[7] = {5, 7, 7, 12, 16, 18, 19}, m[7] = {57, 8, 28, 58, 9, 40, 53};  // Fajr 05:57 ... Isha 19:53
+  const int maghrib = WINDOW_PRAYER + 5, isha = WINDOW_PRAYER + 6, fajr = WINDOW_PRAYER, dhuhr = WINDOW_PRAYER + 3;
+  CHECK(window_minute(isha, h, m) == 19 * 60 + 53, "Isha's minute");
+  CHECK(in_window(22, 6, 23 * 60, h, m) && in_window(22, 6, 2 * 60, h, m) && !in_window(22, 6, 12 * 60, h, m), "22-6");
+  CHECK(in_window(7, 7, 3 * 60, h, m), "from = until: all day");
+  CHECK(in_window(isha, fajr, 20 * 60, h, m) && in_window(isha, fajr, 5 * 60 + 56, h, m), "Isha to Fajr: inside");
+  CHECK(!in_window(isha, fajr, 19 * 60 + 52, h, m) && !in_window(isha, fajr, 5 * 60 + 57, h, m), "Isha to Fajr: ends");
+  CHECK(in_window(maghrib, dhuhr, 9 * 60, h, m) && !in_window(maghrib, dhuhr, 13 * 60, h, m), "Maghrib to Dhuhr");
+  CHECK(in_window(6, isha, 19 * 60, h, m) && !in_window(6, isha, 20 * 60, h, m), "06:00 to Isha (tick)");
+  CHECK(window_length(isha, fajr, h, m) == 604, "Isha to Fajr is 10 h 4 min (got %d)", window_length(isha, fajr, h, m));
+  for (int until = 0; until < 2; until++)
+    for (int i = 0; i < WINDOW_CHOICES; i++)
+      CHECK(window_choice(until, window_value(until, i)) == i, "choice %d round trip (until %d)", i, until);
+  CHECK(window_value(false, 0) == maghrib && window_value(false, 1) == isha, "from offers Maghrib, Isha");
+  CHECK(window_value(true, 0) == fajr && window_value(true, 1) == dhuhr, "until offers Fajr, Dhuhr");
+  CHECK(window_choice(false, 22) == 24 && window_value(false, 24) == 22, "hours keep their meaning");
+}
+
 int main(int argc, char **argv) {
   test_calendar();
+  test_day_window();
   test_parse();
   if (argc > 1)
     test_vectors(argv[1]);

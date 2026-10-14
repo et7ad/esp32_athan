@@ -1,22 +1,29 @@
 # Developer notes (version 3 firmware)
 
-How the firmware is put together, for anyone changing it. Owner-facing behaviour is in `README.md`, the design
-reasoning in `version3_planning.md`, and the short list of rules in `CLAUDE.md`.
+How the firmware is put together, for anyone changing it. Owner-facing behaviour is in `README.md`, the board and
+the prototype's acceptance checklist in `HARDWARE.md`, why this chip in `microcontroller_demand.md`, and the short
+list of rules in `CLAUDE.md`.
 
 ## 1. Files
 
 | Path | What |
 |---|---|
-| `firmware/athan.yaml` | All behaviour: entities, menus, schedule, OLED, scripts, intervals (ESPHome + inline C++ lambdas) |
+| `firmware/athan.yaml` | All behaviour: entities, menus, schedule, scripts, intervals (ESPHome + inline C++ lambdas). `display_type` (oled or tft) picks the display file |
+| `firmware/displays/oled.yaml` | The OLED build's display part: I2C, the SSD1306/SH1106, fonts, `update_display` (clock screen, pop-ups, Wi-Fi setup), the hot-plug watchdog |
+| `firmware/displays/tft.yaml` | The TFT build's display part: SPI, the ST7789 (`mipi_spi`), the PWM backlight (`apply_screen`), Roboto and Material Symbols fonts (bpp 4), the Screen Colour setting (global, web select, its menu row in `menu_display_rows`), and every screen in the display's `lambda:` (the ring clock, pop-ups, Wi-Fi setup) |
 | `firmware/partitions.csv` | 16 MB layout: nvs, otadata, app0/app1 (0x360000 each), `prayer` (0x41, 128 KB), `audio` (0x40, 0x910000) |
-| `firmware/components/athan/__init__.py` | Component schema: `media_player`, `media_speaker` and `announcement_speaker` (the two resamplers, for clean starts and format checks), `time_id`, `data_url`, `radio_urls` (list of `text` ids). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
+| `firmware/components/athan/__init__.py` | Component schema: `media_player`, `media_speaker` and `announcement_speaker` (the two resamplers, for clean starts and format checks), `time_id`, `data_url`, `radio_urls` (list of `text` ids), `display` (oled or tft: defines `ATHAN_DISPLAY_OLED` / `ATHAN_DISPLAY_TFT`). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
 | `athan.h/.cpp` | `AthanComponent`, the worker task, `AudioWebHandler` (the `/audio` page) |
 | `audio_slots.h/.cpp` | The four stored sounds |
 | `prayer_store.h/.cpp` | Yearly file parser + the stored years |
+| `day_window.h` | The hourly tick's and the screen's night windows: an end is an hour or a prayer (Maghrib, Isha / Fajr, Dhuhr) at today's times, stored in the same int settings (`WINDOW_PRAYER` + the prayer's index); the menu rows and web selects share its choice order (no ESPHome dependency, tested in `test_helpers.cpp`) |
 | `tz_posix.h/.cpp` | POSIX TZ parser, offset/UTC conversion, calendar helpers (no ESPHome dependency) |
 | `mp3_check.h/.cpp` | MP3 validity and duration (no ESPHome dependency) |
+| `menu.h/.cpp`, `menu_frame.h` | The menu's navigation (host-tested), and the `Frame` both drawings read (`frame_of()`, the redraw fingerprint) |
+| `menu_view.h/.cpp`, `menu_view_tft.cpp` | `draw_menu()` for the OLED (`menu_view.cpp`) or the TFT (`menu_view_tft.cpp`): one of them is compiled (`ATHAN_DISPLAY_TFT`) |
+| `tft_theme.h`, `tft_draw.h/.cpp` | The TFT's colours (neutrals, the five Screen Colour palettes) and Material Symbols code points (`sym::`); shapes with smoothed edges (rounded boxes, circles, ring arcs) and `icon()` |
 | `firmware/tests/` | `run_tests.sh` (host unit tests), `syntax_check.sh` (type check), `idf_stubs/` (SDK stand-ins) |
-| `firmware/sounds/` | `click.mp3`, `volume.mp3`: built-in tones (`media_player: files:`), added by the builder |
+| `firmware/sounds/` | `click.wav`, `volume.wav`: built-in tones (`media_player: files:`), mono 16-bit 44.1 kHz WAV (no decoding, no MP3 encoder padding ahead of the sound) |
 
 ## 2. Boot
 
@@ -82,7 +89,8 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `web_action`, `upload_begin/data/end`, `render_audio_page` | Used by `AudioWebHandler` only |
 | `wifi_drop_count()`, `wifi_drops_text()` | Wi-Fi connections lost since start, and the last three with time, ESP-IDF reason and RSSI (an `esp_event` handler on `WIFI_EVENT_STA_DISCONNECTED` keeps the reason). The web page's Wi-Fi Drops |
 
-Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`menu_view.h`) draws the open menu.
+Also from lambdas: `athan::draw_menu(display, menu, fonts)` (`menu_view.h`; `MenuFonts` differs per display) draws the
+open menu.
 
 ## 4. Threading
 
@@ -107,7 +115,8 @@ Also from lambdas: `athan::draw_menu(display, menu, {large, medium, small})` (`m
 
 ## 5. Stored sounds
 
-**Regions** (inside the `audio` partition):
+**Regions** (inside the `audio` partition; fixed raw regions rather than a filesystem such as LittleFS, so a sound
+plays straight from flash and needs no file-reading media source):
 
 | Slot | Offset | Size | File limit | Duration limit |
 |---|---|---|---|---|
@@ -279,21 +288,29 @@ to 00:00–23:59.
 | `check_update` | `update.check`, then sets `update_check_state` for the menu |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
 | `sync_web_state` (1 s interval) | Publish entities only on change; unchanged values are compared in a buffer, without allocating |
-| `update_display` | The whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`), the date and status marks, the five prayers with the next one (the calling one during the athan) in a box, and a framed bottom row with the time left, inverted to "ATHAN TIME" and joined to its column while the athan plays |
+| `screen_refresh` (1 s interval, and after a change) | The screen's level: Brightness (0 % = dark), or at night (Night From to Until) the same, `screen_dim_pct` or dark. A screen that would be dark is lit dim for `screen_wake_s` (120 s) after a key, and while the athan or the Pre-Fajr Tawashih plays (the 120 s start when it ends); `screen_dark_in` holds the seconds left (-1 when it stays lit), redrawn each second, and the display files draw it as a tab in a corner. Brightness set to 0 % sets `screen_force_dark`: dark at once, until the next key. Calls the display file's `apply_screen` only when the level changes (`screen_pct_applied`; 0 = dark, which `ui_key` reads: that key press only lights the screen) |
+| `apply_screen`, `menu_display_rows` | In the display file. OLED: contrast (scaled by `oled_contrast`) or panel off; no rows. TFT: the backlight light (gamma 2); the Screen Colour row |
+| `update_display` | In the display file. TFT: `id(tft).update()`, which runs the display's `lambda:` (mipi_spi draws only inside `update()`); asked every second by `tft.yaml`'s 1 s interval while the clock shows (its seconds, and the time left in seconds in the last minute). OLED: the whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`, 26 px), the status marks and the weekday with the date under them, the five prayers with the next one (the calling one during the athan) in a 29-px box, its time in `font3` (Dhuhr only outlined while Sunrise or Doha is next; with Fajr highlighted the other columns move right 1-2 px, clear of its box), and a framed box at the bottom: the next prayer small and its time in `font3`, the time left large (`font1`); while the athan plays it turns white with the prayer's name and ATHAN TIME, joined to its column |
 
 **Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 10 s
-OLED watchdog (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
+OLED watchdog (`displays/oled.yaml` only) (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
 came back).
 
 **Keys and the menu:** CLAUDE.md "Keys and the menu". Navigation is `components/athan/menu.h` (host-tested in
-`firmware/tests/test_menu.cpp`), drawing `menu_view.h`, the rows script `menu_setup`. No row numbers anywhere.
-The rows go round (`ring_row()`); the last, Exit (`MenuRow::exit`), closes on Select, Left or Right. Two panes: the
-rows by name on the left (the one on screen in the middle, a dotted line where the list starts again), the row's
-item on the right. Layouts (`RowStyle`): LIST (item as large as it fits, two lines of the medium font when too wide,
-arrows, marks under it, dots), CHOICES (all items side by side when they fit, the cursor's one in reversed colours:
-`print(..., COLOR_OFF, ...)` over a filled box), LEVEL (bar), TOGGLES (each item's initial with a box, filled when
-on, the cursor's one framed). A single item is a button, or with a tab in its caption the label and the two parts on
-lines of their own (Info). The exit row previews the clock (label: the time, caption: the next prayer).
+`firmware/tests/test_menu.cpp`), drawing `menu_view.h` (`menu_view.cpp` OLED, `menu_view_tft.cpp` TFT), the rows script
+`menu_setup` (plus `menu_display_rows` from the display file, after Night Until). No row numbers anywhere.
+The rows go round (`ring_row()`); the last, Exit (`MenuRow::exit`), closes on Select, Left or Right. Two panes: five
+rows on the left by `short_title` in the medium font after an optional `RowIcon` (the one on screen in the middle, a
+dotted line where the list starts again), the row's full title small at the top of the right pane over its item.
+Layouts (`RowStyle`): LIST (item as large as it fits, two lines of the medium font when too wide, arrows, marks
+under it, dots), CHOICES (all items side by side when they fit, the cursor's one in reversed colours: `print(...,
+COLOR_OFF, ...)` over a filled box), LEVEL (bar), TOGGLES (each item's initial in the medium font with a box, filled
+when on, the cursor's one framed). A single item is a button, or with a tab in its caption the label and the two
+parts on lines of their own (Info: the IP address in `MenuFonts::numbers`, Roboto 11, when the medium font is too
+wide). The exit row previews the clock (label: the time, caption: the next prayer). On the TFT: five rows of 48 px
+with each row's `symbol` (Material Symbols) and its name (the short one when the title is wider than 60 px), the
+cursor on a bar in the accent colour; on the right TOGGLES as round switches (two lines when five do not fit),
+CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic_eq).
 
 **Wi-Fi:**
 - No network is compiled in: `wifi: ap:` (AthanFallbackHotspot / athan404, `ap_timeout: 3min`) +
@@ -329,15 +346,17 @@ lines of their own (Info). The exit row previews the clock (label: the time, cap
 - With MP3 paths as arguments, `mp3_scan` against `ffprobe`.
 
 `firmware/tests/syntax_check.sh`:
+- Runs once per display (`display_type` oled, then tft; `DISPLAYS=tft` for one).
 - Generates the C++ with `esphome compile --only-generate` on a temp copy (placeholder tones if
   `firmware/sounds/` is empty).
 - Type-checks the component sources (`-Wall -Wextra`) and `main.cpp` (all lambdas) with `clang++
-  -fsyntax-only` against the real ESPHome headers. `idf_stubs/` stands in for ESP-IDF and library headers.
+  -fsyntax-only` against the real ESPHome headers. `idf_stubs/` stands in for ESP-IDF and library headers; a header
+  with no stand-in fails the check (clang would otherwise stop there and pass everything after it).
 
 ## 11. To verify on the prototype
 
-The full acceptance list is `version3_planning.md` section 13. These points in this implementation rest on
-assumptions that only hardware can confirm:
+The full acceptance list is `HARDWARE.md` section 9. These points in this implementation rest on assumptions that
+only hardware can confirm:
 
 - Firmware size against the 0x360000 app slots, and internal heap with BLE + hotspot + an athan.
 - `play_file()` of a memory-mapped `AudioFile` from the `audio` partition (the mmap stays valid while playing;
@@ -348,3 +367,20 @@ assumptions that only hardware can confirm:
   raw.githubusercontent.com (no redirect normally).
 - Stream reconnect behaviour after a router restart.
 - The MAX98357A gain jumper and the 4.7 kΩ SD_MODE resistor, left channel (`max98357a_amplifier.md`).
+- Whether the time survives a software restart (an update, the Restart button) before SNTP answers: ESP-IDF keeps
+  it across software restarts, but not across a power cut.
+
+## 12. Ideas for later
+
+None of these is needed; each is independent. Hardware options are in `HARDWARE.md` section 10.
+
+| Idea | What it gives | What it takes |
+|---|---|---|
+| **Atomic sound replacement** | No empty slot if the power fails while a sound is written (today the default downloads again) | A fourth 3 MB spare region: write the new sound there, then swap which region the slot uses (a small map in NVS). The app slots would shrink to about 1.9 MB each, barely above today's 1.8 MB firmware, so in practice it needs 32 MB flash |
+| **A built-in fallback athan** | A real athan, not three tones, when a slot is empty | A short low-bitrate athan in the firmware (`files:`, about 0.5 MB at 16–24 kbps mono); it costs that space in both app slots |
+| **Factory audio image** | New clocks ship with the default sounds, no first download | Build the four regions and their headers on a computer (a small script), flash them with esptool at the `audio` partition's offset together with the firmware |
+| **Browser installer** (ESP Web Tools on GitHub Pages) | Flash a new clock and set its Wi-Fi from Chrome over USB, no ESPHome install | `improv_serial` in the yaml, a manifest and a page under `docs/`; on this board it goes through J6 and a USB-serial adapter (the USB-C is power only) |
+| **More upload formats** (Opus, FLAC) | Owners can upload what they have | Duration parsing per format in `mp3_check`; ESPHome already has the decoders. WAV stays out: 5 min would not fit a 3 MB slot |
+| **Names for own radio links** | The screen shows a name for a slot that plays its own link (it says "own link" now) | One more text entity per slot, or a "name, then link" field format |
+| **AAC and HLS stations** | Stations that are not MP3, Opus, FLAC or WAV | Home Assistant's transcoding proxy where HA is used; natively a different audio library (ESP32-audioI2S, Arduino, not ESPHome) |
+| **A CDN fallback for GitHub** (jsDelivr) | Keeps working if raw.githubusercontent.com rate-limits or is blocked. A clock makes one prayer-times request a year and a few list and sound requests, far below GitHub's limits | A second base URL, tried after a failure; jsDelivr serves GitHub repositories over HTTPS |

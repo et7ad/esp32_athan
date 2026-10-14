@@ -17,6 +17,7 @@ CONF_ANNOUNCEMENT_SPEAKER = "announcement_speaker"
 CONF_DATA_URL = "data_url"
 CONF_RADIO_URLS = "radio_urls"
 CONF_WIFI_BG_ONLY = "wifi_bg_only"
+CONF_DISPLAY = "display"
 
 athan_ns = cg.esphome_ns.namespace("athan")
 AthanComponent = athan_ns.class_("AthanComponent", cg.Component)
@@ -45,6 +46,9 @@ CONFIG_SCHEMA = cv.All(
             ): cv.url,
             # Wi-Fi 802.11b/g only, without 802.11n (ESPHome offers this switch only on the ESP8266).
             cv.Optional(CONF_WIFI_BG_ONLY, default=False): cv.boolean,
+            # The display the firmware is built for (athan.yaml display_type): defines ATHAN_DISPLAY_OLED or
+            # ATHAN_DISPLAY_TFT, so only that display's drawing code is compiled.
+            cv.Optional(CONF_DISPLAY, default="oled"): cv.one_of("oled", "tft", lower=True),
             # Own links of radio slots 1..10 (template text entities), in slot order.
             cv.Optional(CONF_RADIO_URLS, default=[]): cv.All(
                 cv.ensure_list(cv.use_id(text.Text)), cv.Length(max=10)
@@ -71,6 +75,7 @@ async def to_code(config):
     cg.add(var.set_wifi_bg_only(config[CONF_WIFI_BG_ONLY]))
     for text_id in config[CONF_RADIO_URLS]:
         cg.add(var.add_radio_url(await cg.get_variable(text_id)))
+    cg.add_define(f"ATHAN_DISPLAY_{config[CONF_DISPLAY].upper()}")
     # HTTPS downloads with certificate checks (raw.githubusercontent.com).
     esp32.require_certificate_bundle()
     esp32.include_builtin_idf_component("esp_http_client")

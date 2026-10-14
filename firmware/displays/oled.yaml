@@ -1,0 +1,386 @@
+# =====================================================================================================================
+# Display: the 128x64 one-colour OLED on I2C (SSD1306 0.96" or SH1106 1.3"). The default (display_type: oled in
+# athan.yaml). Everything that depends on the display lives here: the bus, the display, the fonts, every screen
+# (update_display: the clock, pop-ups, Wi-Fi setup; the menu is drawn by components/athan/menu_view.cpp) and the
+# hot-plug watchdog. The other display is displays/tft.yaml; HARDWARE.md 3.2 has both wirings.
+#
+# Optional: a missing OLED marks itself failed and everything else runs.
+# =====================================================================================================================
+
+substitutions:
+  # Build and update files carry no suffix: athan-v3.ota.bin and manifest.json (displays/tft.yaml: -tft).
+  variant_suffix: ""
+  # Which OLED: keep one of these two lines. Both are 128x64, so every screen stays the same; ESPHome handles the
+  # SH1106's 2-pixel offset by itself. Nothing else changes (pins, address 0x3C; the boot log's I2C scan shows the
+  # address if a module differs).
+  oled_model: "SSD1306 128x64"    # 0.96" (the prototype's)
+  # oled_model: "SH1106 128x64"   # 1.3"
+  # Orientation, and the contrast at Brightness 100 % (lower levels scale it: apply_screen)
+  oled_flip_x: "true"
+  oled_flip_y: "true"
+  oled_contrast: "1.0"
+
+i2c:
+  sda: ${pin_sda}
+  scl: ${pin_scl}
+  frequency: 400kHz
+  scan: true
+
+display:
+  - platform: ssd1306_i2c
+    id: oled
+    model: ${oled_model}
+    address: 0x3C
+    flip_x: ${oled_flip_x}
+    flip_y: ${oled_flip_y}
+    contrast: ${oled_contrast}
+    update_interval: never     # drawn by the update_display script
+
+font:
+  - file: "gfonts://Roboto"
+    id: font1
+    size: 20
+  - file: "gfonts://Roboto"
+    id: font2
+    size: 14
+  - file: "gfonts://Roboto"
+    id: font3
+    size: 11
+    glyphs: "AMP0123456789.:-"   # AM/PM, the next prayer's time (table and bottom box, "--:--" too), the menu's IP
+  # Small text: the menu's titles and captions, the clock screen's weekday, timetable and next prayer, the radio slot
+  # number. A pixel font at its native 8 px: every stroke sits on whole pixels, so it is crisp on the one-colour OLED,
+  # where Roboto scaled to 10 px came out ragged.
+  - file: "gfonts://Tiny5"
+    id: font4
+    size: 8
+    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°"
+  # The time on the clock screen (the timetable), digits only.
+  - file: "gfonts://Roboto"
+    id: font5
+    size: 26
+    glyphs: "0123456789:-"
+
+script:
+  # The screen's level from screen_refresh (athan.yaml): 10-100 % = the panel's contrast (a narrower range than a
+  # backlight: the lowest is still readable in a dark room), 0 = the panel off (it keeps its picture; dark also spares
+  # an OLED from showing the same picture all night).
+  - id: apply_screen
+    parameters:
+      pct: int
+    then:
+      - lambda: |-
+          if (!id(oled).is_ready()) return;   // missing or failed: the watchdog asks again once it is back
+          if (pct <= 0) {
+            id(oled).turn_off();
+            return;
+          }
+          if (!id(oled).is_on()) id(oled).turn_on();
+          id(oled).set_contrast(${oled_contrast} * pct / 100.0f);
+
+  # The OLED has no menu rows of its own (the TFT adds Screen Colour here). menu_setup calls it.
+  - id: menu_display_rows
+    then:
+      - lambda: '// nothing to add'
+
+  # Redraws the OLED (each display file has its own update_display; athan.yaml only asks for it). A draw blocks the main loop for about 23 ms (1 KB over I2C at 400 kHz), and one key press
+  # often asks for several (a stop, a pop-up, the key itself). The delay of 0 moves the draw to the next pass of the
+  # loop and mode: restart folds every request made before it into that one draw.
+  - id: update_display
+    mode: restart
+    then:
+      - delay: 0ms
+      - lambda: |-
+          // Never touch the OLED before its setup() allocated the buffer, or when it failed (see CLAUDE.md).
+          if (!id(oled).is_ready()) return;
+          auto &d = *id(oled);
+          d.clear();
+          auto now = id(sntp_time).now();
+          const bool wifi_ok = wifi::global_wifi_component->is_connected();
+
+          // A screen lit only for a while (Brightness 0 % or Screen at Night: Dark, woken by a key): the seconds until
+          // it goes dark (screen_refresh), in a white tab with a moon, over whatever sits in that corner: top right on
+          // the clock and the Wi-Fi setup screen, bottom left in the menu.
+          auto draw_countdown = [&](bool menu_open) {
+            const int s = id(screen_dark_in);
+            if (s < 0) return;
+            char num[8];
+            snprintf(num, sizeof(num), "%ds", s);
+            int x1, y1, tw, th;
+            d.get_text_bounds(0, 0, num, id(font4), display::TextAlign::TOP_LEFT, &x1, &y1, &tw, &th);
+            const int w = 2 + 4 + 2 + tw + 2, h = 10;
+            const int x = menu_open ? 0 : 128 - w, y = menu_open ? 64 - h : 0;
+            d.filled_rectangle(x, y, w, h);
+            d.draw_pixel_at(x, y, display::COLOR_OFF); d.draw_pixel_at(x + w - 1, y, display::COLOR_OFF);
+            d.draw_pixel_at(x, y + h - 1, display::COLOR_OFF); d.draw_pixel_at(x + w - 1, y + h - 1, display::COLOR_OFF);
+            static const int8_t moon[12][2] = {{2, 0}, {1, 1}, {0, 2}, {1, 2}, {0, 3}, {1, 3}, {0, 4}, {1, 4},
+                                               {0, 5}, {1, 5}, {1, 6}, {2, 7}};   // a crescent, 3 x 8
+            for (const auto &p : moon) d.draw_pixel_at(x + 2 + p[0], y + 1 + p[1], display::COLOR_OFF);
+            d.print(x + 8, y + 8, id(font4), display::COLOR_OFF, display::TextAlign::BASELINE_LEFT, num);
+          };
+
+          // The menu draws itself (components/athan/menu_view.h).
+          auto &menu = id(athan_core).menu();
+          if (menu.is_open()) {
+            athan::draw_menu(d, menu, {id(font1), id(font2), id(font4), id(font3)});
+            draw_countdown(true);
+            d.display();
+            return;
+          }
+
+          static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
+          static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+          static const char *days_uc[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
+          using display::TextAlign;
+          char line[48];
+          auto text_w = [&](display::BaseFont *f, const char *s) -> int {
+            int x1, y1, w, h;
+            d.get_text_bounds(0, 0, s, f, TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
+            return w;
+          };
+          // "05:57", or "5:57" with the 12-hour clock (AM/PM only next to the big time)
+          auto hhmm = [&](char *b, size_t n, int h, int m) {
+            if (id(clock_12h)) snprintf(b, n, "%d:%02d", (h % 12) ? h % 12 : 12, m);
+            else snprintf(b, n, "%02d:%02d", h, m);
+          };
+          // A filled box with its corners cut by 2 pixels (only the top ones with top_only).
+          auto rounded_fill = [&](int x, int y, int w, int h, bool top_only) {
+            d.filled_rectangle(x, y, w, h);
+            const int xs[2] = {x, x + w - 1}, dx[2] = {1, -1};
+            for (int i = 0; i < 2; i++) {
+              d.draw_pixel_at(xs[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i], y + 1, display::COLOR_OFF);
+              if (top_only) continue;
+              d.draw_pixel_at(xs[i], y + h - 1, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y + h - 1, display::COLOR_OFF);
+              d.draw_pixel_at(xs[i], y + h - 2, display::COLOR_OFF);
+            }
+          };
+          // Pop-up over the clock for 2 s after Left/Right (volume) or Down (relay): script show_toast.
+          auto draw_toast = [&]() {
+            const int k = id(toast_kind);
+            if (k == 0) return;
+            d.filled_rectangle(14, 11, 100, 42, display::COLOR_OFF);
+            d.rectangle(14, 11, 100, 42);
+            if (k == 3) {
+              d.print(64, 27, id(font2), display::TextAlign::BASELINE_CENTER, "Relay");
+              d.print(64, 47, id(font1), display::TextAlign::BASELINE_CENTER, id(external_relay).state ? "ON" : "OFF");
+              return;
+            }
+            const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
+            d.print(64, 24, id(font2), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
+            snprintf(line, sizeof(line), "%d%%", pct);
+            d.print(64, 43, id(font1), display::TextAlign::BASELINE_CENTER, line);
+            d.rectangle(22, 46, 84, 4);
+            d.filled_rectangle(22, 46, 84 * pct / 100, 4);
+          };
+          auto finish = [&]() {
+            draw_countdown(false);
+            draw_toast();
+            d.display();
+          };
+
+          const bool time_ok = now.is_valid();
+          // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (README 1.1). Bluetooth: its
+          // state, and the page to open (Web Bluetooth: Chrome or Edge, not Safari). The hotspot's name is too wide
+          // for this screen; it is in the README.
+          if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
+            d.print(0, 6, id(font4), TextAlign::BASELINE_LEFT, "WI-FI SETUP");
+            const auto st = id(improv_ble).get_improv_state();
+            const char *bt = !id(improv_ble).is_active() ? "BT: starting.."
+                           : st == improv::STATE_AWAITING_AUTHORIZATION ? "BT: press Select"
+                           : st == improv::STATE_AUTHORIZED ? "BT: allowed"
+                           : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
+            d.print(0, 20, id(font2), TextAlign::BASELINE_LEFT, bt);
+            d.print(0, 35, id(font2), TextAlign::BASELINE_LEFT, "improv-wifi.com");
+            d.print(0, 45, id(font4), TextAlign::BASELINE_LEFT, "in Chrome or Edge");
+            d.print(0, 60, id(font2), TextAlign::BASELINE_LEFT,
+                    wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
+            finish();
+            return;
+          }
+          // ---- the clock screen: the time; the weekday with the status marks and the date; the day's five prayers,
+          // the next one in a box; and a framed box at the bottom: the next prayer small and its time a size up, the
+          // time left large ("in 2h 20m"). While the athan plays the box turns white with the prayer's name and ATHAN TIME,
+          // joined to its column. Sunrise and Doha have no column: while one of them is next, Dhuhr gets an outline.
+          // As on V2, what is not known yet is struck through: the time stays "--:--" until SNTP answers, the times
+          // and the box until today's times are loaded. After a power cut (times stored, no time yet) the last day's
+          // times and the prayer that was next show, struck through: a guess, and the sign they are stored.
+          const bool times_ok = time_ok && id(times_loaded);
+          const bool athan = time_ok && id(athan_playing);
+          const bool guess = !time_ok && id(athan_core).has_stored_times();
+          const int npi = id(next_prayer_index);
+          // The time, large, top left (AM/PM after it with the 12-hour clock)
+          if (time_ok) hhmm(line, sizeof(line), now.hour, now.minute);
+          else snprintf(line, sizeof(line), "--:--");
+          d.print(0, 20, id(font5), TextAlign::BASELINE_LEFT, line);
+          int time_end = text_w(id(font5), line);
+          if (time_ok && id(clock_12h)) {
+            const char *ap = now.hour < 12 ? "AM" : "PM";
+            d.print(time_end + 1, 20, id(font3), TextAlign::BASELINE_LEFT, ap);
+            time_end += 1 + text_w(id(font3), ap);
+          }
+          // Top right: the weekday small, the status marks to its left (times borrowed from last year: a hollow
+          // square; no Wi-Fi; buttons locked; the radio slot playing), the date in the medium font under them. With
+          // no room beside the time for the marks, the weekday hides.
+          {
+            const int base = 8;
+            const char *wd = time_ok ? days_uc[(now.day_of_week + 6) % 7] : "---";
+            const int r = id(athan_core).radio_active();
+            char num[4];
+            snprintf(num, sizeof(num), "%d", r + 1);
+            const bool standin = times_ok && id(athan_core).times_standin();
+            const int marks = (standin ? 9 : 0) + (!wifi_ok ? 13 : 0) + (id(buttons_locked) ? 11 : 0) +
+                              (r >= 0 ? text_w(id(font4), num) + 3 + 9 : 0);
+            const int ww = text_w(id(font4), wd);
+            const bool show_wd = 127 - ww - 4 - marks >= time_end + 3;
+            int x = 127;
+            if (show_wd) {
+              d.print(127, 7, id(font4), TextAlign::BASELINE_RIGHT, wd);
+              x = 127 - ww - 4;
+            }
+            if (standin) { d.rectangle(x - 5, base - 5, 5, 5); x -= 9; }
+            if (!wifi_ok) {   // three arcs and a dot, struck through: 9 x 7
+              const int wx = x - 9, wy = base - 7;
+              d.horizontal_line(wx + 2, wy, 5); d.draw_pixel_at(wx + 1, wy + 1, display::COLOR_ON); d.draw_pixel_at(wx + 7, wy + 1, display::COLOR_ON);
+              d.draw_pixel_at(wx, wy + 2, display::COLOR_ON); d.draw_pixel_at(wx + 8, wy + 2, display::COLOR_ON); d.horizontal_line(wx + 3, wy + 2, 3);
+              d.draw_pixel_at(wx + 2, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 6, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 4, wy + 5, display::COLOR_ON);
+              d.line(wx, wy + 6, wx + 8, wy - 1);
+              x -= 13;
+            }
+            if (id(buttons_locked)) {   // a padlock: 7 x 8
+              const int lx = x - 7, ly = base - 8;
+              d.rectangle(lx + 1, ly, 5, 4); d.draw_pixel_at(lx + 1, ly, display::COLOR_OFF); d.draw_pixel_at(lx + 5, ly, display::COLOR_OFF);
+              d.filled_rectangle(lx, ly + 3, 7, 5); d.draw_pixel_at(lx + 3, ly + 5, display::COLOR_OFF);
+              x -= 11;
+            }
+            if (r >= 0) {   // the play mark, a pixel of space, the slot number (1-10)
+              d.print(x, base, id(font4), TextAlign::BASELINE_RIGHT, num);
+              x -= text_w(id(font4), num) + 3;
+              d.filled_triangle(x - 4, base - 6, x - 4, base, x + 1, base - 3);
+            }
+            if (time_ok) snprintf(line, sizeof(line), "%d %s", now.day_of_month, months[now.month - 1]);
+            else snprintf(line, sizeof(line), "-- ---");
+            d.print(127, 19, id(font2), TextAlign::BASELINE_RIGHT, line);
+          }
+          // The timetable: Fajr, Dhuhr, Asr, Maghrib, Isha in columns of 25 px. The next prayer (the one calling while
+          // the athan plays) in a box 29 px wide, its time a size up (font3: 27 px, too wide for the other columns);
+          // an athan switched off is struck through.
+          const bool early = !athan && (npi == 1 || npi == 2);   // Sunrise or Doha next: Dhuhr only outlined
+          {
+            static const int idx[5] = {0, 3, 4, 5, 6};
+            static const char *shorts[5] = {"Fajr", "Dhuhr", "Asr", "Magh", "Isha"};
+            const int hi = athan ? id(current_athan_prayer_index) : early ? 3 : npi;
+            const bool known = times_ok || guess;
+            // Column centres. With Fajr highlighted its box (x 0-28) reaches where Dhuhr's text starts (x 29), so the
+            // other four spread over the rest of the row: Dhuhr 2 px right, Asr and Magh 1 px, Isha stays.
+            static const int centres[5] = {14, 39, 64, 89, 114}, centres_fajr[5] = {14, 41, 65, 90, 114};
+            const int *cxs = hi == 0 ? centres_fajr : centres;
+            for (int k = 0; k < 5; k++) {
+              const int pi = idx[k], cx = cxs[k];
+              const bool nx = pi == hi;
+              const Color c = nx && !early ? display::COLOR_OFF : display::COLOR_ON;
+              if (nx && early) {
+                d.horizontal_line(cx - 12, 22, 25); d.horizontal_line(cx - 12, 42, 25);   // an outline, corners cut
+                d.vertical_line(cx - 14, 24, 17); d.vertical_line(cx + 14, 24, 17);
+                d.draw_pixel_at(cx - 13, 23, display::COLOR_ON); d.draw_pixel_at(cx + 13, 23, display::COLOR_ON);
+                d.draw_pixel_at(cx - 13, 41, display::COLOR_ON); d.draw_pixel_at(cx + 13, 41, display::COLOR_ON);
+              } else if (nx) {
+                rounded_fill(cx - 14, 22, 29, athan ? 42 : 21, athan);
+              }
+              d.print(cx, 30, id(font4), c, TextAlign::BASELINE_CENTER, shorts[k]);
+              if (known) hhmm(line, sizeof(line), id(prayer_hours)[pi], id(prayer_minutes)[pi]);
+              else snprintf(line, sizeof(line), "--:--");
+              if (nx) d.print(cx, 41, id(font3), c, TextAlign::BASELINE_CENTER, line);
+              else d.print(cx, 40, id(font4), c, TextAlign::BASELINE_CENTER, line);
+              if (!times_ok) {
+                const int w = text_w(nx ? id(font3) : id(font4), line);
+                d.horizontal_line(cx - w / 2 - 1, 37, w + 2, c);
+              }
+              if (!id(athan_enabled)[pi]) {
+                const int w = text_w(id(font4), shorts[k]);
+                d.horizontal_line(cx - w / 2 - 1, 27, w + 2, c);
+              }
+            }
+          }
+          // The box at the bottom (rows 44-63)
+          if (athan) {   // white, the prayer's name large with ATHAN over TIME small beside it
+            rounded_fill(0, 44, 128, 20, false);
+            const char *nm = names[std::max(0, std::min(6, id(current_athan_prayer_index)))];
+            const int sw = std::max(text_w(id(font4), "ATHAN"), text_w(id(font4), "TIME"));
+            const int gw = text_w(id(font1), nm) + 5 + sw, x = 64 - gw / 2;
+            d.print(x, 62, id(font1), display::COLOR_OFF, TextAlign::BASELINE_LEFT, nm);
+            d.print(x + gw - sw, 53, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "ATHAN");
+            d.print(x + gw - sw, 61, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "TIME");
+            finish();
+            return;
+          }
+          d.horizontal_line(2, 44, 124); d.horizontal_line(2, 63, 124);   // a frame with rounded corners
+          d.vertical_line(0, 46, 16); d.vertical_line(127, 46, 16);
+          d.draw_pixel_at(1, 45, display::COLOR_ON); d.draw_pixel_at(126, 45, display::COLOR_ON);
+          d.draw_pixel_at(1, 62, display::COLOR_ON); d.draw_pixel_at(126, 62, display::COLOR_ON);
+          {
+            // left: the next prayer small, its time a size up (font3; AM/PM small after it) on the countdown's
+            // baseline
+            const bool named = (times_ok || guess) && npi >= 0 && npi < 7;
+            const char *nm = named ? names[npi] : "Next";
+            char tm[8];
+            if (named) hhmm(tm, sizeof(tm), id(next_prayer_hour), id(next_prayer_minute));
+            else snprintf(tm, sizeof(tm), "--:--");
+            const char *ap = named && id(clock_12h) ? (id(next_prayer_hour) < 12 ? "AM" : "PM") : "";
+            d.print(3, 52, id(font4), TextAlign::BASELINE_LEFT, nm);
+            d.print(3, 62, id(font3), TextAlign::BASELINE_LEFT, tm);
+            int tw = text_w(id(font3), tm);
+            if (ap[0]) {
+              d.print(3 + tw + 2, 62, id(font4), TextAlign::BASELINE_LEFT, ap);
+              tw += 2 + text_w(id(font4), ap);
+            }
+            const int sw = std::max(text_w(id(font4), nm), tw);
+            // right: the time left, large: "in 2h 20m", "in 27 min"; when too wide (12-hour times, long waits)
+            // "in 2h20m" / "in 27m", and then without "in"
+            char big[24];
+            int rem = 0;
+            if (times_ok) {
+              rem = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
+              if (rem < 0) rem += 1440;
+            }
+            for (int form = 0; form < 3; form++) {
+              const char *in = form < 2 ? "in " : "";
+              if (!times_ok) snprintf(big, sizeof(big), "in --");
+              else if (rem < 60) snprintf(big, sizeof(big), form == 1 ? "%s%dm" : "%s%d min", in, rem);
+              else snprintf(big, sizeof(big), form == 0 ? "%s%dh %02dm" : "%s%dh%02dm", in, rem / 60, rem % 60);
+              if (!times_ok || 3 + sw + 4 + text_w(id(font1), big) <= 125) break;
+            }
+            const int bw = text_w(id(font1), big);
+            d.print(125, 62, id(font1), TextAlign::BASELINE_RIGHT, big);
+            if (!times_ok) {
+              d.horizontal_line(2, 58, sw + 2);
+              d.horizontal_line(125 - bw - 2, 55, bw + 4);
+            } else if (npi != 1 && npi != 2 && !id(athan_enabled)[npi]) {   // its athan is off: the name struck
+              d.horizontal_line(2, 49, text_w(id(font4), nm) + 2);
+            }
+          }
+          finish();
+
+interval:
+  # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.
+  - interval: 10s
+    then:
+      - lambda: |-
+          static bool lost = false;
+          static uint8_t back_ticks = 0, reinits = 0;
+          bool ack = (id(oled).write(nullptr, 0) == i2c::ERROR_OK);
+          if (id(oled).is_failed()) {
+            if (ack) {
+              id(oled).reset_to_construction_state();
+              id(oled).call();
+              if (!id(oled).is_failed()) id(update_display).execute();
+              id(screen_pct_applied) = -1;   // its setup() set full contrast: screen_refresh applies the level again
+            }
+            return;
+          }
+          if (!ack) { lost = true; back_ticks = 0; return; }
+          if (!lost || ++back_ticks < 2) return;
+          lost = false;
+          if (reinits >= 1) { ESP_LOGW("oled", "Display back again: restart the device to use it (athan keeps working)"); return; }
+          reinits++;
+          id(oled).setup();
+          if (!id(oled).is_failed()) id(update_display).execute();
+          id(screen_pct_applied) = -1;

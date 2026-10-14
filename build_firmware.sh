@@ -10,23 +10,30 @@
 #                                       1–2 at power-up) or a DevKitC's USB. First flash also writes the partitions
 #   ./build_firmware.sh ota [HOST]      build, then update over Wi-Fi (default: athan.local; V3 clocks only)
 #   ./build_firmware.sh logs [PORT|HOST]  show the device's log
-#   ./build_firmware.sh check           validate firmware/athan.yaml only (fast, no compile)
+#   ./build_firmware.sh check           validate firmware/athan.yaml only (fast, no compile; both displays unless
+#                                       --display is given)
 #   ./build_firmware.sh clean [all]     delete the build folder (all: also ESPHome and the toolchain)
+#
+# Display: --display oled (default) or --display tft, before or after the command, builds for that display
+# (display_type in athan.yaml; wiring: HARDWARE.md 3.2). Each display has its own files below and its own update
+# manifest.
 #
 # Without PORT, ESPHome lists the serial ports it finds and asks. On macOS the board's USB port looks like
 # /dev/cu.usbmodem1101. To flash binaries that are already built, without building again: ./flash_firmware.sh
 #
-# firmware/binaries/ after a build:
+# firmware/binaries/ after a build (a TFT build: athan-v3-tft-<version>.factory.bin, athan-v3-tft.ota.bin and
+# manifest-tft.json):
 #   athan-v3-<version>.factory.bin  full image for a blank board (any ESP web flasher / esptool at offset 0x0)
 #   athan-v3.ota.bin + manifest.json   the two assets of a GitHub Release (README section 3.4)
 #
 # Settings (environment variables):
 #   ESPHOME_VERSION   ESPHome to use (default 2026.9.1, the version the firmware was checked against)
 #   ATHAN_CACHE       cache folder (default ~/.cache/esp32_athan)
+#   ATHAN_DISPLAY     oled or tft, like --display (default oled)
 #   PYTHON            Python 3.12-3.14 to create the environment with (default: the first one found)
 #
-# Needs: Python 3.12, 3.13 or 3.14 and internet on the first run. Before the first build, put click.mp3 and
-# volume.mp3 into firmware/sounds/ (README section 2.2).
+# Needs: Python 3.12, 3.13 or 3.14 and internet on the first run. Before the first build, put click.wav and
+# volume.wav into firmware/sounds/ (README section 2.2).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +41,8 @@ YAML="$ROOT/firmware/athan.yaml"
 OUT="$ROOT/firmware/binaries"
 ESPHOME_VERSION="${ESPHOME_VERSION:-2026.9.1}"
 CACHE="${ATHAN_CACHE:-$HOME/.cache/esp32_athan}"
+# The display to build for. Empty = not chosen: oled, except that check then validates both.
+ATHAN_DISPLAY="${ATHAN_DISPLAY:-}"
 VENV="$CACHE/esphome-$ESPHOME_VERSION"
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
@@ -76,15 +85,35 @@ ensure_esphome() {
   touch "$VENV/.installed"
 }
 
-esphome() { "$VENV/bin/esphome" "$@"; }
+# Every ESPHome call builds for the chosen display (the display_type substitution picks displays/<type>.yaml).
+esphome() { "$VENV/bin/esphome" -s display_type "$(display_type)" "$@"; }
+
+display_type() { echo "${ATHAN_DISPLAY:-oled}"; }
+
+# File-name suffix of a display's build: none for the OLED (the original names), -tft for the TFT.
+variant_suffix() {
+  case "$(display_type)" in
+    oled) echo "" ;;
+    tft) echo "-tft" ;;
+    *) die "unknown display '$(display_type)' (oled or tft)" ;;
+  esac
+}
+
+# set_display oled|tft: from --display or ATHAN_DISPLAY.
+set_display() {
+  case "$1" in
+    oled|tft) ATHAN_DISPLAY="$1" ;;
+    *) die "--display takes oled or tft, not '$1'" ;;
+  esac
+}
 
 check_sounds() {
   local missing=() t
   for t in click volume; do
-    [ -f "$ROOT/firmware/sounds/$t.mp3" ] || missing+=("firmware/sounds/$t.mp3")
+    [ -f "$ROOT/firmware/sounds/$t.wav" ] || missing+=("firmware/sounds/$t.wav")
   done
   if [ ${#missing[@]} -gt 0 ]; then
-    die "missing ${missing[*]}. These are the menu click and the volume tone built into the firmware (V2 SD files C3 and C2, or any short MP3). See README section 2.2."
+    die "missing ${missing[*]}. These are the menu click and the volume tone built into the firmware: short mono 16-bit 44.1 kHz WAV files. See README section 2.2."
   fi
 }
 
@@ -120,7 +149,8 @@ EOF
 }
 
 collect_binaries() {
-  local version ota factory
+  local version ota factory sfx
+  sfx="$(variant_suffix)"
   version="$(project_version)"
   [ -n "$version" ] || die "could not read project_version from $YAML"
   ota="$(newest_output firmware.ota.bin)"
@@ -128,19 +158,20 @@ collect_binaries() {
   [ -n "$ota" ] || die "the build finished but no firmware.ota.bin was found under $ESPHOME_DATA_DIR/build"
   mkdir -p "$OUT"
   if [ -n "$factory" ]; then
-    cp "$factory" "$OUT/athan-v3-$version.factory.bin"
+    cp "$factory" "$OUT/athan-v3$sfx-$version.factory.bin"
   fi
-  cp "$ota" "$OUT/athan-v3.ota.bin"
-  # Writes manifest.json next to it (the GitHub Release pair, README section 3.4).
-  "$VENV/bin/python" "$ROOT/scripts/make_release_manifest.py" "$OUT/athan-v3.ota.bin" --version "$version" >/dev/null
-  say "Firmware $version built:"
+  cp "$ota" "$OUT/athan-v3$sfx.ota.bin"
+  # Writes manifest$sfx.json next to it (the GitHub Release pair, README section 3.4).
+  "$VENV/bin/python" "$ROOT/scripts/make_release_manifest.py" "$OUT/athan-v3$sfx.ota.bin" --version "$version" \
+    --display "$(display_type)" >/dev/null
+  say "Firmware $version ($(display_type) display) built:"
   ls -l "$OUT" | sed -n '2,$p' | sed 's/^/    /'
 }
 
 build() {
   check_sounds
   ensure_esphome
-  say "Compiling firmware/athan.yaml with ESPHome $ESPHOME_VERSION (the first build takes a while)"
+  say "Compiling firmware/athan.yaml for the $(display_type) display with ESPHome $ESPHOME_VERSION (the first build takes a while)"
   esphome compile "$YAML"
   collect_binaries
 }
@@ -148,17 +179,31 @@ build() {
 check() {
   check_sounds
   ensure_esphome
-  local log="$CACHE/check.log"
-  if esphome config "$YAML" >"$log" 2>&1; then
-    grep -E '^WARNING' "$log" || true
-    say "firmware/athan.yaml is valid (ESPHome $ESPHOME_VERSION)"
-  else
-    tail -40 "$log"
-    die "firmware/athan.yaml is not valid (full output: $log)"
-  fi
+  local log="$CACHE/check.log" chosen="$ATHAN_DISPLAY" d
+  for d in ${chosen:-oled tft}; do
+    ATHAN_DISPLAY="$d"
+    if esphome config "$YAML" >"$log" 2>&1; then
+      grep -E '^WARNING' "$log" || true
+      say "firmware/athan.yaml is valid for the $d display (ESPHome $ESPHOME_VERSION)"
+    else
+      tail -40 "$log"
+      die "firmware/athan.yaml is not valid for the $d display (full output: $log)"
+    fi
+  done
+  ATHAN_DISPLAY="$chosen"
 }
 
 main() {
+  local args=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --display) [ $# -ge 2 ] || die "--display needs oled or tft"; set_display "$2"; shift 2 ;;
+      --display=*) set_display "${1#--display=}"; shift ;;
+      *) args+=("$1"); shift ;;
+    esac
+  done
+  [ -z "$ATHAN_DISPLAY" ] || set_display "$ATHAN_DISPLAY"
+  set -- "${args[@]+"${args[@]}"}"
   local cmd="${1:-build}"
   case "$cmd" in
     build)

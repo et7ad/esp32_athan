@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "psram_alloc.h"
+#include "tft_theme.h"
 
 namespace esphome {
 namespace athan {
@@ -24,7 +25,7 @@ enum class MenuKey : uint8_t { UP = 0, DOWN = 1, LEFT = 2, RIGHT = 3, SELECT = 4
 enum class RowKind : uint8_t {
   /// Left/Right show the choices; Select takes the one shown. Select on the one already in use closes the menu.
   CHOICE,
-  /// Left/Right change the setting at once (volume, hours); Select closes the menu.
+  /// Left/Right change the setting at once (the volumes, Brightness); Select closes the menu.
   VALUE,
   /// Select runs the item shown (play a station, switch a prayer's athan); apply() says whether the menu closes.
   ACTION,
@@ -42,10 +43,13 @@ enum class RowStyle : uint8_t {
   /// On/off items (Athan On/Off): the one under the cursor and its state, and every item by the first letter of its
   /// short name with a box under it, filled when on.
   TOGGLES,
+  /// Colours (Screen Colour, TFT only): the item's name and a dot in each item's colour (MenuRow::swatch).
+  SWATCHES,
 };
 
-/// A small icon before a row's short name in the menu's left pane (menu_view.cpp draws it). It groups related rows.
-enum class RowIcon : uint8_t { NONE, CLOCK, SPEAKER, LOCK, EXIT };
+/// A small icon before a row's short name in the OLED menu's left pane (menu_view.cpp draws it). It groups related
+/// rows: a clock for the tick hours, a sun and a moon for the screen's brightness and night.
+enum class RowIcon : uint8_t { NONE, CLOCK, SPEAKER, LOCK, EXIT, SUN, MOON };
 
 struct MenuRow {
   /// The full name: the right pane's header.
@@ -53,6 +57,8 @@ struct MenuRow {
   /// The name in the left pane (the list), shorter where the full one does not fit; nullptr = the title.
   const char *short_title{nullptr};
   RowIcon icon{RowIcon::NONE};
+  /// The row's icon on a display with an icon font (the TFT, which gives every row one): a tft_theme.h sym:: glyph.
+  const char *symbol{nullptr};
   RowKind kind{RowKind::CHOICE};
   RowStyle style{RowStyle::LIST};
   /// Left/Right go round from the last item to the first. Off for volumes: no jump from 100 % to 0 %.
@@ -73,6 +79,8 @@ struct MenuRow {
   /// TOGGLES: item i's short name (its first letter is drawn), and whether it is on (a filled box).
   std::function<std::string(int)> short_label;
   std::function<bool(int)> on;
+  /// SWATCHES: item i's colour, 0xRRGGBB.
+  std::function<uint32_t(int)> swatch;
   /// Stable identity of the item at position i, and the position of an identity now (-1 if gone). With both, the
   /// cursor stays on its item when the list changes under it (a list loads, "Custom" goes after a download).
   /// Without them the cursor keeps its position.

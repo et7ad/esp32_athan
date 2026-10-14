@@ -1,0 +1,491 @@
+# =====================================================================================================================
+# Display: the 240x240 colour TFT on SPI (ST7789 1.54" IPS), chosen with display_type: tft in athan.yaml or
+# ./build_firmware.sh --display tft. Wiring: HARDWARE.md 3.2 (header J7, beside the OLED's J4; SPI clock and data on
+# the OLED's I2C pins).
+#
+# The screens (design page: https://claude.ai/artifact/XttPFXwoSqycdCdLjbHLoi, clock C, menu M1):
+#   clock   the time and date on top; a ring that fills from the last prayer time to the next one, with the next
+#           prayer, the time left and its time inside; the five prayers in a strip at the bottom, the next one in a
+#           filled box of the accent colour (Dhuhr only framed while Sunrise or Doha is next), the ones passed dimmed, a
+#           mute icon over a prayer whose athan is off. In the last minute before an athan the ring flashes once a
+#           second (half a second in the athan colour, half dark: tft_flash_ms) as the time left counts the seconds.
+#           During the athan the ring and the prayer's box turn the athan colour, with the prayer and ATHAN TIME in
+#           the ring.
+#   menu    components/athan/menu_view_tft.cpp: the OLED's two panes, five rows with icons, in colour
+#   others  the volume and relay pop-ups, the Wi-Fi setup screen with the hotspot's name and password
+# Colours: components/athan/tft_theme.h (Screen Colour: the accent and athan pair). Icons: Material Symbols Rounded.
+# =====================================================================================================================
+
+substitutions:
+  # Build and update files carry -tft: athan-v3-tft.ota.bin and manifest-tft.json (an OLED build has no suffix).
+  variant_suffix: "-tft"
+  # Pins 5-8 of the TFT header J7 (HARDWARE.md 3.2). Clock and data are pin_scl / pin_sda.
+  pin_tft_res: GPIO16
+  pin_tft_dc: GPIO17
+  pin_tft_cs: GPIO18
+  pin_tft_bl: GPIO4
+  # Panel settings, which differ between ST7789 modules (README 2.2). A new clock opens on the Wi-Fi setup screen:
+  # its Wi-Fi icon is teal and "Press Select" orange.
+  #   teal shows yellow-green, orange shows blue   -> tft_color_order: rgb
+  #   the background is white, colours inverted    -> tft_invert: "false"
+  #   picture shifted, noise along one edge        -> tft_offset_height: "80" (or tft_offset_width)
+  tft_invert: "true"
+  # bgr: ESPHome's own default for the ST7789V and what these modules need (rgb showed Gold blue and Blue gold)
+  tft_color_order: bgr
+  tft_offset_height: "0"
+  tft_offset_width: "0"
+  # SPI clock. 40 MHz over a short trace and the header; 10-20 MHz if the display sits on a cable.
+  tft_data_rate: 40MHz
+  # The ring's flashes in the last minute before an athan: each on and each off lasts this long. 500 = once a second,
+  # an even blink (the owner's choice after comparing 250/250 up to 750/250 live; 2 frames a second, that minute only).
+  tft_flash_ms: "500"
+
+spi:
+  clk_pin: ${pin_scl}
+  mosi_pin: ${pin_sda}
+
+# The backlight: PWM on the module's BL pin (a transistor on most modules, on when the pin is left open). Driven by
+# apply_screen only; the web page has Screen Brightness and Screen at Night instead of this light. Gamma 2 spreads
+# the 10 steps of Brightness evenly to the eye (10 % = 1 % on time).
+output:
+  - platform: ledc
+    id: tft_backlight_pwm
+    pin: ${pin_tft_bl}
+
+light:
+  - platform: monochromatic
+    id: tft_backlight
+    output: tft_backlight_pwm
+    restore_mode: ALWAYS_ON
+    gamma_correct: 2.0
+    default_transition_length: 0s
+
+globals:
+  - {id: screen_colour, type: int, initial_value: "1", restore_value: true}   # tft_theme.h PALETTES: 1 = Teal
+  - {id: ring_flashing, type: bool, initial_value: "false"}  # the clock is in the last minute before an athan
+  - {id: ring_flash_on, type: bool, initial_value: "true"}   # the flashing ring's phase (lit or dark)
+
+select:
+  - platform: template
+    name: "Screen Colour"
+    id: web_screen_colour
+    icon: "mdi:palette"
+    options: ["Gold", "Teal", "Green", "Blue", "White"]   # tft_theme.h PALETTES, in that order
+    set_action:
+      - lambda: |-
+          auto idx = id(web_screen_colour).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(screen_colour) = (int) idx.value();
+          id(web_screen_colour).publish_state(idx.value());
+          id(update_display).execute();
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 5}
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // The web select follows a colour chosen in the menu.
+          const size_t want = (size_t) std::max(0, std::min(athan::tft::NUM_PALETTES - 1, id(screen_colour)));
+          auto cur = id(web_screen_colour).active_index();
+          if (!id(web_screen_colour).has_state() || !cur.has_value() || cur.value() != want) id(web_screen_colour).publish_state(want);
+          // The clock shows seconds: redraw it every second (about 25 ms of SPI). Not while the menu is open (it
+          // redraws itself when it changes) or the screen is dark; without a time the common 5 s redraw runs.
+          if (id(sntp_time).now().is_valid() && !id(athan_core).menu().is_open() && id(screen_pct_applied) != 0)
+            id(update_display).execute();
+  # The ring's flashes: in the last minute before an athan (ring_flashing, set by the clock's drawing) the ring flips
+  # every ${tft_flash_ms} ms and the screen redraws; at any other time this does nothing. Not while the menu covers
+  # the clock or the screen is dark.
+  - interval: ${tft_flash_ms}ms
+    then:
+      - lambda: |-
+          if (!id(ring_flashing) || id(athan_core).menu().is_open() || id(screen_pct_applied) == 0) return;
+          id(ring_flash_on) = !id(ring_flash_on);
+          id(update_display).execute();
+
+display:
+  - platform: mipi_spi
+    id: tft
+    model: ST7789V
+    dimensions:
+      width: 240
+      height: 240
+      offset_height: ${tft_offset_height}
+      offset_width: ${tft_offset_width}
+    invert_colors: ${tft_invert}
+    color_order: ${tft_color_order}
+    cs_pin: ${pin_tft_cs}
+    dc_pin: ${pin_tft_dc}
+    reset_pin: ${pin_tft_res}
+    data_rate: ${tft_data_rate}
+    # Drawn only when the update_display script asks (update()). The driver draws inside update() alone: it clears
+    # its buffer, runs this lambda and sends the frame (115 KB, about 25 ms at 40 MHz).
+    update_interval: never
+    lambda: |-
+      auto &d = it;
+      id(ring_flashing) = false;   // set again below while the clock is in the last minute before an athan
+      namespace tft = athan::tft;
+      namespace sym = athan::sym;
+      using display::TextAlign;
+      const auto &pal = tft::palette(id(screen_colour));
+      const Color acc(pal.accent), ath(pal.athan), black(0, 0, 0);
+      const Color fg(tft::FG), sub(tft::SUB), dim(tft::DIM), rule(tft::LINE), card(tft::CARD);
+
+      // A screen lit only for a while (Brightness 0 % or Screen at Night: Dark, woken by a key): the seconds until it
+      // goes dark (screen_refresh), on a pill with a moon laid over that corner: under the time on the clock,
+      // bottom left in the menu, beside the title on the Wi-Fi setup screen.
+      auto draw_countdown = [&](int x, int y) {
+        const int s = id(screen_dark_in);
+        if (s < 0) return;
+        char num[8];
+        snprintf(num, sizeof(num), "%ds", s);
+        const int w = 6 + 16 + 4 + tft::text_width(d, id(t_label), num) + 9;
+        tft::fill_round_rect(d, x, y, w, 24, 12, card, black);
+        tft::round_rect_frame(d, x, y, w, 24, 12, 2, acc, black);
+        tft::icon(d, x + 6, y + 4, id(i_16), 16, sym::DARK_MODE, acc, card);
+        d.print(x + 26, y + 17, id(t_label), fg, TextAlign::BASELINE_LEFT, num, card);
+      };
+
+      // The menu draws itself (components/athan/menu_view_tft.cpp).
+      auto &menu = id(athan_core).menu();
+      if (menu.is_open()) {
+        athan::draw_menu(d, menu, {id(t_row), id(t_label), id(t_item), id(t_head), id(t_small), id(t_time),
+                                   id(i_22), id(i_16), pal.accent});
+        draw_countdown(6, 210);
+        return;
+      }
+
+      static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
+      static const char *days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+      static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+      char line[48];
+      auto tw = [&](display::BaseFont *f, const char *s) { return tft::text_width(d, f, s); };
+      // "05:57", or "5:57" with the 12-hour clock (AM/PM separately)
+      auto hhmm = [&](char *b, size_t n, int h, int m) {
+        if (id(clock_12h)) snprintf(b, n, "%d:%02d", (h % 12) ? h % 12 : 12, m);
+        else snprintf(b, n, "%02d:%02d", h, m);
+      };
+      // Pop-up over the clock for 2 s after Left/Right (volume) or Down (relay): script show_toast.
+      auto draw_toast = [&]() {
+        const int k = id(toast_kind);
+        if (k == 0) return;
+        tft::fill_round_rect(d, 26, 58, 188, 124, 16, card, black);
+        tft::round_rect_frame(d, 26, 58, 188, 124, 16, 2, acc, black);
+        if (k == 3) {
+          const bool on = id(external_relay).state;
+          tft::icon(d, 106, 70, id(i_28), 28, sym::POWER, on ? acc : sub, card);
+          d.print(120, 126, id(t_head), sub, TextAlign::BASELINE_CENTER, "Relay", card);
+          d.print(120, 164, id(t_big), on ? acc : fg, TextAlign::BASELINE_CENTER, on ? "ON" : "OFF", card);
+          return;
+        }
+        const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
+        const char *lab = k == 2 ? "Fajr volume" : "Volume";
+        const int x0 = 120 - (tw(id(t_head), lab) + 28) / 2;
+        tft::icon(d, x0, 74, id(i_22), 22, sym::VOLUME_UP, acc, card);
+        d.print(x0 + 28, 92, id(t_head), sub, TextAlign::BASELINE_LEFT, lab, card);
+        snprintf(line, sizeof(line), "%d%%", pct);
+        d.print(120, 140, id(t_big), fg, TextAlign::BASELINE_CENTER, line, card);
+        tft::fill_round_rect(d, 46, 154, 148, 10, 5, rule, card);
+        if (pct > 0) tft::fill_round_rect(d, 46, 154, std::max(10, 148 * pct / 100), 10, 5, acc, rule);
+      };
+
+      auto now = id(sntp_time).now();
+      const bool time_ok = now.is_valid();
+      const bool wifi_ok = wifi::global_wifi_component->is_connected();
+      // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: how to connect (README 1.1). Bluetooth: the state,
+      // and the page to open on a phone or computer (Web Bluetooth: Chrome or Edge, not Safari). Hotspot: its name and
+      // password once it is on.
+      if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
+        tft::icon(d, 14, 10, id(i_28), 28, sym::WIFI, acc);
+        d.print(50, 33, id(t_item), fg, TextAlign::BASELINE_LEFT, "Wi-Fi setup");
+        tft::fill_round_rect(d, 10, 46, 220, 102, 12, card, black);
+        tft::icon(d, 20, 56, id(i_22), 22, sym::BLUETOOTH, acc, card);
+        d.print(52, 70, id(t_text), sub, TextAlign::BASELINE_LEFT, "Bluetooth", card);
+        const auto st = id(improv_ble).get_improv_state();
+        const bool on = id(improv_ble).is_active(), ask = on && st == improv::STATE_AWAITING_AUTHORIZATION;
+        const char *bt = !on ? "Starting..." : ask ? "Press Select" : st == improv::STATE_AUTHORIZED ? "Allowed"
+                         : st == improv::STATE_PROVISIONING ? "Joining..." : "On";
+        d.print(52, 94, id(t_head), ask ? Color(tft::WARN) : fg, TextAlign::BASELINE_LEFT, bt, card);
+        d.print(52, 116, id(t_label), acc, TextAlign::BASELINE_LEFT, "improv-wifi.com", card);
+        d.print(52, 135, id(t_small), sub, TextAlign::BASELINE_LEFT, "in Chrome or Edge", card);
+        const bool ap = wifi::global_wifi_component->is_ap_active();
+        tft::fill_round_rect(d, 10, 154, 220, 80, 12, card, black);
+        tft::icon(d, 20, 164, id(i_22), 22, sym::HOTSPOT, acc, card);
+        d.print(52, 178, id(t_text), sub, TextAlign::BASELINE_LEFT, ap ? "Hotspot: on" : "Hotspot: soon", card);
+        if (ap) {
+          d.print(52, 198, id(t_label), fg, TextAlign::BASELINE_LEFT, "${hotspot_ssid}", card);
+          d.print(52, 217, id(t_small), sub, TextAlign::BASELINE_LEFT, "password ${hotspot_password}", card);
+        }
+        draw_countdown(170, 12);   // beside the title
+        draw_toast();
+        return;
+      }
+
+      // ---- the clock screen. As on the OLED, what is not known yet is struck through: the time stays "--:--" until
+      // SNTP answers, the times until today's are loaded; after a power cut the last day's times show, struck through.
+      const bool times_ok = time_ok && id(times_loaded);
+      const bool athan = time_ok && id(athan_playing);
+      const bool guess = !time_ok && id(athan_core).has_stored_times();
+      const bool known = times_ok || guess;
+      const int npi = std::max(0, std::min(6, id(next_prayer_index)));
+      const int api = std::max(0, std::min(6, id(current_athan_prayer_index)));
+      const bool early = !athan && (npi == 1 || npi == 2);   // Sunrise or Doha next: Dhuhr only outlined
+      const int hi = athan ? api : early ? 3 : npi;
+      auto mins = [&](int pi) { return id(prayer_hours)[pi] * 60 + id(prayer_minutes)[pi]; };
+      const int cur = time_ok ? now.hour * 60 + now.minute : 0;
+
+      // Top left: the time, and after it the seconds a size down (grey), with AM/PM small above them on the 12-hour
+      // clock, so the row stays clear of the status marks. Top right: the date, the status marks under it.
+      if (time_ok) hhmm(line, sizeof(line), now.hour, now.minute);
+      else snprintf(line, sizeof(line), "--:--");
+      d.print(10, 38, id(t_time), fg, TextAlign::BASELINE_LEFT, line);
+      if (time_ok) {
+        const int sx = 10 + tw(id(t_time), line) + 4;
+        char sec[4];
+        snprintf(sec, sizeof(sec), "%02d", now.second);
+        d.print(sx, 38, id(t_head), sub, TextAlign::BASELINE_LEFT, sec);
+        if (id(clock_12h)) d.print(sx, 20, id(t_label), sub, TextAlign::BASELINE_LEFT, now.hour < 12 ? "AM" : "PM");
+      }
+      if (time_ok) snprintf(line, sizeof(line), "%s %d %s", days[(now.day_of_week + 6) % 7], now.day_of_month, months[(now.month + 11) % 12]);
+      else snprintf(line, sizeof(line), "--- -- ---");
+      d.print(230, 20, id(t_text), sub, TextAlign::BASELINE_RIGHT, line);
+      {
+        // right to left: times borrowed from last year, no Wi-Fi, buttons locked, the radio and its slot
+        int x = 230;
+        const int top = 26;
+        if (times_ok && id(athan_core).times_standin()) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::HISTORY, Color(tft::WARN)); x -= 5; }
+        if (!wifi_ok) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::WIFI_OFF, Color(tft::BAD)); x -= 5; }
+        if (id(buttons_locked)) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::LOCK, sub); x -= 5; }
+        const int r = id(athan_core).radio_active();
+        if (r >= 0) {
+          char num[4];
+          snprintf(num, sizeof(num), "%d", r + 1);
+          x -= tw(id(t_label), num);
+          d.print(x, top + 13, id(t_label), acc, TextAlign::BASELINE_LEFT, num);
+          x -= 18;
+          tft::icon(d, x, top, id(i_16), 16, sym::RADIO, acc);
+        }
+      }
+
+      // The ring: the wait from the last prayer time to the next one, filled in the accent up to now (a white knob).
+      // Inside: the next prayer (a mute icon after it when its athan is off), the time left, and its time.
+      const int CY = 114;   // the ring's centre line; its text sits relative to it
+      const float cx = 120, cy = CY, ro = 64, ri = 55;
+      if (athan) {
+        tft::arc(d, cx, cy, ro, ri, 0, 1, ath, black, black);
+        tft::icon(d, 106, CY - 46, id(i_28), 28, sym::VOLUME_UP, ath);
+        d.print(120, CY + 12, id(t_item), fg, TextAlign::BASELINE_CENTER, names[api]);
+        d.print(120, CY + 34, id(t_label), ath, TextAlign::BASELINE_CENTER, "ATHAN TIME");
+      } else {
+        const Color track(tft::TRACK);
+        tft::arc(d, cx, cy, ro, ri, 0, 1, track, black, black);
+        int rem_s = 0;   // seconds to the next prayer
+        if (times_ok) {
+          const int nx = id(next_prayer_hour) * 60 + id(next_prayer_minute);
+          const int now_s = cur * 60 + now.second;
+          rem_s = nx * 60 - now_s;
+          if (rem_s < 0) rem_s += 86400;
+          // after Isha the wait runs to tomorrow's Fajr: count from Isha, a day back
+          const int prev = npi > 0 ? mins(npi - 1) : mins(6) - 1440;
+          const int c_s = (npi == 0 && cur > mins(6)) ? now_s - 86400 : now_s;
+          const float f = nx > prev ? std::max(0.0f, std::min(1.0f, (float) (c_s - prev * 60) / (float) ((nx - prev) * 60))) : 0.0f;
+          const float mid = (ro + ri) / 2, rc = (ro - ri) / 2, a = f * 6.2831853f;
+          // The last minute before an athan (not Sunrise or Doha, not an athan switched off): the ring flashes, whole
+          // in the athan's colour and dark in turn, ${tft_flash_ms} ms each (the fast interval flips ring_flash_on and
+          // redraws), to be seen across a room.
+          const bool athan_due = rem_s < 60 && npi != 1 && npi != 2 && id(athan_enabled)[npi];
+          id(ring_flashing) = athan_due;
+          if (athan_due) {
+            if (id(ring_flash_on)) tft::arc(d, cx, cy, ro, ri, 0, 1, ath, black, black);
+          } else {
+            tft::arc(d, cx, cy, ro, ri, 0, f, acc, black, track);
+            tft::fill_circle(d, cx, cy - mid, rc, acc, track);
+            tft::fill_circle(d, cx + mid * sinf(a), cy - mid * cosf(a), rc + 2, fg, black);
+          }
+        }
+        const char *nm = known ? names[npi] : "Next";
+        const bool muted = known && npi != 1 && npi != 2 && !id(athan_enabled)[npi];
+        const int nw = tw(id(t_head), nm), gw = nw + (muted ? 20 : 0);
+        d.print(120 - gw / 2, CY - 16, id(t_head), acc, TextAlign::BASELINE_LEFT, nm);
+        if (muted) tft::icon(d, 120 - gw / 2 + nw + 4, CY - 31, id(i_16), 16, sym::VOLUME_OFF, acc);
+        // the time left: "1h 29m", "37m" (whole minutes, rounded up), and in the last minute the seconds: "45s"
+        const int rem = (rem_s + 59) / 60;
+        if (!times_ok) snprintf(line, sizeof(line), "--");
+        else if (rem_s < 60) snprintf(line, sizeof(line), "%ds", rem_s);
+        else if (rem >= 60) snprintf(line, sizeof(line), "%dh %02dm", rem / 60, rem % 60);
+        else snprintf(line, sizeof(line), "%dm", rem);
+        d.print(120, CY + 14, id(t_big), fg, TextAlign::BASELINE_CENTER, line);
+        char tm[8];
+        if (known) hhmm(tm, sizeof(tm), id(next_prayer_hour), id(next_prayer_minute));
+        else snprintf(tm, sizeof(tm), "--:--");
+        snprintf(line, sizeof(line), "at %s%s", tm, known && id(clock_12h) ? (id(next_prayer_hour) < 12 ? " AM" : " PM") : "");
+        d.print(120, CY + 36, id(t_text), sub, TextAlign::BASELINE_CENTER, line);
+        if (!times_ok) {
+          const int w = tw(id(t_text), line);
+          d.filled_rectangle(120 - w / 2 - 2, CY + 30, w + 4, 2, sub);
+        }
+      }
+
+      // The strip: the five prayers in columns sized to their text. The next prayer (the calling one during the athan)
+      // in a filled box with dark text, the accent's colour (the athan's during the athan), seen from across a room;
+      // its column is wider by the box's padding. While Sunrise or Doha is next, Dhuhr is only framed, and filled once
+      // Doha has passed (as on the OLED). The ones passed are dimmed. A prayer whose athan is off has a mute icon over
+      // its name, in a darker accent (the accent itself over the next prayer).
+      {
+        static const int idx[5] = {0, 3, 4, 5, 6};
+        static const char *five[5] = {"Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"};
+        const int pad = 5, top = 200, h = 40;   // the box: side padding, rows 200-239
+        char times[5][8];
+        int w[5], total = 0, hk = -1;
+        for (int k = 0; k < 5; k++) {
+          if (known) hhmm(times[k], sizeof(times[k]), id(prayer_hours)[idx[k]], id(prayer_minutes)[idx[k]]);
+          else snprintf(times[k], sizeof(times[k]), "--:--");
+          w[k] = std::max(tw(id(t_label), five[k]), tw(id(t_num), times[k]));
+          total += w[k];
+          if (idx[k] == hi) hk = k;
+        }
+        if (hk >= 0) total += 2 * pad;
+        const float extra = (238 - total) / 5.0f;
+        const Color mute_dim = tft::blend(acc, black, 0.55f);
+        float x = 1;
+        for (int k = 0; k < 5; k++) {
+          const int pi = idx[k];
+          const bool nx = k == hk;
+          const float cw = w[k] + (nx ? 2 * pad : 0) + extra;
+          const int cxk = (int) (x + cw / 2);
+          x += cw;
+          const bool past = times_ok && !nx && mins(pi) < cur && !(npi == 0 && cur < mins(0));
+          Color name_c = past ? dim : sub, time_c = past ? dim : fg, bg = black;
+          const int bw = w[k] + 2 * pad, bx = cxk - bw / 2;
+          if (nx && early) {
+            tft::round_rect_frame(d, bx, top, bw, h, 9, 2, acc, black);
+          } else if (nx) {
+            bg = athan ? ath : acc;
+            tft::fill_round_rect(d, bx, top, bw, h, 9, bg, black);
+            name_c = time_c = Color(tft::INK);
+          }
+          d.print(cxk, 215, nx && !early ? id(t_label) : id(t_small), name_c, TextAlign::BASELINE_CENTER, five[k], bg);
+          d.print(cxk, 234, id(t_num), time_c, TextAlign::BASELINE_CENTER, times[k], bg);
+          if (!times_ok) {
+            const int tww = tw(id(t_num), times[k]);
+            d.filled_rectangle(cxk - tww / 2 - 2, 229, tww + 4, 2, time_c);
+          }
+          if (!id(athan_enabled)[pi]) tft::icon(d, cxk - 8, 182, id(i_16), 16, sym::VOLUME_OFF, nx ? acc : mute_dim);
+        }
+      }
+      draw_countdown(6, 44);   // under the time, clear of the ring
+      draw_toast();
+
+font:
+  # Roboto, smoothed (bpp 4: 16 levels per pixel). Medium (500) unless noted. menu_view_tft.cpp's layout and the clock
+  # above assume these sizes.
+  - {file: "gfonts://Roboto@500", id: t_time, size: 34, bpp: 4, glyphs: "0123456789:-"}        # the time
+  - {file: "gfonts://Roboto@500", id: t_big, size: 28, bpp: 4, glyphs: " 0123456789:-%hmsONF"}  # time left, pop-ups
+  - {file: "gfonts://Roboto@500", id: t_item, size: 22, bpp: 4}    # the menu's item, the athan's prayer, titles
+  - {file: "gfonts://Roboto@500", id: t_head, size: 18, bpp: 4}    # the next prayer, pop-up labels
+  - {file: "gfonts://Roboto@500", id: t_row, size: 16, bpp: 4}     # the menu's rows, chips, buttons
+  - {file: "gfonts://Roboto@500", id: t_num, size: 14, bpp: 4, glyphs: "0123456789:-"}         # the strip's times
+  - {file: "gfonts://Roboto@500", id: t_label, size: 13, bpp: 4}   # the next prayer's name, the menu's title, AM/PM
+  - {file: "gfonts://Roboto", id: t_text, size: 15, bpp: 4}        # Roboto 400: the date, "at 16:09"
+  - {file: "gfonts://Roboto", id: t_small, size: 13, bpp: 4}       # Roboto 400: the strip's names, captions
+  # Material Symbols Rounded: the glyphs are tft_theme.h's sym:: code points (tests/run_tests.sh checks every one is
+  # listed here). Each icon's square sits on the baseline: tft::icon() draws it by its top-left corner.
+  - file: "gfonts://Material Symbols Rounded"
+    id: i_16
+    size: 16
+    bpp: 4
+    glyphs: [
+      "\ue03e",  # radio
+      "\ue899",  # lock
+      "\ue648",  # wifi_off
+      "\ue8b3",  # history
+      "\ue04f",  # volume_off
+      "\ue668",  # check
+      "\ue51c",  # dark_mode
+    ]
+  - file: "gfonts://Material Symbols Rounded"
+    id: i_22
+    size: 22
+    bpp: 4
+    glyphs: [
+      "\ue03e",  # radio
+      "\ueab2",  # mosque
+      "\ue1c6",  # wb_twilight
+      "\ue03d",  # queue_music
+      "\ue855",  # alarm
+      "\ue425",  # timer
+      "\uefd6",  # schedule
+      "\ue9f6",  # toggle_on
+      "\ue050",  # volume_up
+      "\uf1db",  # location_on
+      "\uf8bb",  # nest_clock_farsight_analog
+      "\ue3ab",  # brightness_6
+      "\ue51c",  # dark_mode
+      "\uf159",  # bedtime
+      "\ue40a",  # palette
+      "\uf2cd",  # system_update
+      "\ue899",  # lock
+      "\ue88e",  # info
+      "\ue5c4",  # arrow_back
+      "\ue5cb",  # chevron_left
+      "\ue5cc",  # chevron_right
+      "\uf0be",  # check_circle
+      "\ue1b8",  # graphic_eq
+      "\ue63e",  # wifi
+      "\ue648",  # wifi_off
+      "\ue1a7",  # bluetooth
+      "\ue1e2",  # wifi_tethering
+    ]
+  - file: "gfonts://Material Symbols Rounded"
+    id: i_28
+    size: 28
+    bpp: 4
+    glyphs: [
+      "\ue050",  # volume_up
+      "\uf8c7",  # power_settings_new
+      "\ue63e",  # wifi: the Wi-Fi setup screen's title
+    ]
+
+script:
+  # The screen's level from screen_refresh (athan.yaml): 10-100 % = the backlight, 0 = the backlight off.
+  - id: apply_screen
+    parameters:
+      pct: int
+    then:
+      - lambda: |-
+          if (pct <= 0) {
+            auto call = id(tft_backlight).turn_off();
+            call.perform();
+            return;
+          }
+          auto call = id(tft_backlight).turn_on();
+          call.set_brightness(pct / 100.0f);
+          call.perform();
+
+  # The TFT's own menu row, added in its place by menu_setup (after Night Until): Screen Colour, the accent and
+  # athan colours (tft_theme.h PALETTES). Select takes the one shown.
+  - id: menu_display_rows
+    then:
+      - lambda: |-
+          athan::MenuRow r;
+          r.title = "Screen Colour";
+          r.short_title = "Colour";
+          r.symbol = athan::sym::PALETTE;
+          r.style = athan::RowStyle::SWATCHES;
+          r.count = []() { return athan::tft::NUM_PALETTES; };
+          r.label = [](int i) { return std::string(athan::tft::palette(i).name); };
+          r.swatch = [](int i) { return athan::tft::palette(i).accent; };
+          r.active = []() { return std::max(0, std::min(athan::tft::NUM_PALETTES - 1, id(screen_colour))); };
+          r.apply = [](int i) {
+            id(screen_colour) = i;
+            return false;
+          };
+          id(athan_core).menu().add_row(std::move(r));
+
+  # Redraws the TFT (each display file has its own update_display; athan.yaml only asks for it). mode: restart and
+  # the delay of 0 fold every request made during one pass of the loop into one draw, as on the OLED.
+  - id: update_display
+    mode: restart
+    then:
+      - delay: 0ms
+      - lambda: |-
+          if (id(tft).is_ready()) id(tft).update();

@@ -1,4 +1,4 @@
-# Athan clock version 3, 16 MB flash (ESP32-S3-WROOM-1-N16R8). See version3_planning.md section 4.2.
+# Athan clock version 3, 16 MB flash (ESP32-S3-WROOM-1-N16R8). Sound regions: DEVELOPER.md section 5.
 # The rows from app0 on fill the flash exactly. Changing this table needs a USB flash (not OTA).
 # No phy_init partition: ESP-IDF keeps the PHY calibration data inside the app (it also overlapped otadata).
 # Checked by firmware/tests/run_tests.sh (overlaps, alignment, 16 MB, the component's region sizes).

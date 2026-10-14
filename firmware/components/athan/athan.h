@@ -32,6 +32,7 @@
 #include <freertos/task.h>
 
 #include "audio_slots.h"
+#include "day_window.h"
 #include "menu.h"
 #include "prayer_store.h"
 #include "tz_posix.h"
@@ -272,6 +273,7 @@ class AthanComponent : public Component {
   bool media_chain_stopped_() const;
   bool announce_chain_stopped_() const;
   void stop_slot_preview_();
+  bool cancel_pending_slot_preview_();
   bool begin_preview_(int list);
   bool preview_from_flash_(int list, const std::string &name);
   // The only places that send STOP: each one only when something may be playing, so repeated presses or

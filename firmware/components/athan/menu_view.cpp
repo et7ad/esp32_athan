@@ -1,5 +1,7 @@
 #include "menu_view.h"
 
+#include "menu_frame.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
@@ -12,6 +14,81 @@ namespace athan {
 using display::Display;
 using esphome::Color;
 using display::TextAlign;
+
+// ---- what the menu shows, for both displays
+
+Frame frame_of(Menu &menu) {
+  menu.refresh();
+  const MenuRow &row = menu.row_at(menu.row());
+  Frame fr;
+  fr.row = menu.row();
+  fr.title = row.title;
+  fr.kind = row.kind;
+  fr.style = row.style;
+  fr.exit = row.exit;
+  fr.item = menu.item();
+  fr.n = menu.count();
+  if (fr.item < 0) {
+    fr.cap = row.caption ? row.caption(-1) : std::string();  // why there is nothing to show
+    return fr;
+  }
+  fr.text = row.label ? row.label(fr.item) : std::string();
+  fr.cap = row.caption ? row.caption(fr.item) : std::string();
+  fr.active = row.active ? row.active() : -1;
+  fr.in_use = fr.active == fr.item;
+  fr.playing = row.playing && row.playing() == fr.item;
+  if (fr.n <= MAX_SIDE_BY_SIDE) {
+    if (fr.style == RowStyle::CHOICES) {
+      for (int i = 0; i < fr.n; i++)
+        fr.all.push_back(row.label(i));
+    } else if (fr.style == RowStyle::TOGGLES && row.short_label && row.on) {
+      for (int i = 0; i < fr.n; i++) {
+        fr.shorts.push_back(row.short_label(i));
+        fr.ons.push_back(row.on(i));
+      }
+    } else if (fr.style == RowStyle::SWATCHES && row.swatch) {
+      for (int i = 0; i < fr.n; i++)
+        fr.swatches.push_back(row.swatch(i));
+    }
+  }
+  fr.has_left = menu.item_left() >= 0;
+  fr.has_right = menu.item_right() >= 0;
+  return fr;
+}
+
+static uint32_t fingerprint(const Frame &fr) {
+  uint32_t h = 2166136261u;  // FNV-1a
+  auto mix = [&h](const char *p, size_t n) {
+    for (size_t i = 0; i < n; i++)
+      h = (h ^ static_cast<uint8_t>(p[i])) * 16777619u;
+    h = (h ^ 0xFFu) * 16777619u;  // separator
+  };
+  auto str = [&mix](const std::string &s) { mix(s.data(), s.size()); };
+  mix(fr.title, std::strlen(fr.title));
+  str(fr.text);
+  str(fr.cap);
+  for (const auto &a : fr.all)
+    str(a);
+  for (size_t i = 0; i < fr.shorts.size(); i++) {
+    str(fr.shorts[i]);
+    const char on = fr.ons[i] ? 1 : 0;
+    mix(&on, 1);
+  }
+  for (uint32_t c : fr.swatches)
+    mix(reinterpret_cast<const char *>(&c), sizeof(c));
+  const int32_t nums[8] = {fr.row, fr.item, fr.n, fr.in_use, fr.playing, fr.active, fr.has_left, fr.has_right};
+  mix(reinterpret_cast<const char *>(nums), sizeof(nums));
+  return h;
+}
+
+static uint32_t drawn_fingerprint = 0;  // of the last menu screen sent to the display
+
+void frame_drawn(const Frame &fr) { drawn_fingerprint = fingerprint(fr); }
+
+bool menu_changed(Menu &menu) { return menu.is_open() && fingerprint(frame_of(menu)) != drawn_fingerprint; }
+
+// ---- the OLED's drawing (the TFT's is menu_view_tft.cpp)
+#ifndef ATHAN_DISPLAY_TFT
 
 namespace {
 
@@ -106,6 +183,20 @@ int row_icon(Display &d, RowIcon icon, int x, int y, Color c) {
     case RowIcon::EXIT:  // an arrow back
       arrow_left(d, x, y + 1, 7, c);
       return 4;
+    case RowIcon::SUN: {  // a 3 x 3 sun with eight one-pixel rays
+      d.filled_rectangle(x + 2, y + 3, 3, 3, c);
+      static const int8_t rays[8][2] = {{3, 1}, {3, 7}, {0, 4}, {6, 4}, {1, 2}, {5, 2}, {1, 6}, {5, 6}};
+      for (const auto &p : rays)
+        d.draw_pixel_at(x + p[0], y + p[1], c);
+      return 7;
+    }
+    case RowIcon::MOON: {  // a crescent opening to the right
+      static const int8_t px[16][2] = {{2, 0}, {3, 0}, {1, 1}, {2, 1}, {0, 2}, {1, 2}, {0, 3}, {1, 3},
+                                       {0, 4}, {1, 4}, {0, 5}, {1, 5}, {1, 6}, {2, 6}, {2, 7}, {3, 7}};
+      for (const auto &p : px)
+        d.draw_pixel_at(x + p[0], y + 1 + p[1], c);
+      return 5;
+    }
     default:
       return 0;
   }
@@ -157,85 +248,6 @@ bool only_digits_and_dots(const std::string &s) {
 }
 
 }  // namespace
-
-// Everything the menu screen shows, read from the hooks once per draw. Its fingerprint tells whether a redraw would
-// change anything (menu_changed()).
-struct Frame {
-  int row{0};
-  const char *title{""};
-  RowStyle style{RowStyle::LIST};
-  bool exit{false};
-  std::string text, cap;
-  int item{-1}, n{0}, active{-1};
-  bool in_use{false}, playing{false}, has_left{false}, has_right{false};
-  std::vector<std::string> all;     // CHOICES: every item, side by side when they fit
-  std::vector<std::string> shorts;  // TOGGLES: every item's short name
-  std::vector<bool> ons;            // TOGGLES: on or off
-};
-
-const int MAX_SIDE_BY_SIDE = 6;  // at most this many items in a CHOICES or TOGGLES line
-
-static Frame frame_of(Menu &menu) {
-  menu.refresh();
-  const MenuRow &row = menu.row_at(menu.row());
-  Frame fr;
-  fr.row = menu.row();
-  fr.title = row.title;
-  fr.style = row.style;
-  fr.exit = row.exit;
-  fr.item = menu.item();
-  fr.n = menu.count();
-  if (fr.item < 0) {
-    fr.cap = row.caption ? row.caption(-1) : std::string();  // why there is nothing to show
-    return fr;
-  }
-  fr.text = row.label ? row.label(fr.item) : std::string();
-  fr.cap = row.caption ? row.caption(fr.item) : std::string();
-  fr.active = row.active ? row.active() : -1;
-  fr.in_use = fr.active == fr.item;
-  fr.playing = row.playing && row.playing() == fr.item;
-  if (fr.n <= MAX_SIDE_BY_SIDE) {
-    if (fr.style == RowStyle::CHOICES) {
-      for (int i = 0; i < fr.n; i++)
-        fr.all.push_back(row.label(i));
-    } else if (fr.style == RowStyle::TOGGLES && row.short_label && row.on) {
-      for (int i = 0; i < fr.n; i++) {
-        fr.shorts.push_back(row.short_label(i));
-        fr.ons.push_back(row.on(i));
-      }
-    }
-  }
-  fr.has_left = menu.item_left() >= 0;
-  fr.has_right = menu.item_right() >= 0;
-  return fr;
-}
-
-static uint32_t fingerprint(const Frame &fr) {
-  uint32_t h = 2166136261u;  // FNV-1a
-  auto mix = [&h](const char *p, size_t n) {
-    for (size_t i = 0; i < n; i++)
-      h = (h ^ static_cast<uint8_t>(p[i])) * 16777619u;
-    h = (h ^ 0xFFu) * 16777619u;  // separator
-  };
-  auto str = [&mix](const std::string &s) { mix(s.data(), s.size()); };
-  mix(fr.title, std::strlen(fr.title));
-  str(fr.text);
-  str(fr.cap);
-  for (const auto &a : fr.all)
-    str(a);
-  for (size_t i = 0; i < fr.shorts.size(); i++) {
-    str(fr.shorts[i]);
-    const char on = fr.ons[i] ? 1 : 0;
-    mix(&on, 1);
-  }
-  const int32_t nums[8] = {fr.row, fr.item, fr.n, fr.in_use, fr.playing, fr.active, fr.has_left, fr.has_right};
-  mix(reinterpret_cast<const char *>(nums), sizeof(nums));
-  return h;
-}
-
-static uint32_t drawn_fingerprint = 0;  // of the last menu screen sent to the display
-
-bool menu_changed(Menu &menu) { return menu.is_open() && fingerprint(frame_of(menu)) != drawn_fingerprint; }
 
 // The left pane: five rows round the one on screen, which always sits in the middle, highlighted; each by its short
 // name in the medium font after its icon. A dotted line marks where the list starts again (between Exit and Radio).
@@ -292,7 +304,7 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   if (!menu.is_open())
     return;
   const Frame fr = frame_of(menu);
-  drawn_fingerprint = fingerprint(fr);
+  frame_drawn(fr);
   draw_rows(d, menu, f);
 
   // The right pane's header: the row's full title, small, in capitals.
@@ -438,6 +450,8 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   }
   draw_caption();
 }
+
+#endif  // ATHAN_DISPLAY_TFT
 
 }  // namespace athan
 }  // namespace esphome

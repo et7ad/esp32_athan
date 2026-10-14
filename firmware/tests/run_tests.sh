@@ -1,6 +1,6 @@
 #!/bin/bash
-# Host unit tests (no ESP32 needed): firmware/partitions.csv, and components/athan/tz_posix.cpp, mp3_check.cpp
-# and menu.cpp.
+# Host unit tests (no ESP32 needed): firmware/partitions.csv, the TFT's icon glyphs, and components/athan/
+# tz_posix.cpp, mp3_check.cpp and menu.cpp.
 # Needs: python3 (standard library), a C++17 compiler (c++/clang++/g++). Optional: ffprobe + some MP3 files.
 #
 #   firmware/tests/run_tests.sh                 # partition table, calendar, parser and time zone checks
@@ -55,6 +55,19 @@ if [ -n "$GEN" ]; then
   python3 "$GEN" -q --offset 0x8000 --primary-bootloader-offset 0x0 --flash-size 16MB ../partitions.csv "$OUT/pt.bin"
   echo "partition table: accepted by ESP-IDF's gen_esp32part.py"
 fi
+
+# The TFT's icons: every Material Symbols code point tft_theme.h names must be a glyph of an icon font in
+# displays/tft.yaml (a missing glyph draws nothing on the device, without an error).
+python3 - ../components/athan/tft_theme.h ../displays/tft.yaml <<'EOF'
+import re, sys
+theme, yaml = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+used = {m.group(2).lower(): m.group(1) for m in re.finditer(r'constexpr const char \*(\w+) = "\\u([0-9a-fA-F]{4})"', theme)}
+listed = {c.lower() for c in re.findall(r'"\\u([0-9a-fA-F]{4})"', yaml)}
+missing = sorted(f"{name} (\\u{cp})" for cp, name in used.items() if cp not in listed)
+if not used or missing:
+    sys.exit("tft icons missing from displays/tft.yaml's icon fonts: " + (", ".join(missing) or "none found in tft_theme.h"))
+print(f"tft icons: all {len(used)} code points of tft_theme.h are in displays/tft.yaml")
+EOF
 
 # Time zone vectors from Python's zoneinfo: every 30 minutes over 2025-2028 for the zones the data uses.
 python3 - "$OUT/tz_vectors.txt" <<'EOF'

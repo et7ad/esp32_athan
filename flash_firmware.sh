@@ -9,11 +9,13 @@
 #                                         firmware). For a blank board, or after partitions.csv changed. Resets the
 #                                         settings and the saved Wi-Fi (sounds and prayer times stay)
 #
-# Options:  -f FILE   flash another file, for example athan-v3.ota.bin downloaded from a GitHub Release
-#           -y        don't ask before usb-full
+# Options:  -f FILE         flash another file, for example athan-v3.ota.bin downloaded from a GitHub Release
+#           -y              don't ask before usb-full
+#           --display tft   the TFT build's files (default oled; ATHAN_DISPLAY works too)
 #
 # Default files (written by ./build_firmware.sh): ota and usb send firmware/binaries/athan-v3.ota.bin, usb-full
-# the newest firmware/binaries/athan-v3-*.factory.bin. Without PORT, the USB port is found by itself (asks if
+# the newest firmware/binaries/athan-v3-<version>.factory.bin (TFT: athan-v3-tft.ota.bin, athan-v3-tft-<version>.
+# factory.bin). A clock flashed with the other display's build runs with a dark screen; flash the right one. Without PORT, the USB port is found by itself (asks if
 # there are several). On the V3 board that port is a 3.3 V USB-serial adapter on J6 (GND 1, adapter RX 4, TX 5):
 # put the jumper on J6 pins 1-2 before powering the board, and remove it afterwards.
 #
@@ -115,7 +117,7 @@ partition() {
 }
 
 newest_factory() {
-  ls -t "$OUT"/athan-v3-*.factory.bin 2>/dev/null | head -1 || true
+  ls -t "$OUT"/athan-v3"$(variant_suffix)"-[0-9]*.factory.bin 2>/dev/null | head -1 || true
 }
 
 flash_ota() {
@@ -172,20 +174,25 @@ flash_main() {
     case "$1" in
       -f|--file) [ $# -ge 2 ] || die "-f needs a file"; file="$2"; shift 2 ;;
       -y|--yes) ASSUME_YES=1; shift ;;
+      --display) [ $# -ge 2 ] || die "--display needs oled or tft"; set_display "$2"; shift 2 ;;
+      --display=*) set_display "${1#--display=}"; shift ;;
       -h|--help|help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; return 0 ;;
       -*) die "unknown option $1" ;;
       *) args+=("$1"); shift ;;
     esac
   done
   [ ${#args[@]} -ge 1 ] || die "say how to flash: ota, usb or usb-full (./flash_firmware.sh help)"
+  [ -z "$ATHAN_DISPLAY" ] || set_display "$ATHAN_DISPLAY"
+  local ota_bin
+  ota_bin="$OUT/athan-v3$(variant_suffix).ota.bin"
   cmd="${args[0]}"
   [ ${#args[@]} -ge 2 ] && target="${args[1]}"
   case "$cmd" in
-    ota) flash_ota "${file:-$OUT/athan-v3.ota.bin}" "${target:-$(device_name).local}" ;;
-    usb) flash_usb_app "${file:-$OUT/athan-v3.ota.bin}" "$target" ;;
+    ota) flash_ota "${file:-$ota_bin}" "${target:-$(device_name).local}" ;;
+    usb) flash_usb_app "${file:-$ota_bin}" "$target" ;;
     usb-full)
       file="${file:-$(newest_factory)}"
-      [ -n "$file" ] || die "no firmware/binaries/athan-v3-*.factory.bin yet. Build it with ./build_firmware.sh, or pass one with -f."
+      [ -n "$file" ] || die "no firmware/binaries/athan-v3$(variant_suffix)-<version>.factory.bin yet. Build it with ./build_firmware.sh, or pass one with -f."
       flash_usb_full "$file" "$target"
       ;;
     *) die "unknown command '$cmd' (ota, usb, usb-full, help)" ;;

@@ -2,10 +2,10 @@
 # Athan clock, version 3: ESP32-S3-WROOM-1-N16R8 + MAX98357A. ESPHome 2026.9 or newer.
 #
 #   Build:   esphome run firmware/athan.yaml        (first flash over USB-C: it also writes partitions.csv)
-#   Docs:    README.md (owners), DEVELOPER.md (internals), version3_planning.md (design), CLAUDE.md (agents)
+#   Docs:    README.md (owners), DEVELOPER.md (internals), HARDWARE.md (board, prototype checklist), CLAUDE.md (agents)
 #
 # Before the first build, put the two menu tones in firmware/sounds/ (README "Building"):
-#   sounds/click.mp3   (menu click,   V2 file C3)      sounds/volume.mp3  (volume tone, V2 file C2)
+#   sounds/click.wav   (menu click)      sounds/volume.wav  (volume tone): mono 16-bit 44.1 kHz WAV (README 2.2)
 #
 # Behaviour lives here (menus, schedule, web entities). What ESPHome lacks (replaceable sounds in flash, the
 # GitHub lists, radio subscriptions, yearly prayer files, runtime time zone, the /audio page) is the custom
@@ -18,21 +18,29 @@ substitutions:
   project_version: "3.0.0"
   # This repository's docs/ folder over HTTPS (lists, stations, yearly prayer files)
   data_url: "https://raw.githubusercontent.com/et7ad/esp32_athan/main/docs"
-  # Firmware updates: manifest attached to the latest GitHub Release (scripts/make_release_manifest.py)
-  update_manifest: "https://github.com/et7ad/esp32_athan/releases/latest/download/manifest.json"
+  # Firmware updates: manifest attached to the latest GitHub Release (scripts/make_release_manifest.py). Each display
+  # has its own: manifest.json (OLED), manifest-tft.json (TFT); variant_suffix comes from the display file.
+  update_manifest: "https://github.com/et7ad/esp32_athan/releases/latest/download/manifest${variant_suffix}.json"
+
+  # The display, chosen at build time: only that display's code is built.
+  #   oled  the 128x64 one-colour OLED on I2C (SSD1306 0.96" or SH1106 1.3"): displays/oled.yaml
+  #   tft   the 240x240 colour TFT on SPI (ST7789 1.54" IPS):                   displays/tft.yaml
+  # Change it here, or per build: ./build_firmware.sh --display tft, esphome -s display_type tft ...
+  # Each display file also has its own settings (OLED model and orientation, TFT panel options).
+  display_type: oled
 
   # Serial log level. DEBUG while testing: the log is how a crash or restart gets explained. For a finished build,
   # WARN keeps only warnings and errors (smaller, a little less work per event); NONE removes the log entirely.
   # Choices: NONE, ERROR, WARN, INFO, DEBUG, VERBOSE.
   log_level: DEBUG
 
-  # Pins: HARDWARE.md 3.2 (also version3_planning.md section 3.3)
+  # Pins: HARDWARE.md 3.2
   pin_i2s_bclk: GPIO5
   pin_i2s_lrclk: GPIO6
   pin_i2s_dout: GPIO7
   pin_amp_sd: GPIO15       # MAX98357A SD_MODE through 4.7 kOhm: high = on (left channel), low/floating = off
-  pin_sda: GPIO8
-  pin_scl: GPIO9
+  pin_sda: GPIO8           # display: I2C data (OLED) or SPI data (TFT), header pin 4
+  pin_scl: GPIO9           # display: I2C clock (OLED) or SPI clock (TFT), header pin 3
   # The 5-way switch: each direction and the centre push switch to GND (internal pull-ups). Any of the five
   # may be swapped here to suit the board's routing.
   pin_up: GPIO14
@@ -43,18 +51,29 @@ substitutions:
   pin_relay: GPIO12
   pin_led: GPIO13
 
-  # OLED orientation / contrast
-  oled_flip_x: "true"
-  oled_flip_y: "true"
-  oled_contrast: "1.0"
-
   # Volume curve: 10 % plays this many dB below full, rising evenly to 100 % = full (0 % = silent).
   # Larger = quieter low end. ESPHome's own curve spans 49 dB, which made 50 % only -24.5 dB.
   volume_range_db: "30"
 
+  # The screen at night (Screen at Night: Dim) and when a key or the athan lights a dark one: this share of full
+  # brightness (the TFT's backlight, the OLED's contrast). The owner's Brightness, if lower but not 0, wins.
+  screen_dim_pct: "10"
+  # A dark screen (Brightness 0 %, or Screen at Night: Dark) lit by a key stays lit (dim) this many seconds after the
+  # last press, counting down in a corner; also after the athan or the Pre-Fajr Tawashih ends. Keep it at least the
+  # menu's 60 s, so the menu never goes dark while open.
+  screen_wake_s: "120"
+
+  # The fallback hotspot for Wi-Fi setup (README 1.1). The TFT's setup screen shows both.
+  hotspot_ssid: "AthanFallbackHotspot"
+  hotspot_password: "athan404"
+
   # Pre-Fajr Tawashih: minutes before Fajr, and how long the relay stays on
   prefajr_offset_min: "25"
   prefajr_relay_min: "15"
+
+# The display's bus, fonts and screens (see display_type above)
+packages:
+  display_hw: !include displays/${display_type}.yaml
 
 esphome:
   name: ${device_name}
@@ -181,6 +200,9 @@ web_server:
     - id: grp_location
       name: "Location and Prayer Times"
       sorting_weight: 50
+    - id: grp_screen
+      name: "Screen"
+      sorting_weight: 55
     - id: grp_system
       name: "System"
       sorting_weight: 60
@@ -211,8 +233,8 @@ update:
 # No network is compiled in: Wi-Fi is set over Bluetooth (esp32_improv) or the fallback hotspot.
 wifi:
   ap:
-    ssid: "AthanFallbackHotspot"
-    password: "athan404"
+    ssid: ${hotspot_ssid}
+    password: ${hotspot_password}
     ap_timeout: 3min
   on_connect:
     - logger.log: "Wi-Fi connected"
@@ -258,11 +280,6 @@ esp32_improv:
   on_state:
     - script.execute: update_display   # "BT: press Select" / "BT: allowed" (update_display guards is_ready())
 
-i2c:
-  sda: ${pin_sda}
-  scl: ${pin_scl}
-  frequency: 400kHz
-  scan: true
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Audio: media player -> resamplers -> mixer -> I2S -> MAX98357A
@@ -326,7 +343,7 @@ media_player:
     volume_max: 1.0
     volume_initial: 0.5
     volume_increment: 0.1
-    # Athan, tawashih, tick and menu tones (stored MP3s)
+    # Athan, tawashih and tick (stored MP3s) and the menu tones (WAV)
     announcement_pipeline:
       speaker: announce_resampler
       format: MP3
@@ -338,11 +355,14 @@ media_player:
       format: NONE
       num_channels: 1
       sample_rate: 44100
+    # The menu tones: mono 16-bit 44.1 kHz WAV, the speaker's own format. Nothing to decode, resample or downmix,
+    # and no MP3 encoder padding (about 25 ms of silence ahead of the sound, as long as the click itself), so a key's
+    # click starts at once. ESPHome reads the type from the file and builds in its small WAV reader.
     files:
       - id: tone_click
-        file: sounds/click.mp3
+        file: sounds/click.wav
       - id: tone_volume
-        file: sounds/volume.mp3
+        file: sounds/volume.wav
     on_play:
       - output.turn_on: amp_enable
       - script.stop: amp_idle_off
@@ -368,6 +388,8 @@ athan:
   # Own links of radio slots 1..10 (the text entities below), used when a slot does not follow the project list
   radio_urls: [radio_url_1, radio_url_2, radio_url_3, radio_url_4, radio_url_5,
                radio_url_6, radio_url_7, radio_url_8, radio_url_9, radio_url_10]
+  # The display this build is for (display_type): ATHAN_DISPLAY_OLED or ATHAN_DISPLAY_TFT in the C++ (menu_view.cpp)
+  display: ${display_type}
 
 external_components:
   - source:
@@ -604,6 +626,74 @@ select:
     web_server:
       sorting_group_id: grp_radio
       sorting_weight: 1
+  - platform: template
+    name: "Screen at Night"
+    id: web_screen_night
+    icon: "mdi:weather-night"
+    # Off: as by day. Dim: ${screen_dim_pct} % from Night From to Night Until. Dark: off then; a key press lights it
+    # for 30 s (that press does nothing else), the athan and the Pre-Fajr Tawashih while they play.
+    options: ["Off", "Dim", "Dark"]
+    set_action:
+      - lambda: |-
+          auto idx = id(web_screen_night).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(screen_night) = (int) idx.value();
+          id(web_screen_night).publish_state(idx.value());
+          id(screen_refresh).execute();
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 2}
+  # The hourly tick's and the screen's night windows, [start, end): each end an hour, or a prayer that moves with the
+  # times every day (start: Maghrib or Isha, end: Fajr or Dhuhr). The options' order is the menu's
+  # (components/athan/day_window.h: window_value / window_choice).
+  - platform: template
+    name: "Tick Window Start"
+    id: web_htick_start
+    icon: "mdi:clock-start"
+    options: &window_from ["Maghrib", "Isha", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
+    set_action:
+      - lambda: |-
+          auto idx = id(web_htick_start).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(htick_start_hour) = athan::window_value(false, (int) idx.value());
+          id(web_htick_start).publish_state(idx.value());
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 8}
+  - platform: template
+    name: "Tick Window End"
+    id: web_htick_end
+    icon: "mdi:clock-end"
+    options: &window_until ["Fajr", "Dhuhr", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
+    set_action:
+      - lambda: |-
+          auto idx = id(web_htick_end).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(htick_end_hour) = athan::window_value(true, (int) idx.value());
+          id(web_htick_end).publish_state(idx.value());
+    web_server: {sorting_group_id: grp_athan, sorting_weight: 9}
+  - platform: template
+    name: "Night From"
+    id: web_night_from
+    icon: "mdi:weather-night"
+    options: *window_from
+    set_action:
+      - lambda: |-
+          auto idx = id(web_night_from).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(night_from_hour) = athan::window_value(false, (int) idx.value());
+          id(web_night_from).publish_state(idx.value());
+          id(screen_refresh).execute();
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 3}
+  - platform: template
+    name: "Night Until"
+    id: web_night_until
+    icon: "mdi:weather-sunset-up"
+    options: *window_until
+    set_action:
+      - lambda: |-
+          auto idx = id(web_night_until).index_of(x.c_str(), x.size());
+          if (!idx.has_value()) return;
+          id(night_until_hour) = athan::window_value(true, (int) idx.value());
+          id(web_night_until).publish_state(idx.value());
+          id(screen_refresh).execute();
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 4}
 
 number:
   - platform: template
@@ -640,29 +730,21 @@ number:
           id(fajr_volume_feedback).execute();
     web_server: {sorting_group_id: grp_athan, sorting_weight: 5}
   - platform: template
-    name: "Tick Window Start"
-    id: web_htick_start
-    icon: "mdi:clock-start"
-    unit_of_measurement: "h"
+    name: "Screen Brightness"
+    id: web_screen_brightness
+    icon: "mdi:brightness-6"
+    unit_of_measurement: "%"
     min_value: 0
-    max_value: 23
-    step: 1
+    max_value: 100
+    step: 10
     mode: slider
     set_action:
-      - lambda: 'id(htick_start_hour) = std::max(0, std::min(23, (int) (x + 0.5f))); id(web_htick_start).publish_state(id(htick_start_hour));'
-    web_server: {sorting_group_id: grp_athan, sorting_weight: 8}
-  - platform: template
-    name: "Tick Window End"
-    id: web_htick_end
-    icon: "mdi:clock-end"
-    unit_of_measurement: "h"
-    min_value: 0
-    max_value: 23
-    step: 1
-    mode: slider
-    set_action:
-      - lambda: 'id(htick_end_hour) = std::max(0, std::min(23, (int) (x + 0.5f))); id(web_htick_end).publish_state(id(htick_end_hour));'
-    web_server: {sorting_group_id: grp_athan, sorting_weight: 9}
+      - lambda: |-
+          id(screen_brightness) = std::max(0, std::min(100, ((int) (x + 0.5f) + 5) / 10 * 10));
+          id(screen_force_dark) = id(screen_brightness) == 0;   // 0 %: dark at once (a key lights it)
+          id(web_screen_brightness).publish_state(id(screen_brightness));
+          id(screen_refresh).execute();
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 1}
 
 button:
   - platform: template
@@ -750,43 +832,6 @@ text_sensor:
       id: web_ip
       web_server: {sorting_group_id: grp_system, sorting_weight: 7}
 
-# ---------------------------------------------------------------------------------------------------------------------
-# Display (optional: a missing OLED marks itself failed and everything else runs)
-# ---------------------------------------------------------------------------------------------------------------------
-display:
-  - platform: ssd1306_i2c
-    id: oled
-    model: "SSD1306 128x64"
-    address: 0x3C
-    flip_x: ${oled_flip_x}
-    flip_y: ${oled_flip_y}
-    contrast: ${oled_contrast}
-    update_interval: never     # drawn by the update_display script
-
-font:
-  - file: "gfonts://Roboto"
-    id: font1
-    size: 20
-  - file: "gfonts://Roboto"
-    id: font2
-    size: 14
-  - file: "gfonts://Roboto"
-    id: font3
-    size: 11
-    glyphs: "AMP0123456789.:-"   # AM/PM, the next prayer's time (table and bottom box, "--:--" too), the menu's IP
-  # Small text: the menu's titles and captions, the clock screen's weekday, timetable and next prayer, the radio slot
-  # number. A pixel font at its native 8 px: every stroke sits on whole pixels, so it is crisp on the one-colour OLED,
-  # where Roboto scaled to 10 px came out ragged.
-  - file: "gfonts://Tiny5"
-    id: font4
-    size: 8
-    glyphs: " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~°"
-  # The time on the clock screen (the timetable), digits only.
-  - file: "gfonts://Roboto"
-    id: font5
-    size: 26
-    glyphs: "0123456789:-"
-
 time:
   - platform: sntp
     id: sntp_time
@@ -795,14 +840,15 @@ time:
     on_time_sync:
       - script.execute: update_display
     on_time:
-      # Hourly tick at HH:00 inside the window [start, end) (start == end: all day)
+      # Hourly tick at HH:00 inside the window [start, end) (start == end: all day). An end may be a prayer
+      # (day_window.h: Maghrib or Isha to Fajr or Dhuhr), at today's time.
       - minutes: 0
         seconds: 0
         then:
           - lambda: |-
-              int h = id(sntp_time).now().hour;
-              int s = id(htick_start_hour), e = id(htick_end_hour);
-              bool in_window = (s == e) || (s < e ? (h >= s && h < e) : (h >= s || h < e));
+              const int h = id(sntp_time).now().hour;
+              const bool in_window = athan::in_window(id(htick_start_hour), id(htick_end_hour), h * 60,
+                                                      id(prayer_hours), id(prayer_minutes));
               if (id(htick_enabled) && in_window && !id(athan_playing) && !id(athan_core).slot_playing() &&
                   id(athan_core).preview_list() < 0)
                 id(play_tick).execute();
@@ -826,6 +872,11 @@ globals:
   - {id: selected_location_key, type: std::string, initial_value: '"davis"', restore_value: true, max_restore_data_length: 31}
   - {id: radio_subscribed, type: "bool[10]", initial_value: "{true, true, true, true, true, true, true, true, true, true}", restore_value: true}
   - {id: radio_slot, type: int, initial_value: "0", restore_value: true}
+  # The screen (script screen_refresh): Brightness 10-100 %, Screen at Night 0 Off / 1 Dim / 2 Dark, night hours
+  - {id: screen_brightness, type: int, initial_value: "100", restore_value: true}
+  - {id: screen_night, type: int, initial_value: "0", restore_value: true}
+  - {id: night_from_hour, type: int, initial_value: "22", restore_value: true}
+  - {id: night_until_hour, type: int, initial_value: "6", restore_value: true}
   # not persisted
   - {id: ui_last_activity, type: uint32_t, initial_value: "0"}  # last key press (the menu closes after 60 s)
   - {id: last_tone_ms, type: uint32_t, initial_value: "0"}      # tone rate limit (play_tone_click / play_tone_volume)
@@ -853,6 +904,10 @@ globals:
   - {id: prefajr_triggered, type: bool, initial_value: "false"}
   - {id: prefajr_playing, type: bool, initial_value: "false"}   # the Pre-Fajr Tawashih sound is playing
   - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing, 5 check failed
+  - {id: screen_woken_ms, type: uint32_t, initial_value: "0"}  # last key press: a dark screen stays lit after it
+  - {id: screen_pct_applied, type: int, initial_value: "-1"}  # the level the display has now (0 = dark, -1 = not set)
+  - {id: screen_dark_in, type: int, initial_value: "-1"}      # seconds until a lit screen goes dark (-1: it stays)
+  - {id: screen_force_dark, type: bool, initial_value: "false"}  # Brightness just set to 0 %: dark now, until a key
 
 script:
   # ---------------- audio helpers ----------------
@@ -1091,6 +1146,15 @@ script:
           using athan::MenuKey;
           const MenuKey k = static_cast<MenuKey>(button);
           id(ui_last_activity) = millis();
+          // A dark screen (Brightness 0 %, Screen at Night: Dark): this press only lights it, dim, for
+          // ${screen_wake_s} s after the last press (screen_refresh counts them down on the screen).
+          const bool dark = id(screen_pct_applied) == 0;
+          id(screen_woken_ms) = millis();
+          if (dark) {
+            id(screen_force_dark) = false;
+            id(screen_refresh).execute();
+            return;
+          }
           if (id(buttons_locked)) {
             id(silence_audio).execute();
             return;
@@ -1133,11 +1197,55 @@ script:
           }
           id(update_display).execute();
 
+  # ---------------- screen ----------------
+  # The screen's level: Brightness by day (0 % = dark); from Night From to Night Until (Screen at Night) the same,
+  # dim (${screen_dim_pct} %), or dark. A screen that would be dark is lit dim for ${screen_wake_s} s after a key press
+  # (ui_key: the press that lights it does nothing else), and while the athan or the Pre-Fajr Tawashih plays (the
+  # ${screen_wake_s} s start when it ends); screen_dark_in counts those seconds down, and the display files show them
+  # in a corner. Setting Brightness to 0 % darkens it at once (screen_force_dark) until the next key. Runs every second
+  # and at once after a change; the display hears only of a new level: apply_screen, in each display file (the OLED's
+  # contrast or panel off, the TFT's backlight).
+  - id: screen_refresh
+    then:
+      - lambda: |-
+          const uint32_t wake_ms = ${screen_wake_s} * 1000UL;
+          const bool sound = id(athan_playing) || id(prefajr_playing);
+          if (sound) id(screen_woken_ms) = millis();   // the wait to dark starts when it ends
+          const int bright = std::max(0, std::min(100, id(screen_brightness)));
+          const int dim = bright > 0 ? std::min(bright, ${screen_dim_pct}) : ${screen_dim_pct};
+          auto now = id(sntp_time).now();
+          // the night's ends may be prayers (day_window.h: Maghrib or Isha to Fajr or Dhuhr), at today's times
+          const bool night = id(screen_night) != 0 && now.is_valid() &&
+                             athan::in_window(id(night_from_hour), id(night_until_hour), now.hour * 60 + now.minute,
+                                              id(prayer_hours), id(prayer_minutes));
+          int pct = bright;
+          if (night) pct = id(screen_night) == 2 ? 0 : id(screen_night) == 1 ? std::min(bright, dim) : bright;
+          int dark_in = -1;
+          if (pct == 0 && !id(screen_force_dark)) {
+            const uint32_t since = millis() - id(screen_woken_ms);
+            if (sound) {
+              pct = dim;
+            } else if (since < wake_ms) {
+              pct = dim;
+              dark_in = (int) ((wake_ms - since + 999) / 1000);
+            }
+          }
+          const bool count_changed = dark_in != id(screen_dark_in);
+          id(screen_dark_in) = dark_in;
+          if (pct != id(screen_pct_applied)) {
+            const bool was_dark = id(screen_pct_applied) == 0;
+            id(screen_pct_applied) = pct;
+            id(apply_screen).execute(pct);
+            if (was_dark) id(update_display).execute();   // what it shows may be a minute old
+          }
+          if (count_changed && pct > 0) id(update_display).execute();   // the countdown's new second
+
   # ---------------- device menu ----------------
-  # The OLED menu's rows, top to bottom, each defined once (navigation: components/athan/menu.h, drawing:
-  # menu_view.h). Kinds: CHOICE = Left/Right show the choices, Select takes the one shown (on the one in use: closes
-  # the menu). VALUE = Left/Right change it at once, Select closes. ACTION = Select runs the item shown. Up/Down go
-  # round the rows; the last row, Exit, returns to the clock (Select, Left or Right), as does 60 s without a press.
+  # The menu's rows, top to bottom, each defined once (navigation: components/athan/menu.h, drawing: menu_view.h;
+  # rows only one display has come from its display file: menu_display_rows). Kinds: CHOICE = Left/Right show the
+  # choices, Select takes the one shown (on the one in use: closes the menu). VALUE = Left/Right change it at once,
+  # Select closes. ACTION = Select runs the item shown. Up/Down go round the rows; the last row, Exit, returns to the
+  # clock (Select, Left or Right), as does 60 s without a press.
   - id: menu_setup
     then:
       - lambda: |-
@@ -1151,12 +1259,27 @@ script:
             else snprintf(b, sizeof(b), "%02d:00", h);
             return b;
           };
+          // The tick's and the night's window ends (day_window.h): From offers Maghrib, Isha, then the hours; Until
+          // offers Fajr, Dhuhr, then the hours. A prayer end moves with the prayer times every day.
+          auto end_text = [hour_text](int v) -> std::string {
+            const char *pn = athan::window_prayer_name(v);
+            return pn ? std::string(pn) : hour_text(v);
+          };
+          // The line under From / Until: the other end and today's length ("until Fajr, 10 h"); equal ends = all day.
+          // The rows pass the end under the cursor, so the line shows the window Select would make.
+          auto window_caption = [end_text](int from, int until, bool is_until) -> std::string {
+            const int len = athan::window_length(from, until, id(prayer_hours), id(prayer_minutes));
+            if (len == 1440) return "All day";
+            return (is_until ? "from " + end_text(from) : "until " + end_text(until)) + ", " +
+                   std::to_string((len + 30) / 60) + " h";
+          };
 
           // Radio: the ten slots. Select plays the one shown (the check mark: what Up on the clock plays), or stops
           // it if it is the one playing, and returns to the clock.
           {
             MenuRow r;
             r.title = "Radio";
+            r.symbol = athan::sym::RADIO;   // the TFT's icon (tft_theme.h); the OLED shows none for this row
             r.kind = RowKind::ACTION;
             r.count = []() { return 10; };
             r.label = [](int i) -> std::string {
@@ -1214,7 +1337,7 @@ script:
             r.caption = [=](int i) -> std::string {
               if (slot == 2 && id(menu_download_slot) != slot && i >= 0 &&
                   id(athan_core).menu_item(slot, off, i) == athan::MENU_RANDOM)
-                return "New one each day, streamed";   // also before the list has loaded
+                return "Random one every day";   // also before the list has loaded
               if (!id(athan_core).catalog_ready())
                 return wifi::global_wifi_component->is_connected() ? "Loading list..." : "No internet";
               if (i < 0) return "List is empty";
@@ -1268,21 +1391,28 @@ script:
           };
           // The left pane shows each row's short_title (after its icon) where the full title is too wide; the right
           // pane's header shows the full title.
-          menu.add_row(sound_row("Athan", 0));
+          {
+            MenuRow r = sound_row("Athan", 0);
+            r.symbol = athan::sym::MOSQUE;
+            menu.add_row(std::move(r));
+          }
           {
             MenuRow r = sound_row("Fajr Athan", 1);
             r.short_title = "Fajr";
+            r.symbol = athan::sym::TWILIGHT;
             menu.add_row(std::move(r));
           }
           {
             MenuRow r = sound_row("Tawashih", 2);
             r.short_title = "Tawsh";
+            r.symbol = athan::sym::QUEUE_MUSIC;
             menu.add_row(std::move(r));
           }
 
           {
             MenuRow r;
             r.title = "Pre-Fajr";
+            r.symbol = athan::sym::ALARM;
             r.style = athan::RowStyle::CHOICES;   // Off  On, side by side
             r.count = []() { return 2; };
             r.label = [](int i) { return std::string(i ? "On" : "Off"); };
@@ -1300,27 +1430,29 @@ script:
             MenuRow r = sound_row("Hourly Tick", 3);
             r.short_title = "Tick";
             r.icon = athan::RowIcon::CLOCK;   // with Tick From and Tick Until
+            r.symbol = athan::sym::TIMER;
             menu.add_row(std::move(r));
           }
 
-          // Tick From / Tick Until: the hourly tick's window [from, until), at once; equal = all day.
+          // Tick From / Tick Until: the hourly tick's window [from, until); equal = all day. From: Maghrib, Isha or an
+          // hour; Until: Fajr, Dhuhr or an hour. Like the other choices: Left/Right browse, Select takes the one shown
+          // (the check mark), and the line under it shows the window it would make.
           for (int w = 0; w < 2; w++) {
             MenuRow r;
             r.title = w == 0 ? "Tick From" : "Tick Until";
             r.short_title = w == 0 ? "From" : "Until";
             r.icon = athan::RowIcon::CLOCK;
-            r.kind = RowKind::VALUE;
-            r.count = []() { return 24; };
-            r.label = hour_text;
-            r.active = [w]() { return w == 0 ? id(htick_start_hour) : id(htick_end_hour); };
-            r.caption = [hour_text, w](int) -> std::string {
-              const int a = id(htick_start_hour), b = id(htick_end_hour);
-              if (a == b) return "All day";
-              return (w == 0 ? "until " + hour_text(b) : "from " + hour_text(a)) + ", " +
-                     std::to_string((b - a + 24) % 24) + " h";
+            r.symbol = athan::sym::SCHEDULE;
+            r.kind = RowKind::CHOICE;
+            r.count = []() { return athan::WINDOW_CHOICES; };
+            r.label = [end_text, w](int i) { return end_text(athan::window_value(w == 1, i)); };
+            r.active = [w]() { return athan::window_choice(w == 1, w == 0 ? id(htick_start_hour) : id(htick_end_hour)); };
+            r.caption = [window_caption, w](int i) {
+              const int v = athan::window_value(w == 1, std::max(0, i));
+              return w == 0 ? window_caption(v, id(htick_end_hour), false) : window_caption(id(htick_start_hour), v, true);
             };
             r.apply = [w](int i) {
-              (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = i;
+              (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = athan::window_value(w == 1, i);
               return false;
             };
             menu.add_row(std::move(r));
@@ -1335,6 +1467,7 @@ script:
             r.title = "Athan On/Off";
             r.short_title = "On/Off";
             r.icon = athan::RowIcon::SPEAKER;   // which athans sound
+            r.symbol = athan::sym::TOGGLE_ON;
             r.kind = RowKind::ACTION;
             r.style = athan::RowStyle::TOGGLES;   // all five at once, the ones off struck through
             r.short_label = [](int i) { return std::string(shorts[i]); };
@@ -1354,6 +1487,7 @@ script:
             r.title = "Volume";
             r.short_title = "Vol";   // "Volume" after the speaker is wider than the list
             r.icon = athan::RowIcon::SPEAKER;
+            r.symbol = athan::sym::VOLUME_UP;
             r.kind = RowKind::VALUE;
             r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
@@ -1373,6 +1507,7 @@ script:
             r.title = "Fajr Volume";
             r.short_title = "Fajr";
             r.icon = athan::RowIcon::SPEAKER;
+            r.symbol = athan::sym::VOLUME_UP;
             r.kind = RowKind::VALUE;
             r.style = athan::RowStyle::LEVEL;
             r.wrap = false;
@@ -1394,6 +1529,7 @@ script:
             MenuRow r;
             r.title = "Location";
             r.short_title = "Masjid";
+            r.symbol = athan::sym::LOCATION;
             r.style = athan::RowStyle::CHOICES;   // side by side while the names fit
             r.count = []() { return (int) id(web_location_select).size(); };
             r.label = [](int i) -> std::string {
@@ -1421,6 +1557,7 @@ script:
           {
             MenuRow r;
             r.title = "Clock";
+            r.symbol = athan::sym::CLOCK;
             r.style = athan::RowStyle::CHOICES;
             r.count = []() { return 2; };
             r.label = [](int i) { return std::string(i ? "12-hour" : "24-hour"); };
@@ -1432,10 +1569,87 @@ script:
             menu.add_row(std::move(r));
           }
 
+          // Brightness: 0-100 % at once (screen_refresh: the TFT's backlight, the OLED's contrast; 0 % = dark).
+          {
+            MenuRow r;
+            r.title = "Brightness";
+            r.short_title = "Bright";
+            r.icon = athan::RowIcon::SUN;
+            r.symbol = athan::sym::BRIGHTNESS;
+            r.kind = RowKind::VALUE;
+            r.style = athan::RowStyle::LEVEL;
+            r.wrap = false;
+            r.count = []() { return 11; };
+            r.label = [](int i) { return std::to_string(i * 10) + "%"; };
+            r.active = []() { return std::max(0, std::min(10, id(screen_brightness) / 10)); };
+            r.caption = [](int i) { return std::string(i == 0 ? "Dark till a key" : ""); };
+            r.apply = [](int i) {
+              id(screen_brightness) = i * 10;
+              id(screen_force_dark) = i == 0;   // 0 %: dark at once; the next key lights it, dim, counting down
+              id(screen_refresh).execute();
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Screen at Night: from Night From to Night Until the screen stays as by day, dims, or goes dark.
+          {
+            static const char *const modes[3] = {"Off", "Dim", "Dark"};
+            MenuRow r;
+            r.title = "Screen at Night";
+            r.short_title = "Night";
+            r.icon = athan::RowIcon::MOON;
+            r.symbol = athan::sym::DARK_MODE;
+            r.style = athan::RowStyle::CHOICES;   // Off Dim Dark, side by side when they fit
+            r.count = []() { return 3; };
+            r.label = [](int i) { return std::string(modes[i]); };
+            r.active = []() { return std::max(0, std::min(2, id(screen_night))); };
+            r.caption = [end_text](int i) -> std::string {
+              if (i <= 0) return "As by day";
+              const int a = id(night_from_hour), b = id(night_until_hour);
+              const bool all = athan::window_length(a, b, id(prayer_hours), id(prayer_minutes)) == 1440;
+              return std::string(modes[i]) + " " + (all ? std::string("all day") : end_text(a) + " to " + end_text(b));
+            };
+            r.apply = [](int i) {
+              id(screen_night) = i;
+              id(screen_refresh).execute();
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // Night From / Night Until: the screen's night [from, until), like the tick hours (the same choices: From
+          // Maghrib, Isha or an hour; Until Fajr, Dhuhr or an hour; Select takes the one shown); equal = all day.
+          for (int w = 0; w < 2; w++) {
+            MenuRow r;
+            r.title = w == 0 ? "Night From" : "Night Until";
+            r.short_title = w == 0 ? "From" : "Until";
+            r.icon = athan::RowIcon::MOON;
+            r.symbol = athan::sym::BEDTIME;
+            r.kind = RowKind::CHOICE;
+            r.count = []() { return athan::WINDOW_CHOICES; };
+            r.label = [end_text, w](int i) { return end_text(athan::window_value(w == 1, i)); };
+            r.active = [w]() { return athan::window_choice(w == 1, w == 0 ? id(night_from_hour) : id(night_until_hour)); };
+            r.caption = [window_caption, w](int i) {
+              const int v = athan::window_value(w == 1, std::max(0, i));
+              return w == 0 ? window_caption(v, id(night_until_hour), false) : window_caption(id(night_from_hour), v, true);
+            };
+            r.apply = [w](int i) {
+              (w == 0 ? id(night_from_hour) : id(night_until_hour)) = athan::window_value(w == 1, i);
+              id(screen_refresh).execute();
+              return false;
+            };
+            menu.add_row(std::move(r));
+          }
+
+          // The display's own rows (displays/*.yaml, script menu_display_rows): the TFT's Screen Colour.
+          id(menu_display_rows).execute();
+
           // Update: Select checks the GitHub Release, then installs a newer version.
           {
             MenuRow r;
             r.title = "Update";
+            r.symbol = athan::sym::SYSTEM_UPDATE;
             r.kind = RowKind::ACTION;
             r.count = []() { return 1; };
             r.label = [](int) -> std::string {
@@ -1470,6 +1684,7 @@ script:
             r.title = "Lock Buttons";
             r.short_title = "Lock";
             r.icon = athan::RowIcon::LOCK;
+            r.symbol = athan::sym::LOCK;
             r.kind = RowKind::ACTION;
             r.count = []() { return 1; };
             r.label = [](int) { return std::string("Lock now"); };
@@ -1485,6 +1700,7 @@ script:
           {
             MenuRow r;
             r.title = "Info";
+            r.symbol = athan::sym::INFO;
             r.kind = RowKind::ACTION;
             r.count = []() { return 1; };
             // One screen: the IP address, and under it the web page's name and the firmware version side by side.
@@ -1506,6 +1722,7 @@ script:
             MenuRow r;
             r.title = "Exit";
             r.icon = athan::RowIcon::EXIT;
+            r.symbol = athan::sym::ARROW_BACK;
             r.kind = RowKind::ACTION;
             r.exit = true;
             r.count = []() { return 1; };
@@ -1810,8 +2027,22 @@ script:
           }
           if (!id(web_volume).has_state() || (int) id(web_volume).state != id(volume_level)) id(web_volume).publish_state(id(volume_level));
           if (id(fajr_volume_level) >= 0 && (!id(web_fajr_volume).has_state() || (int) id(web_fajr_volume).state != id(fajr_volume_level))) id(web_fajr_volume).publish_state(id(fajr_volume_level));
-          if (!id(web_htick_start).has_state() || (int) id(web_htick_start).state != id(htick_start_hour)) id(web_htick_start).publish_state(id(htick_start_hour));
-          if (!id(web_htick_end).has_state() || (int) id(web_htick_end).state != id(htick_end_hour)) id(web_htick_end).publish_state(id(htick_end_hour));
+          // The windows' selects (day_window.h: a prayer end, or an hour)
+          auto sync_window = [](esphome::select::Select *s, bool until, int v) {
+            const size_t want = (size_t) athan::window_choice(until, v);
+            auto cur = s->active_index();
+            if (!s->has_state() || !cur.has_value() || cur.value() != want) s->publish_state(want);
+          };
+          sync_window(id(web_htick_start), false, id(htick_start_hour));
+          sync_window(id(web_htick_end), true, id(htick_end_hour));
+          sync_window(id(web_night_from), false, id(night_from_hour));
+          sync_window(id(web_night_until), true, id(night_until_hour));
+          if (!id(web_screen_brightness).has_state() || (int) id(web_screen_brightness).state != id(screen_brightness)) id(web_screen_brightness).publish_state(id(screen_brightness));
+          {
+            auto cur = id(web_screen_night).active_index();
+            const size_t want = (size_t) std::max(0, std::min(2, id(screen_night)));
+            if (!id(web_screen_night).has_state() || !cur.has_value() || cur.value() != want) id(web_screen_night).publish_state(want);
+          }
           auto fmt_time = [&](char *out, size_t n, int h, int m) {
             if (id(clock_12h)) {
               int h12 = h % 12; if (h12 == 0) h12 = 12;
@@ -1822,10 +2053,17 @@ script:
           };
           char t1[12], t2[12];
           {
-            int s = id(htick_start_hour), e = id(htick_end_hour);
+            // "Isha to Fajr (10 h)", "07:00 to 22:00 (15 h)": an end is a prayer (day_window.h) or an hour
+            const int s = id(htick_start_hour), e = id(htick_end_hour);
+            auto end_text = [&](char *out, size_t n, int v) {
+              const char *pn = athan::window_prayer_name(v);
+              if (pn) snprintf(out, n, "%s", pn);
+              else fmt_time(out, n, v, 0);
+            };
+            const int len = athan::window_length(s, e, id(prayer_hours), id(prayer_minutes));
             if (!id(htick_enabled)) snprintf(buf, sizeof(buf), "tick off");
-            else if (s == e) snprintf(buf, sizeof(buf), "all day");
-            else { fmt_time(t1, sizeof(t1), s, 0); fmt_time(t2, sizeof(t2), e, 0); snprintf(buf, sizeof(buf), "%s to %s (%d h)", t1, t2, (e - s + 24) % 24); }
+            else if (len == 1440) snprintf(buf, sizeof(buf), "all day");
+            else { end_text(t1, sizeof(t1), s); end_text(t2, sizeof(t2), e); snprintf(buf, sizeof(buf), "%s to %s (%d h)", t1, t2, (len + 30) / 60); }
             pub(id(web_htick_window), buf);
           }
           static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
@@ -1890,262 +2128,12 @@ script:
             pub(id(web_fw_version), buf);
           }
 
-  # ---------------- OLED ----------------
-  # Redraws the OLED. A draw blocks the main loop for about 23 ms (1 KB over I2C at 400 kHz), and one key press
-  # often asks for several (a stop, a pop-up, the key itself). The delay of 0 moves the draw to the next pass of the
-  # loop and mode: restart folds every request made before it into that one draw.
-  - id: update_display
-    mode: restart
-    then:
-      - delay: 0ms
-      - lambda: |-
-          // Never touch the OLED before its setup() allocated the buffer, or when it failed (see CLAUDE.md).
-          if (!id(oled).is_ready()) return;
-          auto &d = *id(oled);
-          d.clear();
-          auto now = id(sntp_time).now();
-          const bool wifi_ok = wifi::global_wifi_component->is_connected();
-
-          // The menu draws itself (components/athan/menu_view.h).
-          auto &menu = id(athan_core).menu();
-          if (menu.is_open()) {
-            athan::draw_menu(d, menu, {id(font1), id(font2), id(font4), id(font3)});
-            d.display();
-            return;
-          }
-
-          static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
-          static const char *months[12] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-          static const char *days_uc[7] = {"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"};
-          using display::TextAlign;
-          char line[48];
-          auto text_w = [&](display::BaseFont *f, const char *s) -> int {
-            int x1, y1, w, h;
-            d.get_text_bounds(0, 0, s, f, TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
-            return w;
-          };
-          // "05:57", or "5:57" with the 12-hour clock (AM/PM only next to the big time)
-          auto hhmm = [&](char *b, size_t n, int h, int m) {
-            if (id(clock_12h)) snprintf(b, n, "%d:%02d", (h % 12) ? h % 12 : 12, m);
-            else snprintf(b, n, "%02d:%02d", h, m);
-          };
-          // A filled box with its corners cut by 2 pixels (only the top ones with top_only).
-          auto rounded_fill = [&](int x, int y, int w, int h, bool top_only) {
-            d.filled_rectangle(x, y, w, h);
-            const int xs[2] = {x, x + w - 1}, dx[2] = {1, -1};
-            for (int i = 0; i < 2; i++) {
-              d.draw_pixel_at(xs[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y, display::COLOR_OFF); d.draw_pixel_at(xs[i], y + 1, display::COLOR_OFF);
-              if (top_only) continue;
-              d.draw_pixel_at(xs[i], y + h - 1, display::COLOR_OFF); d.draw_pixel_at(xs[i] + dx[i], y + h - 1, display::COLOR_OFF);
-              d.draw_pixel_at(xs[i], y + h - 2, display::COLOR_OFF);
-            }
-          };
-          // Pop-up over the clock for 2 s after Left/Right (volume) or Down (relay): script show_toast.
-          auto draw_toast = [&]() {
-            const int k = id(toast_kind);
-            if (k == 0) return;
-            d.filled_rectangle(14, 11, 100, 42, display::COLOR_OFF);
-            d.rectangle(14, 11, 100, 42);
-            if (k == 3) {
-              d.print(64, 27, id(font2), display::TextAlign::BASELINE_CENTER, "Relay");
-              d.print(64, 47, id(font1), display::TextAlign::BASELINE_CENTER, id(external_relay).state ? "ON" : "OFF");
-              return;
-            }
-            const int pct = std::max(0, std::min(100, k == 2 ? id(fajr_volume_level) : id(volume_level)));
-            d.print(64, 24, id(font2), display::TextAlign::BASELINE_CENTER, k == 2 ? "Fajr volume" : "Volume");
-            snprintf(line, sizeof(line), "%d%%", pct);
-            d.print(64, 43, id(font1), display::TextAlign::BASELINE_CENTER, line);
-            d.rectangle(22, 46, 84, 4);
-            d.filled_rectangle(22, 46, 84 * pct / 100, 4);
-          };
-          auto finish = [&]() {
-            draw_toast();
-            d.display();
-          };
-
-          const bool time_ok = now.is_valid();
-          // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (README "Wi-Fi setup").
-          // The hotspot's name is too wide for the screen; it is in the README.
-          if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
-            d.print(0, 0, id(font2), "Wi-Fi setup:");
-            const auto st = id(improv_ble).get_improv_state();
-            const char *bt = !id(improv_ble).is_active() ? "BT: starting.."
-                           : st == improv::STATE_AWAITING_AUTHORIZATION ? "BT: press Select"
-                           : st == improv::STATE_AUTHORIZED ? "BT: allowed"
-                           : st == improv::STATE_PROVISIONING ? "BT: joining.." : "BT: on";
-            d.print(0, 20, id(font2), bt);
-            d.print(0, 40, id(font2), wifi::global_wifi_component->is_ap_active() ? "Hotspot: on" : "Hotspot: soon");
-            finish();
-            return;
-          }
-          // ---- the clock screen: the time; the weekday with the status marks and the date; the day's five prayers,
-          // the next one in a box; and a framed box at the bottom: the next prayer small and its time a size up, the
-          // time left large ("in 2h 20m"). While the athan plays the box turns white with the prayer's name and ATHAN TIME,
-          // joined to its column. Sunrise and Doha have no column: while one of them is next, Dhuhr gets an outline.
-          // As on V2, what is not known yet is struck through: the time stays "--:--" until SNTP answers, the times
-          // and the box until today's times are loaded. After a power cut (times stored, no time yet) the last day's
-          // times and the prayer that was next show, struck through: a guess, and the sign they are stored.
-          const bool times_ok = time_ok && id(times_loaded);
-          const bool athan = time_ok && id(athan_playing);
-          const bool guess = !time_ok && id(athan_core).has_stored_times();
-          const int npi = id(next_prayer_index);
-          // The time, large, top left (AM/PM after it with the 12-hour clock)
-          if (time_ok) hhmm(line, sizeof(line), now.hour, now.minute);
-          else snprintf(line, sizeof(line), "--:--");
-          d.print(0, 20, id(font5), TextAlign::BASELINE_LEFT, line);
-          int time_end = text_w(id(font5), line);
-          if (time_ok && id(clock_12h)) {
-            const char *ap = now.hour < 12 ? "AM" : "PM";
-            d.print(time_end + 1, 20, id(font3), TextAlign::BASELINE_LEFT, ap);
-            time_end += 1 + text_w(id(font3), ap);
-          }
-          // Top right: the weekday small, the status marks to its left (times borrowed from last year: a hollow
-          // square; no Wi-Fi; buttons locked; the radio slot playing), the date in the medium font under them. With
-          // no room beside the time for the marks, the weekday hides.
-          {
-            const int base = 8;
-            const char *wd = time_ok ? days_uc[(now.day_of_week + 6) % 7] : "---";
-            const int r = id(athan_core).radio_active();
-            char num[4];
-            snprintf(num, sizeof(num), "%d", r + 1);
-            const bool standin = times_ok && id(athan_core).times_standin();
-            const int marks = (standin ? 9 : 0) + (!wifi_ok ? 13 : 0) + (id(buttons_locked) ? 11 : 0) +
-                              (r >= 0 ? text_w(id(font4), num) + 3 + 9 : 0);
-            const int ww = text_w(id(font4), wd);
-            const bool show_wd = 127 - ww - 4 - marks >= time_end + 3;
-            int x = 127;
-            if (show_wd) {
-              d.print(127, 7, id(font4), TextAlign::BASELINE_RIGHT, wd);
-              x = 127 - ww - 4;
-            }
-            if (standin) { d.rectangle(x - 5, base - 5, 5, 5); x -= 9; }
-            if (!wifi_ok) {   // three arcs and a dot, struck through: 9 x 7
-              const int wx = x - 9, wy = base - 7;
-              d.horizontal_line(wx + 2, wy, 5); d.draw_pixel_at(wx + 1, wy + 1, display::COLOR_ON); d.draw_pixel_at(wx + 7, wy + 1, display::COLOR_ON);
-              d.draw_pixel_at(wx, wy + 2, display::COLOR_ON); d.draw_pixel_at(wx + 8, wy + 2, display::COLOR_ON); d.horizontal_line(wx + 3, wy + 2, 3);
-              d.draw_pixel_at(wx + 2, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 6, wy + 3, display::COLOR_ON); d.draw_pixel_at(wx + 4, wy + 5, display::COLOR_ON);
-              d.line(wx, wy + 6, wx + 8, wy - 1);
-              x -= 13;
-            }
-            if (id(buttons_locked)) {   // a padlock: 7 x 8
-              const int lx = x - 7, ly = base - 8;
-              d.rectangle(lx + 1, ly, 5, 4); d.draw_pixel_at(lx + 1, ly, display::COLOR_OFF); d.draw_pixel_at(lx + 5, ly, display::COLOR_OFF);
-              d.filled_rectangle(lx, ly + 3, 7, 5); d.draw_pixel_at(lx + 3, ly + 5, display::COLOR_OFF);
-              x -= 11;
-            }
-            if (r >= 0) {   // the play mark, a pixel of space, the slot number (1-10)
-              d.print(x, base, id(font4), TextAlign::BASELINE_RIGHT, num);
-              x -= text_w(id(font4), num) + 3;
-              d.filled_triangle(x - 4, base - 6, x - 4, base, x + 1, base - 3);
-            }
-            if (time_ok) snprintf(line, sizeof(line), "%d %s", now.day_of_month, months[now.month - 1]);
-            else snprintf(line, sizeof(line), "-- ---");
-            d.print(127, 19, id(font2), TextAlign::BASELINE_RIGHT, line);
-          }
-          // The timetable: Fajr, Dhuhr, Asr, Maghrib, Isha in columns of 25 px. The next prayer (the one calling while
-          // the athan plays) in a box 29 px wide, its time a size up (font3: 27 px, too wide for the other columns);
-          // an athan switched off is struck through.
-          const bool early = !athan && (npi == 1 || npi == 2);   // Sunrise or Doha next: Dhuhr only outlined
-          {
-            static const int idx[5] = {0, 3, 4, 5, 6};
-            static const char *shorts[5] = {"Fajr", "Dhuhr", "Asr", "Magh", "Isha"};
-            const int hi = athan ? id(current_athan_prayer_index) : early ? 3 : npi;
-            const bool known = times_ok || guess;
-            // Column centres. With Fajr highlighted its box (x 0-28) reaches where Dhuhr's text starts (x 29), so the
-            // other four spread over the rest of the row: Dhuhr 2 px right, Asr and Magh 1 px, Isha stays.
-            static const int centres[5] = {14, 39, 64, 89, 114}, centres_fajr[5] = {14, 41, 65, 90, 114};
-            const int *cxs = hi == 0 ? centres_fajr : centres;
-            for (int k = 0; k < 5; k++) {
-              const int pi = idx[k], cx = cxs[k];
-              const bool nx = pi == hi;
-              const Color c = nx && !early ? display::COLOR_OFF : display::COLOR_ON;
-              if (nx && early) {
-                d.horizontal_line(cx - 12, 22, 25); d.horizontal_line(cx - 12, 42, 25);   // an outline, corners cut
-                d.vertical_line(cx - 14, 24, 17); d.vertical_line(cx + 14, 24, 17);
-                d.draw_pixel_at(cx - 13, 23, display::COLOR_ON); d.draw_pixel_at(cx + 13, 23, display::COLOR_ON);
-                d.draw_pixel_at(cx - 13, 41, display::COLOR_ON); d.draw_pixel_at(cx + 13, 41, display::COLOR_ON);
-              } else if (nx) {
-                rounded_fill(cx - 14, 22, 29, athan ? 42 : 21, athan);
-              }
-              d.print(cx, 30, id(font4), c, TextAlign::BASELINE_CENTER, shorts[k]);
-              if (known) hhmm(line, sizeof(line), id(prayer_hours)[pi], id(prayer_minutes)[pi]);
-              else snprintf(line, sizeof(line), "--:--");
-              if (nx) d.print(cx, 41, id(font3), c, TextAlign::BASELINE_CENTER, line);
-              else d.print(cx, 40, id(font4), c, TextAlign::BASELINE_CENTER, line);
-              if (!times_ok) {
-                const int w = text_w(nx ? id(font3) : id(font4), line);
-                d.horizontal_line(cx - w / 2 - 1, 37, w + 2, c);
-              }
-              if (!id(athan_enabled)[pi]) {
-                const int w = text_w(id(font4), shorts[k]);
-                d.horizontal_line(cx - w / 2 - 1, 27, w + 2, c);
-              }
-            }
-          }
-          // The box at the bottom (rows 44-63)
-          if (athan) {   // white, the prayer's name large with ATHAN over TIME small beside it
-            rounded_fill(0, 44, 128, 20, false);
-            const char *nm = names[std::max(0, std::min(6, id(current_athan_prayer_index)))];
-            const int sw = std::max(text_w(id(font4), "ATHAN"), text_w(id(font4), "TIME"));
-            const int gw = text_w(id(font1), nm) + 5 + sw, x = 64 - gw / 2;
-            d.print(x, 62, id(font1), display::COLOR_OFF, TextAlign::BASELINE_LEFT, nm);
-            d.print(x + gw - sw, 53, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "ATHAN");
-            d.print(x + gw - sw, 61, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "TIME");
-            finish();
-            return;
-          }
-          d.horizontal_line(2, 44, 124); d.horizontal_line(2, 63, 124);   // a frame with rounded corners
-          d.vertical_line(0, 46, 16); d.vertical_line(127, 46, 16);
-          d.draw_pixel_at(1, 45, display::COLOR_ON); d.draw_pixel_at(126, 45, display::COLOR_ON);
-          d.draw_pixel_at(1, 62, display::COLOR_ON); d.draw_pixel_at(126, 62, display::COLOR_ON);
-          {
-            // left: the next prayer small, its time a size up (font3; AM/PM small after it) on the countdown's
-            // baseline
-            const bool named = (times_ok || guess) && npi >= 0 && npi < 7;
-            const char *nm = named ? names[npi] : "Next";
-            char tm[8];
-            if (named) hhmm(tm, sizeof(tm), id(next_prayer_hour), id(next_prayer_minute));
-            else snprintf(tm, sizeof(tm), "--:--");
-            const char *ap = named && id(clock_12h) ? (id(next_prayer_hour) < 12 ? "AM" : "PM") : "";
-            d.print(3, 52, id(font4), TextAlign::BASELINE_LEFT, nm);
-            d.print(3, 62, id(font3), TextAlign::BASELINE_LEFT, tm);
-            int tw = text_w(id(font3), tm);
-            if (ap[0]) {
-              d.print(3 + tw + 2, 62, id(font4), TextAlign::BASELINE_LEFT, ap);
-              tw += 2 + text_w(id(font4), ap);
-            }
-            const int sw = std::max(text_w(id(font4), nm), tw);
-            // right: the time left, large: "in 2h 20m", "in 27 min"; when too wide (12-hour times, long waits)
-            // "in 2h20m" / "in 27m", and then without "in"
-            char big[24];
-            int rem = 0;
-            if (times_ok) {
-              rem = id(next_prayer_hour) * 60 + id(next_prayer_minute) - (now.hour * 60 + now.minute);
-              if (rem < 0) rem += 1440;
-            }
-            for (int form = 0; form < 3; form++) {
-              const char *in = form < 2 ? "in " : "";
-              if (!times_ok) snprintf(big, sizeof(big), "in --");
-              else if (rem < 60) snprintf(big, sizeof(big), form == 1 ? "%s%dm" : "%s%d min", in, rem);
-              else snprintf(big, sizeof(big), form == 0 ? "%s%dh %02dm" : "%s%dh%02dm", in, rem / 60, rem % 60);
-              if (!times_ok || 3 + sw + 4 + text_w(id(font1), big) <= 125) break;
-            }
-            const int bw = text_w(id(font1), big);
-            d.print(125, 62, id(font1), TextAlign::BASELINE_RIGHT, big);
-            if (!times_ok) {
-              d.horizontal_line(2, 58, sw + 2);
-              d.horizontal_line(125 - bw - 2, 55, bw + 4);
-            } else if (npi != 1 && npi != 2 && !id(athan_enabled)[npi]) {   // its athan is off: the name struck
-              d.horizontal_line(2, 49, text_w(id(font4), nm) + 2);
-            }
-          }
-          finish();
-
 # ---------------------------------------------------------------------------------------------------------------------
 interval:
   # Every second: reload today's times when they change, call the athan, Pre-Fajr Tawashih.
   - interval: 1s
     then:
+      - script.execute: screen_refresh   # night hours, the 30 s after a key, the athan (a no-op when unchanged)
       - lambda: |-
           if (id(athan_core).schedule_version() != id(schedule_seen)) {
             id(schedule_seen) = id(athan_core).schedule_version();
@@ -2197,25 +2185,3 @@ interval:
             }
           }
       - script.execute: sync_web_state
-  # OLED hot-plug watchdog (V2 behaviour): the device NEVER restarts because of the display.
-  - interval: 10s
-    then:
-      - lambda: |-
-          static bool lost = false;
-          static uint8_t back_ticks = 0, reinits = 0;
-          bool ack = (id(oled).write(nullptr, 0) == i2c::ERROR_OK);
-          if (id(oled).is_failed()) {
-            if (ack) {
-              id(oled).reset_to_construction_state();
-              id(oled).call();
-              if (!id(oled).is_failed()) id(update_display).execute();
-            }
-            return;
-          }
-          if (!ack) { lost = true; back_ticks = 0; return; }
-          if (!lost || ++back_ticks < 2) return;
-          lost = false;
-          if (reinits >= 1) { ESP_LOGW("oled", "Display back again: restart the device to use it (athan keeps working)"); return; }
-          reinits++;
-          id(oled).setup();
-          if (!id(oled).is_failed()) id(update_display).execute();
