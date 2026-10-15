@@ -126,12 +126,36 @@ static void test_day_window() {
   CHECK(in_window(maghrib, dhuhr, 9 * 60, h, m) && !in_window(maghrib, dhuhr, 13 * 60, h, m), "Maghrib to Dhuhr");
   CHECK(in_window(6, isha, 19 * 60, h, m) && !in_window(6, isha, 20 * 60, h, m), "06:00 to Isha (tick)");
   CHECK(window_length(isha, fajr, h, m) == 604, "Isha to Fajr is 10 h 4 min (got %d)", window_length(isha, fajr, h, m));
-  for (int until = 0; until < 2; until++)
-    for (int i = 0; i < WINDOW_CHOICES; i++)
-      CHECK(window_choice(until, window_value(until, i)) == i, "choice %d round trip (until %d)", i, until);
-  CHECK(window_value(false, 0) == maghrib && window_value(false, 1) == isha, "from offers Maghrib, Isha");
-  CHECK(window_value(true, 0) == fajr && window_value(true, 1) == dhuhr, "until offers Fajr, Dhuhr");
-  CHECK(window_choice(false, 22) == 24 && window_value(false, 24) == 22, "hours keep their meaning");
+  const WindowKind TICK = WindowKind::TICK, NIGHT = WindowKind::NIGHT;
+  for (WindowKind k : {TICK, NIGHT})
+    for (int until = 0; until < 2; until++)
+      for (int i = 0; i < WINDOW_CHOICES; i++)
+        CHECK(window_choice(k, until, window_value(k, until, i)) == i, "choice %d round trip (until %d)", i, until);
+  // The night runs from dusk to dawn, the tick's day window the other way round.
+  CHECK(window_value(NIGHT, false, 0) == maghrib && window_value(NIGHT, false, 1) == isha, "night from: Maghrib, Isha");
+  CHECK(window_value(NIGHT, true, 0) == fajr && window_value(NIGHT, true, 1) == dhuhr, "night until: Fajr, Dhuhr");
+  CHECK(window_value(TICK, false, 0) == fajr && window_value(TICK, false, 1) == dhuhr, "tick from: Fajr, Dhuhr");
+  CHECK(window_value(TICK, true, 0) == maghrib && window_value(TICK, true, 1) == isha, "tick until: Maghrib, Isha");
+  CHECK(window_choice(TICK, false, 22) == 24 && window_value(TICK, false, 24) == 22, "hours keep their meaning");
+  CHECK(window_choice(TICK, false, isha) < 0 && window_choice(TICK, true, dhuhr) < 0, "the tick does not offer these");
+  // A tick window saved with ends it no longer offers ("Isha to Dhuhr") becomes the hours with the same ticks.
+  CHECK(window_sanitize(TICK, false, isha, h, m) == 20, "tick from Isha (19:53): 20:00, its first tick (got %d)",
+        window_sanitize(TICK, false, isha, h, m));
+  CHECK(window_sanitize(TICK, true, dhuhr, h, m) == 13, "tick until Dhuhr (12:58): 13:00, 12:00 still ticks");
+  CHECK(window_sanitize(TICK, false, fajr, h, m) == fajr && window_sanitize(NIGHT, false, isha, h, m) == isha,
+        "offered ends stay");
+  CHECK(window_sanitize(TICK, true, 7, h, m) == 7 && window_sanitize(NIGHT, true, 42, h, m) == 0, "hours stay, junk: 0");
+  const uint8_t late[7] = {5, 7, 7, 12, 16, 18, 23}, latem[7] = {57, 8, 28, 58, 9, 40, 30};  // Isha at 23:30
+  CHECK(window_sanitize(TICK, false, isha, late, latem) == 0, "23:30 rounds up to 00:00");
+  // Screen at Night: Normal is the day's level at every brightness (0 % = dark by day too), Dim the lower of
+  // Brightness and the dim level, Turned off dark.
+  for (int bright = 0; bright <= 100; bright++) {
+    const int dim = bright > 0 ? (bright < 10 ? bright : 10) : 10;  // screen_refresh's dim level (screen_dim_pct 10)
+    CHECK(night_level(NIGHT_NORMAL, bright, dim) == bright, "Normal at %d %% is the day's level", bright);
+    CHECK(night_level(NIGHT_DIM, bright, dim) == (bright < dim ? bright : dim), "Dim at %d %%", bright);
+    CHECK(night_level(NIGHT_OFF, bright, dim) == 0, "Turned off at %d %%", bright);
+  }
+  CHECK(night_level(7, 60, 10) == 60, "an unknown setting behaves as Normal");
 }
 
 int main(int argc, char **argv) {

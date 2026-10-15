@@ -1,8 +1,11 @@
 # =====================================================================================================================
-# Athan clock, version 3: ESP32-S3-WROOM-1-N16R8 + MAX98357A. ESPHome 2026.9 or newer.
+# Athan clock, version 3: ESP32-S3-WROOM-1-N16R8 + MAX98357A. ESPHome 2026.9.1 (components/speaker is a copy of its
+# speaker component: another ESPHome version needs it copied again, components/speaker/README.md).
 #
-#   Build:   esphome run firmware/athan.yaml        (first flash over USB-C: it also writes partitions.csv)
-#   Docs:    README.md (owners), DEVELOPER.md (internals), HARDWARE.md (board, prototype checklist), CLAUDE.md (agents)
+#   Build:   esphome run firmware/athan.yaml        (first flash over the J6 header, as USB-C is power only; it also
+#                                                    writes partitions.csv)
+#   Docs:    README.md (owners), DEVELOPER.md (internals), firmware_rules.md (the rules the code depends on),
+#            HARDWARE.md (board, prototype checklist)
 #
 # Before the first build, put the two menu tones in firmware/sounds/ (README "Building"):
 #   sounds/click.wav   (menu click)      sounds/volume.wav  (volume tone): mono 16-bit 44.1 kHz WAV (README 2.2)
@@ -58,8 +61,8 @@ substitutions:
   # The screen at night (Screen at Night: Dim) and when a key or the athan lights a dark one: this share of full
   # brightness (the TFT's backlight, the OLED's contrast). The owner's Brightness, if lower but not 0, wins.
   screen_dim_pct: "10"
-  # A dark screen (Brightness 0 %, or Screen at Night: Dark) lit by a key stays lit (dim) this many seconds after the
-  # last press, counting down in a corner; also after the athan or the Pre-Fajr Tawashih ends. Keep it at least the
+  # A dark screen (Brightness 0 %, or Screen at Night: Turned off) lit by a key stays lit (dim) this many seconds after
+  # the last press, counting down in a corner; also after the athan or the Pre-Fajr Tawashih ends. Keep it at least the
   # menu's 60 s, so the menu never goes dark while open.
   screen_wake_s: "120"
 
@@ -87,6 +90,22 @@ esphome:
       - lambda: |-
           // First boot: Fajr volume starts equal to the main volume.
           if (id(fajr_volume_level) < 0) id(fajr_volume_level) = id(volume_level);
+          // A restart while Pre-Fajr had the relay on: its timer is gone, and the restored relay would stay on all day.
+          if (id(relay_by_prefajr)) {
+            id(relay_by_prefajr) = false;
+            id(external_relay).turn_off();
+            ESP_LOGI("prefajr", "Relay off: the clock restarted while Pre-Fajr had it on");
+          }
+          // A window end this firmware does not offer (an earlier one let the tick start at Maghrib or Isha and end at
+          // Fajr or Dhuhr) becomes the first hour at or after that prayer: the same ticks (day_window.h).
+          {
+            using athan::WindowKind;
+            const uint8_t *ph = id(prayer_hours), *pm = id(prayer_minutes);
+            id(htick_start_hour) = athan::window_sanitize(WindowKind::TICK, false, id(htick_start_hour), ph, pm);
+            id(htick_end_hour) = athan::window_sanitize(WindowKind::TICK, true, id(htick_end_hour), ph, pm);
+            id(night_from_hour) = athan::window_sanitize(WindowKind::NIGHT, false, id(night_from_hour), ph, pm);
+            id(night_until_hour) = athan::window_sanitize(WindowKind::NIGHT, true, id(night_until_hour), ph, pm);
+          }
           id(athan_core).set_location(id(selected_location_key));
           // Previews set their own volume before they start: Fajr volume for the Fajr and Tawashih lists.
           id(athan_core).set_preview_volume_callback([](int list) {
@@ -95,6 +114,13 @@ esphome:
           });
           // Stopping a preview (browsing to the next one, the /audio page's Stop) silences at once (hard_mute).
           id(athan_core).set_hard_stop_callback([]() { id(hard_mute).execute(); });
+          // The /audio page's Stop: what Up, Select or Down stop while a sound plays (ui_key), the radio plays on.
+          id(athan_core).set_stop_sound_callback([]() {
+            const bool sound_on = id(athan_playing) || id(prefajr_playing) || id(athan_core).slot_playing() ||
+                                  id(athan_core).preview_list() >= 0;
+            if (sound_on) id(stop_sound).execute();
+            return sound_on;
+          });
       - script.execute: menu_setup
       # Wi-Fi reset: power up holding Select (the centre push). Overwrites the saved network, so setup mode starts
       # (Bluetooth, then the hotspot).
@@ -630,9 +656,11 @@ select:
     name: "Screen at Night"
     id: web_screen_night
     icon: "mdi:weather-night"
-    # Off: as by day. Dim: ${screen_dim_pct} % from Night From to Night Until. Dark: off then; a key press lights it
-    # for 30 s (that press does nothing else), the athan and the Pre-Fajr Tawashih while they play.
-    options: ["Off", "Dim", "Dark"]
+    # Normal: the night changes nothing, the screen is as by day (Brightness). Dim: ${screen_dim_pct} % from Night From
+    # to Night Until. Turned off: dark then; a key press lights it dim for ${screen_wake_s} s (that press does nothing
+    # else), the athan and the Pre-Fajr Tawashih while they play. Saved as screen_night 0, 1, 2 (day_window.h:
+    # NIGHT_NORMAL, NIGHT_DIM, NIGHT_OFF).
+    options: ["Normal (same as day)", "Dim", "Turned off"]
     set_action:
       - lambda: |-
           auto idx = id(web_screen_night).index_of(x.c_str(), x.size());
@@ -642,42 +670,43 @@ select:
           id(screen_refresh).execute();
     web_server: {sorting_group_id: grp_screen, sorting_weight: 2}
   # The hourly tick's and the screen's night windows, [start, end): each end an hour, or a prayer that moves with the
-  # times every day (start: Maghrib or Isha, end: Fajr or Dhuhr). The options' order is the menu's
-  # (components/athan/day_window.h: window_value / window_choice).
+  # times every day. The tick's day window starts at dawn (Fajr, Dhuhr) and ends at dusk (Maghrib, Isha); the night
+  # the other way round. The options' order is the menu's (components/athan/day_window.h: window_value /
+  # window_choice).
   - platform: template
     name: "Tick Window Start"
     id: web_htick_start
     icon: "mdi:clock-start"
-    options: &window_from ["Maghrib", "Isha", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
+    options: &dawn_ends ["Fajr", "Dhuhr", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
     set_action:
       - lambda: |-
           auto idx = id(web_htick_start).index_of(x.c_str(), x.size());
           if (!idx.has_value()) return;
-          id(htick_start_hour) = athan::window_value(false, (int) idx.value());
+          id(htick_start_hour) = athan::window_value(athan::WindowKind::TICK, false, (int) idx.value());
           id(web_htick_start).publish_state(idx.value());
     web_server: {sorting_group_id: grp_athan, sorting_weight: 8}
   - platform: template
     name: "Tick Window End"
     id: web_htick_end
     icon: "mdi:clock-end"
-    options: &window_until ["Fajr", "Dhuhr", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
+    options: &dusk_ends ["Maghrib", "Isha", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00", "07:00", "08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00", "22:00", "23:00"]
     set_action:
       - lambda: |-
           auto idx = id(web_htick_end).index_of(x.c_str(), x.size());
           if (!idx.has_value()) return;
-          id(htick_end_hour) = athan::window_value(true, (int) idx.value());
+          id(htick_end_hour) = athan::window_value(athan::WindowKind::TICK, true, (int) idx.value());
           id(web_htick_end).publish_state(idx.value());
     web_server: {sorting_group_id: grp_athan, sorting_weight: 9}
   - platform: template
     name: "Night From"
     id: web_night_from
     icon: "mdi:weather-night"
-    options: *window_from
+    options: *dusk_ends
     set_action:
       - lambda: |-
           auto idx = id(web_night_from).index_of(x.c_str(), x.size());
           if (!idx.has_value()) return;
-          id(night_from_hour) = athan::window_value(false, (int) idx.value());
+          id(night_from_hour) = athan::window_value(athan::WindowKind::NIGHT, false, (int) idx.value());
           id(web_night_from).publish_state(idx.value());
           id(screen_refresh).execute();
     web_server: {sorting_group_id: grp_screen, sorting_weight: 3}
@@ -685,12 +714,12 @@ select:
     name: "Night Until"
     id: web_night_until
     icon: "mdi:weather-sunset-up"
-    options: *window_until
+    options: *dawn_ends
     set_action:
       - lambda: |-
           auto idx = id(web_night_until).index_of(x.c_str(), x.size());
           if (!idx.has_value()) return;
-          id(night_until_hour) = athan::window_value(true, (int) idx.value());
+          id(night_until_hour) = athan::window_value(athan::WindowKind::NIGHT, true, (int) idx.value());
           id(web_night_until).publish_state(idx.value());
           id(screen_refresh).execute();
     web_server: {sorting_group_id: grp_screen, sorting_weight: 4}
@@ -811,6 +840,7 @@ text_sensor:
   - {platform: template, name: "Next Prayer", id: web_next_prayer, icon: "mdi:clock-outline", update_interval: never, web_server: {sorting_group_id: grp_now, sorting_weight: 3}}
   - {platform: template, name: "Today's Times", id: web_today_times, icon: "mdi:calendar-today", update_interval: never, web_server: {sorting_group_id: grp_now, sorting_weight: 4}}
   - {platform: template, name: "Tick Window", id: web_htick_window, icon: "mdi:bell-outline", update_interval: never, web_server: {sorting_group_id: grp_athan, sorting_weight: 10}}
+  - {platform: template, name: "Night Window", id: web_night_window, icon: "mdi:weather-night", update_interval: never, web_server: {sorting_group_id: grp_screen, sorting_weight: 5}}
   - {platform: template, name: "Selected Sounds", id: web_sounds, icon: "mdi:music-box-multiple", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 1}}
   - {platform: template, name: "Sound Status", id: web_sound_status, icon: "mdi:information-outline", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 2}}
   - {platform: template, name: "Change Sounds At", id: web_audio_page, icon: "mdi:web", update_interval: never, web_server: {sorting_group_id: grp_sounds, sorting_weight: 3}}
@@ -841,7 +871,7 @@ time:
       - script.execute: update_display
     on_time:
       # Hourly tick at HH:00 inside the window [start, end) (start == end: all day). An end may be a prayer
-      # (day_window.h: Maghrib or Isha to Fajr or Dhuhr), at today's time.
+      # (day_window.h: Fajr or Dhuhr to Maghrib or Isha), at today's time.
       - minutes: 0
         seconds: 0
         then:
@@ -849,8 +879,10 @@ time:
               const int h = id(sntp_time).now().hour;
               const bool in_window = athan::in_window(id(htick_start_hour), id(htick_end_hour), h * 60,
                                                       id(prayer_hours), id(prayer_minutes));
-              if (id(htick_enabled) && in_window && !id(athan_playing) && !id(athan_core).slot_playing() &&
-                  id(athan_core).preview_list() < 0)
+              // Not over the athan, the Pre-Fajr Tawashih (Random streams it: then no stored sound plays), another
+              // stored sound or a preview: it would set the normal volume over the Fajr one.
+              if (id(htick_enabled) && in_window && !id(athan_playing) && !id(prefajr_playing) &&
+                  !id(athan_core).slot_playing() && id(athan_core).preview_list() < 0)
                 id(play_tick).execute();
       - seconds: 0
         then:
@@ -872,7 +904,7 @@ globals:
   - {id: selected_location_key, type: std::string, initial_value: '"davis"', restore_value: true, max_restore_data_length: 31}
   - {id: radio_subscribed, type: "bool[10]", initial_value: "{true, true, true, true, true, true, true, true, true, true}", restore_value: true}
   - {id: radio_slot, type: int, initial_value: "0", restore_value: true}
-  # The screen (script screen_refresh): Brightness 10-100 %, Screen at Night 0 Off / 1 Dim / 2 Dark, night hours
+  # The screen (script screen_refresh): Brightness 10-100 %, Screen at Night 0 Normal / 1 Dim / 2 Turned off, night hours
   - {id: screen_brightness, type: int, initial_value: "100", restore_value: true}
   - {id: screen_night, type: int, initial_value: "0", restore_value: true}
   - {id: night_from_hour, type: int, initial_value: "22", restore_value: true}
@@ -901,8 +933,15 @@ globals:
   - {id: next_prayer_minute, type: int, initial_value: "0", restore_value: true}
   - {id: prefajr_next_hour, type: int, initial_value: "0"}
   - {id: prefajr_next_minute, type: int, initial_value: "0"}
-  - {id: prefajr_triggered, type: bool, initial_value: "false"}
+  # What was already called, by a day number that counts up by one a day (across New Year too): the prayer as
+  # day * 8 + its index, the Pre-Fajr Tawashih as the day of its Fajr. A reload of the times in a prayer's minute (Refresh,
+  # a year stored) or a restart finds that prayer again; these keep it from being called twice. Saved: a restart too.
+  - {id: prayer_called, type: int, initial_value: "0", restore_value: true}
+  - {id: prefajr_called, type: int, initial_value: "0", restore_value: true}
   - {id: prefajr_playing, type: bool, initial_value: "false"}   # the Pre-Fajr Tawashih sound is playing
+  # The relay is on because of Pre-Fajr, its timer running (the relay itself restores its state after a restart, the
+  # timer does not): on_boot switches it off.
+  - {id: relay_by_prefajr, type: bool, initial_value: "false", restore_value: true}
   - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing, 5 check failed
   - {id: screen_woken_ms, type: uint32_t, initial_value: "0"}  # last key press: a dark screen stays lit after it
   - {id: screen_pct_applied, type: int, initial_value: "-1"}  # the level the display has now (0 = dark, -1 = not set)
@@ -969,8 +1008,8 @@ script:
           id(apply_playing_volume).execute();
           id(show_toast).execute(fajr ? 2 : 1);
           // A short tone at the new level when nothing plays; over a sound, that sound is the feedback.
-          if (!id(athan_playing) && !id(athan_core).slot_playing() && id(athan_core).preview_list() < 0 &&
-              id(athan_core).radio_active() < 0)
+          if (!id(athan_playing) && !id(prefajr_playing) && !id(athan_core).slot_playing() &&
+              id(athan_core).preview_list() < 0 && id(athan_core).radio_active() < 0)
             id(play_tone_volume).execute();
   # Pop-up over the clock for 2 s (toast_kind): the volume a Left/Right press set, the relay a Down press switched.
   - id: show_toast
@@ -1010,13 +1049,17 @@ script:
             - script.execute: amp_wake
             - lambda: 'id(athan_core).play_tone(id(tone_volume));'
   # Fajr volume changed (menu or web slider): play the volume tone at the new Fajr level, then go back to the volume
-  # of whatever is playing. While the Fajr athan or the Pre-Fajr Tawashih plays, it just takes the new level.
+  # of whatever is playing. While something plays (an athan, the tawashih, a stored sound, the radio, a preview), only
+  # the volume of what plays is applied: the player has one volume, so the tone at the Fajr level would take the radio
+  # or a normal preview to that level too.
   - id: fajr_volume_feedback
     mode: restart
     then:
       - if:
           condition:
-            lambda: 'return id(athan_playing) || id(prefajr_playing) || id(athan_core).slot_playing();'
+            lambda: |-
+              return id(athan_playing) || id(prefajr_playing) || id(athan_core).slot_playing() ||
+                     id(athan_core).radio_active() >= 0 || id(athan_core).preview_list() >= 0;
           then:
             - script.execute: apply_playing_volume
           else:
@@ -1146,7 +1189,7 @@ script:
           using athan::MenuKey;
           const MenuKey k = static_cast<MenuKey>(button);
           id(ui_last_activity) = millis();
-          // A dark screen (Brightness 0 %, Screen at Night: Dark): this press only lights it, dim, for
+          // A dark screen (Brightness 0 %, Screen at Night: Turned off): this press only lights it, dim, for
           // ${screen_wake_s} s after the last press (screen_refresh counts them down on the screen).
           const bool dark = id(screen_pct_applied) == 0;
           id(screen_woken_ms) = millis();
@@ -1198,8 +1241,8 @@ script:
           id(update_display).execute();
 
   # ---------------- screen ----------------
-  # The screen's level: Brightness by day (0 % = dark); from Night From to Night Until (Screen at Night) the same,
-  # dim (${screen_dim_pct} %), or dark. A screen that would be dark is lit dim for ${screen_wake_s} s after a key press
+  # The screen's level: Brightness by day (0 % = dark); from Night From to Night Until (Screen at Night) the same
+  # (Normal), dim (${screen_dim_pct} %), or dark (Turned off). A screen that would be dark is lit dim for ${screen_wake_s} s after a key press
   # (ui_key: the press that lights it does nothing else), and while the athan or the Pre-Fajr Tawashih plays (the
   # ${screen_wake_s} s start when it ends); screen_dark_in counts those seconds down, and the display files show them
   # in a corner. Setting Brightness to 0 % darkens it at once (screen_force_dark) until the next key. Runs every second
@@ -1210,16 +1253,19 @@ script:
       - lambda: |-
           const uint32_t wake_ms = ${screen_wake_s} * 1000UL;
           const bool sound = id(athan_playing) || id(prefajr_playing);
-          if (sound) id(screen_woken_ms) = millis();   // the wait to dark starts when it ends
+          if (sound) {
+            id(screen_woken_ms) = millis();   // the wait to dark starts when it ends
+            id(screen_force_dark) = false;    // Brightness set to 0 %: the athan lights it too, as after a restart
+          }
           const int bright = std::max(0, std::min(100, id(screen_brightness)));
           const int dim = bright > 0 ? std::min(bright, ${screen_dim_pct}) : ${screen_dim_pct};
           auto now = id(sntp_time).now();
-          // the night's ends may be prayers (day_window.h: Maghrib or Isha to Fajr or Dhuhr), at today's times
-          const bool night = id(screen_night) != 0 && now.is_valid() &&
+          // the night's ends may be prayers (day_window.h: Maghrib or Isha to Fajr or Dhuhr), at today's times.
+          // Screen at Night: Normal never looks at the window: the screen is exactly as by day (night_level()).
+          const bool night = id(screen_night) != athan::NIGHT_NORMAL && now.is_valid() &&
                              athan::in_window(id(night_from_hour), id(night_until_hour), now.hour * 60 + now.minute,
                                               id(prayer_hours), id(prayer_minutes));
-          int pct = bright;
-          if (night) pct = id(screen_night) == 2 ? 0 : id(screen_night) == 1 ? std::min(bright, dim) : bright;
+          int pct = night ? athan::night_level(id(screen_night), bright, dim) : bright;
           int dark_in = -1;
           if (pct == 0 && !id(screen_force_dark)) {
             const uint32_t since = millis() - id(screen_woken_ms);
@@ -1259,8 +1305,9 @@ script:
             else snprintf(b, sizeof(b), "%02d:00", h);
             return b;
           };
-          // The tick's and the night's window ends (day_window.h): From offers Maghrib, Isha, then the hours; Until
-          // offers Fajr, Dhuhr, then the hours. A prayer end moves with the prayer times every day.
+          // The tick's and the night's window ends (day_window.h): the night from Maghrib or Isha until Fajr or Dhuhr,
+          // the tick's day window from Fajr or Dhuhr until Maghrib or Isha, each end also any hour. A prayer end moves
+          // with the prayer times every day.
           auto end_text = [hour_text](int v) -> std::string {
             const char *pn = athan::window_prayer_name(v);
             return pn ? std::string(pn) : hour_text(v);
@@ -1307,15 +1354,17 @@ script:
           }
 
           // Sound rows: "Off" (tick only), "Random" (tawashih only, first: one list entry a day, streamed, nothing
-          // stored), "Custom" (an uploaded sound), then the suggested list. They open on the sound in use; a pause on
-          // an item plays a preview (from flash for the stored one). Select on another entry downloads it (its
-          // progress shows under it, the check mark moves when it is stored).
+          // stored), "Custom" (an uploaded sound), then the suggested list, numbered ("2. Abdul Basit"), as long as
+          // docs/audio/catalog.json has it. They open on the sound in use; a pause on an item plays a preview (from
+          // flash for the stored one). Select on another entry downloads it (its progress shows under it, the check
+          // mark moves when it is stored).
           auto sound_row = [](const char *title, int slot) {
             const bool off = slot == 3;
+            // Where `item` sits in the row (-1: not there). menu_index() works it out directly, and menu_item()
+            // confirms it: the menu asks on every draw, and a list can have hundreds of entries.
             auto pos_of = [=](int item) {
-              for (int p = 0; p < id(athan_core).menu_size(slot, off); p++)
-                if (id(athan_core).menu_item(slot, off, p) == item) return p;
-              return -1;
+              const int p = id(athan_core).menu_index(slot, off, item);
+              return id(athan_core).menu_item(slot, off, p) == item ? p : -1;
             };
             MenuRow r;
             r.title = title;
@@ -1327,7 +1376,7 @@ script:
               if (it == athan::MENU_OFF) return "Off";
               if (it == athan::MENU_RANDOM) return "Random";
               if (it == athan::MENU_CUSTOM) return "Custom";
-              return id(athan_core).catalog_name(slot, it);
+              return athan::numbered(it, id(athan_core).catalog_name(slot, it));
             };
             r.active = [=]() {
               if (off && !id(htick_enabled)) return pos_of(athan::MENU_OFF);
@@ -1434,9 +1483,10 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Tick From / Tick Until: the hourly tick's window [from, until); equal = all day. From: Maghrib, Isha or an
-          // hour; Until: Fajr, Dhuhr or an hour. Like the other choices: Left/Right browse, Select takes the one shown
-          // (the check mark), and the line under it shows the window it would make.
+          // Tick From / Tick Until: the hourly tick's window [from, until); equal = all day. By day: From Fajr, Dhuhr or
+          // an hour; Until Maghrib, Isha or an hour (the night's the other way round). Like the other choices:
+          // Left/Right browse, Select takes the one shown (the check mark), and the line under it shows the window it
+          // would make.
           for (int w = 0; w < 2; w++) {
             MenuRow r;
             r.title = w == 0 ? "Tick From" : "Tick Until";
@@ -1445,14 +1495,14 @@ script:
             r.symbol = athan::sym::SCHEDULE;
             r.kind = RowKind::CHOICE;
             r.count = []() { return athan::WINDOW_CHOICES; };
-            r.label = [end_text, w](int i) { return end_text(athan::window_value(w == 1, i)); };
-            r.active = [w]() { return athan::window_choice(w == 1, w == 0 ? id(htick_start_hour) : id(htick_end_hour)); };
+            r.label = [end_text, w](int i) { return end_text(athan::window_value(athan::WindowKind::TICK, w == 1, i)); };
+            r.active = [w]() { return athan::window_choice(athan::WindowKind::TICK, w == 1, w == 0 ? id(htick_start_hour) : id(htick_end_hour)); };
             r.caption = [window_caption, w](int i) {
-              const int v = athan::window_value(w == 1, std::max(0, i));
+              const int v = athan::window_value(athan::WindowKind::TICK, w == 1, std::max(0, i));
               return w == 0 ? window_caption(v, id(htick_end_hour), false) : window_caption(id(htick_start_hour), v, true);
             };
             r.apply = [w](int i) {
-              (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = athan::window_value(w == 1, i);
+              (w == 0 ? id(htick_start_hour) : id(htick_end_hour)) = athan::window_value(athan::WindowKind::TICK, w == 1, i);
               return false;
             };
             menu.add_row(std::move(r));
@@ -1469,7 +1519,7 @@ script:
             r.icon = athan::RowIcon::SPEAKER;   // which athans sound
             r.symbol = athan::sym::TOGGLE_ON;
             r.kind = RowKind::ACTION;
-            r.style = athan::RowStyle::TOGGLES;   // all five at once, the ones off struck through
+            r.style = athan::RowStyle::TOGGLES;   // all five at once, each with a box (filled when on)
             r.short_label = [](int i) { return std::string(shorts[i]); };
             r.on = [](int i) { return id(athan_enabled)[prayer_of[i]]; };
             r.count = []() { return 5; };
@@ -1481,7 +1531,8 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Volume, Fajr Volume: 0-100 % in steps of 10, at once (with a tone at the new level when nothing plays).
+          // Volume, Fajr Volume: 0-100 % in steps of 10, at once, with a tone at the new level (Volume: over the radio
+          // too, at its new level; Fajr Volume: fajr_volume_feedback).
           {
             MenuRow r;
             r.title = "Volume";
@@ -1592,23 +1643,24 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Screen at Night: from Night From to Night Until the screen stays as by day, dims, or goes dark.
+          // Screen at Night: from Night From to Night Until the screen stays as by day (Normal), dims, or is turned
+          // off (dark until a key).
           {
-            static const char *const modes[3] = {"Off", "Dim", "Dark"};
+            static const char *const modes[3] = {"Normal", "Dim", "Turned off"};
             MenuRow r;
             r.title = "Screen at Night";
             r.short_title = "Night";
             r.icon = athan::RowIcon::MOON;
             r.symbol = athan::sym::DARK_MODE;
-            r.style = athan::RowStyle::CHOICES;   // Off Dim Dark, side by side when they fit
+            r.style = athan::RowStyle::CHOICES;   // Normal Dim Turned off, side by side when they fit
             r.count = []() { return 3; };
             r.label = [](int i) { return std::string(modes[i]); };
             r.active = []() { return std::max(0, std::min(2, id(screen_night))); };
             r.caption = [end_text](int i) -> std::string {
-              if (i <= 0) return "As by day";
+              if (i <= athan::NIGHT_NORMAL) return "Same as by day";
               const int a = id(night_from_hour), b = id(night_until_hour);
               const bool all = athan::window_length(a, b, id(prayer_hours), id(prayer_minutes)) == 1440;
-              return std::string(modes[i]) + " " + (all ? std::string("all day") : end_text(a) + " to " + end_text(b));
+              return all ? std::string("All day") : end_text(a) + " to " + end_text(b);   // when it is dim or off
             };
             r.apply = [](int i) {
               id(screen_night) = i;
@@ -1618,8 +1670,8 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Night From / Night Until: the screen's night [from, until), like the tick hours (the same choices: From
-          // Maghrib, Isha or an hour; Until Fajr, Dhuhr or an hour; Select takes the one shown); equal = all day.
+          // Night From / Night Until: the screen's night [from, until), like the tick hours but the other way round:
+          // From Maghrib, Isha or an hour; Until Fajr, Dhuhr or an hour; Select takes the one shown; equal = all day.
           for (int w = 0; w < 2; w++) {
             MenuRow r;
             r.title = w == 0 ? "Night From" : "Night Until";
@@ -1628,14 +1680,14 @@ script:
             r.symbol = athan::sym::BEDTIME;
             r.kind = RowKind::CHOICE;
             r.count = []() { return athan::WINDOW_CHOICES; };
-            r.label = [end_text, w](int i) { return end_text(athan::window_value(w == 1, i)); };
-            r.active = [w]() { return athan::window_choice(w == 1, w == 0 ? id(night_from_hour) : id(night_until_hour)); };
+            r.label = [end_text, w](int i) { return end_text(athan::window_value(athan::WindowKind::NIGHT, w == 1, i)); };
+            r.active = [w]() { return athan::window_choice(athan::WindowKind::NIGHT, w == 1, w == 0 ? id(night_from_hour) : id(night_until_hour)); };
             r.caption = [window_caption, w](int i) {
-              const int v = athan::window_value(w == 1, std::max(0, i));
+              const int v = athan::window_value(athan::WindowKind::NIGHT, w == 1, std::max(0, i));
               return w == 0 ? window_caption(v, id(night_until_hour), false) : window_caption(id(night_from_hour), v, true);
             };
             r.apply = [w](int i) {
-              (w == 0 ? id(night_from_hour) : id(night_until_hour)) = athan::window_value(w == 1, i);
+              (w == 0 ? id(night_from_hour) : id(night_until_hour)) = athan::window_value(athan::WindowKind::NIGHT, w == 1, i);
               id(screen_refresh).execute();
               return false;
             };
@@ -1696,7 +1748,7 @@ script:
             menu.add_row(std::move(r));
           }
 
-          // Info: Left/Right page through it, Select closes.
+          // Info: one page (the caption), Select closes.
           {
             MenuRow r;
             r.title = "Info";
@@ -1789,12 +1841,14 @@ script:
     mode: single
     then:
       - lambda: |-
+          // The radio to bring back afterwards: the one playing, or the one a menu preview replaced (closing the menu
+          // brings that back only when no athan plays, and the preview has already taken the radio's place).
+          int r = id(athan_core).radio_active();
+          if (r < 0) r = id(menu_radio_resume);
+          id(radio_resume) = r;
           id(athan_playing) = true;
           id(athan_core).menu().close();   // the athan screen shows, and Up/Down/Select stop it
-          int r = id(athan_core).radio_active();
-          id(radio_resume) = r;
-          if (r >= 0) id(athan_core).radio_stop();
-          else id(athan_core).stop_media();   // a preview, if any
+          id(athan_core).stop_media();     // the radio or a preview, if any
           id(amp_wake).execute();
           id(led_output).turn_on();
       - if:
@@ -1807,7 +1861,12 @@ script:
       - delay: 100ms
       - if:
           condition:
-            lambda: 'return id(athan_core).play_slot(id(current_athan_prayer_index) == 0 ? 1 : 0);'
+            lambda: |-
+              // Fajr plays the Fajr athan, or the regular one while the Fajr slot is empty (being rewritten, or a power
+              // cut while writing): the call without its Fajr line rather than three tones. Never the other way round:
+              // the Fajr athan's "as-salatu khayrun min an-nawm" belongs to Fajr only.
+              const bool fajr = id(current_athan_prayer_index) == 0;
+              return id(athan_core).play_slot(fajr ? 1 : 0) || (fajr && id(athan_core).play_slot(0));
           else:
             # Empty slot (new device offline, or a power cut while writing): mark the time with three tones.
             - repeat:
@@ -1832,22 +1891,36 @@ script:
           }
           id(update_display).execute();
 
+  # What was called (prayer_called, prefajr_called) is saved at once, not at ESPHome's next write (every 60 s): a crash
+  # or a watchdog reset in that time keeps the clock's time and would call it again. A few writes a day.
+  - id: save_called
+    mode: restart
+    then:
+      - delay: 1500ms   # a global hands its new value to the preferences within a second
+      - lambda: 'global_preferences->sync();'
+
   # Pre-Fajr Tawashih: relay on, tawashih at the Fajr volume, relay off ${prefajr_relay_min} min after it ends.
   - id: run_prefajr
     mode: single
     then:
       - lambda: |-
           ESP_LOGI("prefajr", "Pre-Fajr Tawashih");
-          id(athan_core).menu().close();   // Up/Down/Select on the clock stop it
+          // The radio to bring back afterwards (as in make_athan). prefajr_playing before closing the menu: closing it
+          // would otherwise start the radio a menu preview replaced, only to stop it again here.
           int r = id(athan_core).radio_active();
+          if (r < 0) r = id(menu_radio_resume);
           id(radio_resume) = r;
-          if (r >= 0) id(athan_core).radio_stop();
+          id(prefajr_playing) = true;
+          id(athan_core).menu().close();   // Up/Down/Select on the clock stop it
+          id(athan_core).stop_media();     // the radio or a preview, if any
           id(amp_wake).execute();
       - switch.turn_on: external_relay
       # Until the tawashih ends, the relay's timer allows for the longest one (the 7 min wait below): a tawashih
-      # stopped by a key or the web Stop (which stops this script) must not leave the relay on.
-      - lambda: 'id(prefajr_relay_off).execute((${prefajr_relay_min} + 7) * 60000);'
-      - lambda: 'id(prefajr_playing) = true;'
+      # stopped by a key or the web Stop (which stops this script) must not leave the relay on. A restart loses the
+      # timer: relay_by_prefajr (saved) switches the relay off at boot.
+      - lambda: |-
+          id(relay_by_prefajr) = true;
+          id(prefajr_relay_off).execute((${prefajr_relay_min} + 7) * 60000);
       - script.execute: apply_fajr_volume
       - delay: 100ms
       - lambda: |-
@@ -1877,6 +1950,7 @@ script:
     then:
       - delay: !lambda 'return after_ms;'
       - switch.turn_off: external_relay
+      - lambda: 'id(relay_by_prefajr) = false;'
 
   # Hourly tick: plays over the radio with the radio lowered (mixer ducking).
   - id: play_tick
@@ -1937,7 +2011,8 @@ script:
           id(compute_coming_prayer).execute();
           id(update_display).execute();
 
-  # Next prayer at or after now (equal minute counts: used after a reload, the athan script is mode: single).
+  # Next prayer at or after now (equal minute counts: a reload in a prayer's minute finds it again, and the 1 s interval
+  # does not call it twice: prayer_called).
   - id: compute_coming_prayer
     mode: restart
     then:
@@ -1957,7 +2032,6 @@ script:
             if (t < 0) t += 1440;
             id(prefajr_next_hour) = t / 60;
             id(prefajr_next_minute) = t % 60;
-            id(prefajr_triggered) = false;
           }
 
   # After a prayer time is reached: the next one strictly later.
@@ -1980,7 +2054,6 @@ script:
             if (t < 0) t += 1440;
             id(prefajr_next_hour) = t / 60;
             id(prefajr_next_minute) = t % 60;
-            id(prefajr_triggered) = false;
           }
 
   # ---------------- web / Home Assistant entities (publish on change) ----------------
@@ -1988,8 +2061,8 @@ script:
     mode: restart
     then:
       - lambda: |-
-          // Runs every second: values are formatted into buf and compared in place, so an unchanged one (nearly all
-          // of them, nearly always) costs no heap allocation. Only a change is published.
+          // Runs every second: values are formatted into buf and compared in place, and only a change is published.
+          // The component's status lines and sound names are copied each second (short strings, under its lock).
           char buf[320];
           auto pub = [](text_sensor::TextSensor *t, const char *s) { if (t->state != s) t->publish_state(s); };
           {
@@ -2027,16 +2100,18 @@ script:
           }
           if (!id(web_volume).has_state() || (int) id(web_volume).state != id(volume_level)) id(web_volume).publish_state(id(volume_level));
           if (id(fajr_volume_level) >= 0 && (!id(web_fajr_volume).has_state() || (int) id(web_fajr_volume).state != id(fajr_volume_level))) id(web_fajr_volume).publish_state(id(fajr_volume_level));
-          // The windows' selects (day_window.h: a prayer end, or an hour)
-          auto sync_window = [](esphome::select::Select *s, bool until, int v) {
-            const size_t want = (size_t) athan::window_choice(until, v);
+          // The windows' selects (day_window.h: a prayer end, or an hour; each window offers its own prayers)
+          auto sync_window = [](esphome::select::Select *s, athan::WindowKind k, bool until, int v) {
+            const int choice = athan::window_choice(k, until, v);
+            if (choice < 0) return;  // an end this window does not offer: on_boot turned it into an hour already
+            const size_t want = (size_t) choice;
             auto cur = s->active_index();
             if (!s->has_state() || !cur.has_value() || cur.value() != want) s->publish_state(want);
           };
-          sync_window(id(web_htick_start), false, id(htick_start_hour));
-          sync_window(id(web_htick_end), true, id(htick_end_hour));
-          sync_window(id(web_night_from), false, id(night_from_hour));
-          sync_window(id(web_night_until), true, id(night_until_hour));
+          sync_window(id(web_htick_start), athan::WindowKind::TICK, false, id(htick_start_hour));
+          sync_window(id(web_htick_end), athan::WindowKind::TICK, true, id(htick_end_hour));
+          sync_window(id(web_night_from), athan::WindowKind::NIGHT, false, id(night_from_hour));
+          sync_window(id(web_night_until), athan::WindowKind::NIGHT, true, id(night_until_hour));
           if (!id(web_screen_brightness).has_state() || (int) id(web_screen_brightness).state != id(screen_brightness)) id(web_screen_brightness).publish_state(id(screen_brightness));
           {
             auto cur = id(web_screen_night).active_index();
@@ -2053,18 +2128,23 @@ script:
           };
           char t1[12], t2[12];
           {
-            // "Isha to Fajr (10 h)", "07:00 to 22:00 (15 h)": an end is a prayer (day_window.h) or an hour
-            const int s = id(htick_start_hour), e = id(htick_end_hour);
+            // The windows as the web page shows them, under their selects: "Fajr to Isha (14 h)", "07:00 to 22:00
+            // (15 h)", "all day", or off. An end is a prayer (day_window.h) or an hour.
             auto end_text = [&](char *out, size_t n, int v) {
               const char *pn = athan::window_prayer_name(v);
               if (pn) snprintf(out, n, "%s", pn);
               else fmt_time(out, n, v, 0);
             };
-            const int len = athan::window_length(s, e, id(prayer_hours), id(prayer_minutes));
-            if (!id(htick_enabled)) snprintf(buf, sizeof(buf), "tick off");
-            else if (len == 1440) snprintf(buf, sizeof(buf), "all day");
-            else { end_text(t1, sizeof(t1), s); end_text(t2, sizeof(t2), e); snprintf(buf, sizeof(buf), "%s to %s (%d h)", t1, t2, (len + 30) / 60); }
+            auto window_text = [&](bool on, const char *off, int s, int e) {
+              const int len = athan::window_length(s, e, id(prayer_hours), id(prayer_minutes));
+              if (!on) snprintf(buf, sizeof(buf), "%s", off);
+              else if (len == 1440) snprintf(buf, sizeof(buf), "all day");
+              else { end_text(t1, sizeof(t1), s); end_text(t2, sizeof(t2), e); snprintf(buf, sizeof(buf), "%s to %s (%d h)", t1, t2, (len + 30) / 60); }
+            };
+            window_text(id(htick_enabled), "tick off", id(htick_start_hour), id(htick_end_hour));
             pub(id(web_htick_window), buf);
+            window_text(id(screen_night) != athan::NIGHT_NORMAL, "same as day", id(night_from_hour), id(night_until_hour));
+            pub(id(web_night_window), buf);
           }
           static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
           auto now = id(sntp_time).now();
@@ -2092,7 +2172,7 @@ script:
             int pos = 0;
             for (int i = 0; i < 4 && pos < (int) sizeof(buf) - 1; i++) {
               const std::string l = (i == 2 && id(athan_core).tawashih_random()) ? std::string("Random")
-                                                                                  : id(athan_core).slot_label(i);
+                                                                                  : id(athan_core).sound_name(i);
               pos += snprintf(buf + pos, sizeof(buf) - pos, "%s%s: %s", i ? "; " : "", slot_names[i],
                               l.empty() ? "none" : l.c_str());
             }
@@ -2147,22 +2227,55 @@ interval:
           int cur = now.hour * 60 + now.minute;
           int next = id(next_prayer_hour) * 60 + id(next_prayer_minute);
           int isha = id(prayer_hours)[6] * 60 + id(prayer_minutes)[6];
-          // Reached the next prayer (after Isha the next one is tomorrow's Fajr: wait until midnight passes).
+          const int y = now.year - 1;
+          const int day = 365 * now.year + y / 4 - y / 100 + y / 400 + now.day_of_year;   // +1 a day, across New Year too
+          // Reached the next prayer (after Isha the next one is tomorrow's Fajr: wait until midnight passes). Called
+          // once: a reload of the times in its minute, or a restart, finds the same prayer again (prayer_called).
           if (cur >= next && (id(next_prayer_index) == 6 || cur < isha)) {
             int pi = id(next_prayer_index);
             bool main_prayer = (pi != 1 && pi != 2);
-            if (main_prayer && id(athan_enabled)[pi]) {
+            const bool again = id(prayer_called) == day * 8 + pi;
+            if (!again) {
+              id(prayer_called) = day * 8 + pi;
+              id(save_called).execute();
+            }
+            if (main_prayer && id(athan_enabled)[pi] && !again) {
               id(current_athan_prayer_index) = pi;
               id(make_athan).execute();
             }
-            ESP_LOGI("prayer", "Prayer time reached: %d", pi);
+            ESP_LOGI("prayer", "Prayer time reached: %d%s", pi, again ? " (called already)" : "");
             id(jump_to_next_prayer).execute();
             id(update_display).execute();
           }
-          if (id(prefajr_enabled) && !id(prefajr_triggered) && id(next_prayer_index) == 0 &&
-              now.hour == id(prefajr_next_hour) && now.minute == id(prefajr_next_minute)) {
-            id(prefajr_triggered) = true;
-            id(run_prefajr).execute();
+          // Pre-Fajr Tawashih: in its minute, or up to 5 min late (a minute the loop missed, a clock that jumped, an
+          // athan that was still playing), never at or after Fajr; once for each Fajr (prefajr_called: a reload or a
+          // restart in that time). Its minute after Fajr's on the clock: it starts before midnight, for tomorrow's Fajr.
+          if (id(prefajr_enabled) && id(next_prayer_index) == 0 && !id(athan_playing)) {
+            const int pf = id(prefajr_next_hour) * 60 + id(prefajr_next_minute);
+            const int fajr = id(next_prayer_hour) * 60 + id(next_prayer_minute);   // again: the jump above moves it
+            const int late = (cur - pf + 1440) % 1440, span = (fajr - pf + 1440) % 1440;
+            const int fajr_day = cur > fajr ? day + 1 : day;
+            if (late < std::min(5, span) && id(prefajr_called) != fajr_day) {
+              id(prefajr_called) = fajr_day;
+              id(save_called).execute();
+              id(run_prefajr).execute();
+            }
+          }
+  # The web page's Tick Window and Night Window lines follow a change of what they show at once, from anywhere (the web
+  # page, the menu, Home Assistant), instead of at the next second: a fingerprint of their settings is compared every
+  # 100 ms (a few microseconds), and sync_web_state runs when it differs. The prayer times move them only once a day,
+  # which the 1 s sync covers.
+  - interval: 100ms
+    then:
+      - lambda: |-
+          static uint32_t seen = 0;
+          uint32_t h = 2166136261u;
+          for (int v : {(int) id(htick_enabled), id(htick_start_hour), id(htick_end_hour), id(screen_night),
+                        id(night_from_hour), id(night_until_hour), (int) id(clock_12h)})
+            h = (h ^ (uint32_t) v) * 16777619u;
+          if (h != seen) {
+            seen = h;
+            id(sync_web_state).execute();
           }
   - interval: 1s
     then:

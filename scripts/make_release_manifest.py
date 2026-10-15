@@ -17,17 +17,48 @@ Writes, next to the input file:
 Upload both to a new GitHub Release (tag e.g. v3.0.1) and mark it "latest". A release that serves both displays
 carries all four files, both built from the same version. The version must equal
 `project_version` in firmware/athan.yaml at build time, or the devices keep offering the update.
+
+The image is checked first, and nothing is written when a check fails: it must be an ESP32-S3 app image (the OTA
+image, not the factory image a USB flash takes), built for --display (each build checks its own manifest, and its
+URL is inside the image), and the version must appear in it.
 """
 
 import argparse
 import hashlib
 import json
 import pathlib
+import re
 import shutil
 import sys
 
 # File-name suffix per display (athan.yaml display_type): the OLED keeps the original names.
 SUFFIX = {"oled": "", "tft": "-tft"}
+ESP32S3_CHIP_ID = 9  # esp_chip_id_t in the image header (bytes 12-13), as flash_firmware.sh checks it
+
+
+def image_problem(data: bytes, display: str, version: str) -> str:
+    """Why this image must not be released as the --display build of --version, or ""."""
+    if len(data) < 24 or data[0] != 0xE9:
+        return "not an ESP32 app image (the first byte is not 0xE9)"
+    if len(data) > 0x10000 and data[0x8000:0x8002] == b"\xaa\x50":
+        return ("a factory image (bootloader, partition table and app, for a USB flash from 0x0). Release the OTA "
+                "image: firmware.ota.bin, or the dashboard's OTA format")
+    chip = int.from_bytes(data[12:14], "little")
+    if chip != ESP32S3_CHIP_ID:
+        return f"built for another chip (chip id {chip}; the ESP32-S3 is {ESP32S3_CHIP_ID})"
+    # The build's update URL (athan.yaml update_manifest: .../releases/latest/download/manifest<suffix>.json)
+    checks = {m.decode() for m in re.findall(rb"/releases/latest/download/(manifest[A-Za-z0-9_-]*)\.json", data)}
+    want = f"manifest{SUFFIX[display]}"
+    if checks != {want}:
+        built = {f"manifest{s}": d for d, s in SUFFIX.items()}
+        found = ", ".join(f"{c}.json ({built[c]} build)" if c in built else f"{c}.json" for c in sorted(checks))
+        hint = f": use --display {built[next(iter(checks))]}" if len(checks) == 1 and next(iter(checks)) in built else ""
+        return (f"this image updates from {found or 'no release manifest'}, but --display {display} writes "
+                f"{want}.json{hint}")
+    if not re.search(rb"(?<![0-9.])" + re.escape(version.encode()) + rb"(?![0-9.])", data):
+        return (f"version {version} does not appear in the image: build it with project_version \"{version}\" in "
+                "firmware/athan.yaml, or pass the version it was built with")
+    return ""
 
 
 def main() -> int:
@@ -46,8 +77,10 @@ def main() -> int:
         print(f"not found: {a.ota_bin}", file=sys.stderr)
         return 1
     data = a.ota_bin.read_bytes()
-    if data[:1] != b"\xe9":
-        print("warning: this does not look like an ESP32 app image (first byte is not 0xE9)", file=sys.stderr)
+    problem = image_problem(data, a.display, a.version)
+    if problem:
+        print(f"✗ {a.ota_bin}: {problem}. Nothing written.", file=sys.stderr)
+        return 1
     out_dir = a.ota_bin.parent
     asset = out_dir / asset_name
     if asset.resolve() != a.ota_bin.resolve():

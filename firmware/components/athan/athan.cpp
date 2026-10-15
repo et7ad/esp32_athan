@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string_view>
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/components/network/util.h"
@@ -31,6 +32,7 @@ static const char *const TAG = "athan";
 static const char *const LIST_KEYS[NUM_LISTS] = {"athan", "fajr", "tawashih", "tick"};
 static const char *const LIST_TITLES[NUM_LISTS] = {"Athan (Dhuhr, Asr, Maghrib, Isha)", "Fajr athan",
                                                    "Pre-Fajr Tawashih", "Hourly tick"};
+// The suggested lists have no entry limit; the file has this one (over 1,000 entries in all at about 50 bytes each).
 static const size_t CATALOG_MAX_BYTES = 64 * 1024;
 static const size_t STATIONS_MAX_BYTES = 16 * 1024;
 static const uint32_t HOUR_MS = 3600UL * 1000UL;
@@ -95,6 +97,19 @@ static std::string fmt_mb(size_t bytes) {
   return b;
 }
 
+// Appends `n` characters of `s` to the page, escaped like html_escape() (no temporary string per list entry).
+static void append_escaped(PsramString &o, const char *s, size_t n) {
+  for (size_t i = 0; i < n; i++) {
+    switch (s[i]) {
+      case '&': o += "&amp;"; break;
+      case '<': o += "&lt;"; break;
+      case '>': o += "&gt;"; break;
+      case '"': o += "&quot;"; break;
+      default: o += s[i];
+    }
+  }
+}
+
 static std::string html_escape(const std::string &s) {
   std::string o;
   o.reserve(s.size());
@@ -133,11 +148,14 @@ class AudioWebHandler : public AsyncWebHandler {
       return;
     }
     if (request->method() == HTTP_GET && url == "/audio/status") {
-      const PsramString bar = this->parent_->render_audio_status(std::strtoul(request->arg("g").c_str(), nullptr, 10));
+      const PsramString bar = this->parent_->render_audio_status(std::strtoul(request->arg("g").c_str(), nullptr, 10),
+                                                                 request->arg("a") == "1");
       request->send(200, "text/html; charset=utf-8", bar.c_str());
       return;
     }
     if (request->method() == HTTP_POST) {
+      // `list` is in the form's link, `entry` is what its dropdown shows (the form's body; arg() reads both): a list
+      // entry, or MENU_RANDOM / MENU_CUSTOM for the Random and Custom lines.
       int a = std::atoi(request->arg("list").c_str());
       int b = std::atoi(request->arg("entry").c_str());
       if (url == "/audio/download")
@@ -146,11 +164,11 @@ class AudioWebHandler : public AsyncWebHandler {
         this->parent_->web_action(AthanComponent::WebAction::PREVIEW, a, b);
       else if (url == "/audio/stop")
         this->parent_->web_action(AthanComponent::WebAction::STOP, 0, 0);
-      else if (url == "/audio/random")
-        this->parent_->web_action(AthanComponent::WebAction::RANDOM, 0, 0);
       // /audio/upload: the file already arrived through handleUpload().
-      // Every form posts into the page's status bar (an iframe), so the answer is the bar, not the page.
-      request->redirect("/audio/status?g=" + std::to_string(std::strtoul(request->arg("g").c_str(), nullptr, 10)));
+      // Every form posts into the page's status bar (an iframe), so the answer is the bar, not the page. `a=1`: the
+      // main loop carries the action out a moment later, so the bar looks again once after it (its result).
+      request->redirect("/audio/status?g=" + std::to_string(std::strtoul(request->arg("g").c_str(), nullptr, 10)) +
+                        "&a=1");
       return;
     }
     request->send(404, "text/plain", "Not found");
@@ -237,13 +255,19 @@ void AthanComponent::loop() {
     }
     for (auto &a : actions) {
       switch (a.first) {
-        case WebAction::DOWNLOAD: this->download_from_catalog(a.second.first, a.second.second); break;
+        case WebAction::DOWNLOAD: this->web_download_(a.second.first, a.second.second); break;
         case WebAction::PREVIEW: this->request_preview(a.second.first, a.second.second, 300); break;
-        case WebAction::RANDOM: this->set_tawashih_random(true); break;
         case WebAction::STOP:
-          if (this->hard_stop_cb_ && this->preview_list_ >= 0)
-            this->hard_stop_cb_();  // silent at once
-          this->stop_media();
+          // What Up, Select or Down stop while a sound plays (the yaml's stop_sound, silent at once): a preview, the
+          // Pre-Fajr Tawashih, the athan or the tick. The radio plays on: web Stop Radio stops it.
+          if (this->stop_sound_cb_ && this->stop_sound_cb_()) {
+            this->set_sound_status_("Stopped");
+          } else if (this->pending_preview_list_ >= 0) {
+            this->stop_preview();  // asked for, not started yet
+            this->set_sound_status_("Stopped");
+          } else {
+            this->set_sound_status_("Nothing is playing");
+          }
           break;
       }
     }
@@ -255,10 +279,15 @@ void AthanComponent::loop() {
   if (this->pending_preview_list_ >= 0 && static_cast<int32_t>(millis() - this->pending_preview_at_) >= 0) {
     const int list = this->pending_preview_list_, item = this->pending_preview_item_;
     this->pending_preview_list_ = -1;
-    if (item == MENU_CUSTOM)
+    if (item == MENU_CUSTOM) {
       this->preview_stored(list);
-    else
+    } else if (item == MENU_RANDOM) {
+      const int n = this->catalog_size(list);  // the /audio page's Random line: one entry Random could play
+      if (n > 0)
+        this->preview_catalog(list, static_cast<int>(esp_random() % n));
+    } else {
       this->preview_catalog(list, item);
+    }
   }
 
   // A preview is over when nothing has been playing for a moment (stream or from flash).
@@ -281,8 +310,21 @@ void AthanComponent::loop() {
       this->announce_stops_++;
     this->announce_was_stopped_ = st;
   }
+  // Nothing plays and nothing is about to: a start waiting for its pipeline, or one made in the last second (its
+  // resampler takes a moment to run), counts as playing (write_pace_()).
+  this->audio_quiet_ = this->media_was_stopped_ && this->announce_was_stopped_ && this->announce_pending_ == nullptr &&
+                       !this->stream_pending_ && millis() - this->last_start_ms_ > 1000;
   if (this->media_stop_pending_ && this->player_ != nullptr && this->media_chain_stopped_())
     this->media_stop_pending_ = false;
+  // A STOP sent 2 s ago and the media chain still runs: the stream had ended and its pipeline only waits for its
+  // resampler (frames an I2S speaker restart lost stay counted), which a STOP does not reach (the 5 s bound below has
+  // the same for stored sounds). Its resampler stops it.
+  if (this->media_stop_pending_ && this->media_speaker_ != nullptr && !this->media_speaker_->is_stopped() &&
+      millis() - this->media_stop_sent_at_ > 2000 && !this->media_stuck_stopped_) {
+    ESP_LOGW(TAG, "The media pipeline still plays 2 s after its STOP: stopping its resampler");
+    this->media_stuck_stopped_ = true;
+    this->media_speaker_->stop();
+  }
 
   // The random tawashih is over once its stream has started and the media chain has stopped again. A link that
   // fails at once (backup servers answer with errors now and then) gets one more try with another entry.
@@ -309,14 +351,25 @@ void AthanComponent::loop() {
       this->playing_seen_ = true;
       // A stored sound cannot play longer than it is. ESPHome's player ends it only once its mixer input has
       // counted every frame played, and an I2S speaker restart (its "restarting speaker task" errors) loses frames
-      // from that count: the player then announces until other audio plays. Its length plus 5 s ends it.
+      // from that count: the player then announces until other audio plays. Its length plus 5 s ends it: by then
+      // its reader and decoder are long done and the pipeline only waits for its resampler, which a STOP does not
+      // reach (ESPHome's pipeline only marks a hard stop for its next sound). Stopping the resampler ends it at once;
+      // the player's STOP follows 3 s later if it still plays all the same.
       const uint32_t len = this->slots_.duration_ms(this->playing_slot_);
-      if (len > 0 && !this->announce_stop_sent_ && millis() - this->playing_since_ > len + 5000) {
+      const uint32_t over = millis() - this->playing_since_;
+      if (len > 0 && this->stuck_step_ == 0 && over > len + 5000) {
         ESP_LOGW(TAG, "The %s sound has run 5 s past its length and the player still plays it: stopping it",
                  SLOT_NAMES[this->playing_slot_]);
-        this->announce_stop_sent_ = true;
+        this->stuck_step_ = 1;
         this->announce_check_slot_ = -1;
-        this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
+        if (this->announce_speaker_ != nullptr)
+          this->announce_speaker_->stop();
+      } else if (len > 0 && this->stuck_step_ == 1 && over > len + 8000) {
+        this->stuck_step_ = 2;
+        if (!this->announce_stop_sent_) {
+          this->announce_stop_sent_ = true;
+          this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
+        }
       }
     } else if (this->playing_seen_ || millis() - this->playing_since_ > 5000) {
       this->playing_slot_ = -1;
@@ -331,6 +384,23 @@ void AthanComponent::loop() {
   this->last_tick_ = now;
   const uint64_t now64 = millis_64();
   const bool online = network::is_connected();
+
+  // An upload that broke off (the tab closed, the laptop slept, Wi-Fi dropped): ESPHome's web server then returns
+  // without telling the handler, so its 3 MB buffer and sound_busy_ stayed taken until a restart and every download
+  // said "Busy" (seen on the prototype). Nothing for 20 s ends it (the server itself waits 5 s for each piece).
+  if (this->upload_open_ && static_cast<int32_t>(now - this->upload_seen_ms_) > 20000) {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    if (this->upload_.buf == nullptr) {
+      this->upload_open_ = false;
+    } else if (static_cast<int32_t>(millis() - this->upload_seen_ms_) > 20000) {
+      ESP_LOGW(TAG, "Upload of %s broke off: current sound kept", this->upload_.name.c_str());
+      heap_caps_free(this->upload_.buf);
+      this->upload_ = Upload{};
+      this->upload_open_ = false;
+      this->sound_status_ = "Upload broke off, current sound kept";
+      this->sound_busy_ = false;
+    }
+  }
 
   if (online && !this->catalog_pending_ && due(now64, this->next_catalog_try_))
     this->fetch_catalog();
@@ -564,28 +634,52 @@ void AthanComponent::job_catalog_() {
   HttpResult r = this->http_get_(this->data_url_ + "/audio/catalog.json", CATALOG_MAX_BYTES, &buf, &len, -1);
   bool ok = false;
   if (r == HttpResult::OK) {
-    std::vector<NamedUrl> lists[NUM_LISTS];
+    CatalogList lists[NUM_LISTS];  // every entry the file has, in PSRAM
     JsonDocument doc = json::parse_json(buf, len);
     JsonObject root = doc.as<JsonObject>();
     const std::string base = this->data_url_ + "/audio/";
     if (!root.isNull()) {
       for (int l = 0; l < NUM_LISTS; l++) {
         JsonArray entries = root[LIST_KEYS[l]].as<JsonArray>();  // a named handle (GCC 14 -Wdangling-reference)
+        lists[l].reserve(entries.size());
         for (JsonVariant e : entries) {
-          if (lists[l].size() >= MAX_ENTRIES)
-            break;
           if (!e["name"].is<const char *>() || !e["url"].is<const char *>())
             continue;
-          lists[l].push_back({e["name"].as<std::string>(), this->resolve_url_(base, e["url"].as<std::string>())});
+          const std::string url = this->resolve_url_(base, e["url"].as<std::string>());
+          CatalogEntry c;
+          c.name = e["name"].as<const char *>();
+          c.url.assign(url.data(), url.size());
+          c.source = AudioSlots::source_id(url);  // once here, not on every selected_entry() call
+          lists[l].push_back(std::move(c));
         }
       }
       ok = true;
     }
     heap_caps_free(buf);
     if (ok) {
+      // What the lists hold (names and links, in order): an /audio page posts an entry's place in its list, so one
+      // drawn before a change offers "Reload page" (sounds_changed_). The 12-hourly reload of the same lists not.
+      uint32_t sig = 2166136261u;
+      auto mix = [&sig](const char *p, size_t n) {
+        for (size_t i = 0; i < n; i++)
+          sig = (sig ^ static_cast<uint8_t>(p[i])) * 16777619u;
+        sig = (sig ^ 0xFFu) * 16777619u;
+      };
+      for (int l = 0; l < NUM_LISTS; l++) {
+        for (const auto &e : lists[l]) {
+          mix(e.name.data(), e.name.size());
+          mix(e.url.data(), e.url.size());
+        }
+        mix("|", 1);
+      }
       std::lock_guard<std::mutex> lock(this->mutex_);
       for (int l = 0; l < NUM_LISTS; l++)
         this->catalog_[l] = std::move(lists[l]);
+      this->catalog_gen_++;  // every remembered selected entry is worked out again against the new lists
+      if (sig != this->catalog_sig_) {
+        this->catalog_sig_ = sig;
+        this->sounds_changed_++;
+      }
     }
   }
   this->defer([this, ok]() {
@@ -615,7 +709,8 @@ std::string AthanComponent::catalog_name(int list, int entry) const {
   std::lock_guard<std::mutex> lock(this->mutex_);
   if (entry < 0 || entry >= static_cast<int>(this->catalog_[list].size()))
     return "";
-  return this->catalog_[list][entry].name;
+  const PsramString &n = this->catalog_[list][entry].name;
+  return std::string(n.data(), n.size());
 }
 
 void AthanComponent::preview_catalog(int list, int entry) {
@@ -624,8 +719,9 @@ void AthanComponent::preview_catalog(int list, int entry) {
     std::lock_guard<std::mutex> lock(this->mutex_);
     if (list < 0 || list >= NUM_LISTS || entry < 0 || entry >= static_cast<int>(this->catalog_[list].size()))
       return;
-    url = this->catalog_[list][entry].url;
-    name = this->catalog_[list][entry].name;
+    const CatalogEntry &e = this->catalog_[list][entry];
+    url.assign(e.url.data(), e.url.size());
+    name = numbered(entry, std::string(e.name.data(), e.name.size()));
   }
   if (!this->begin_preview_(list))
     return;
@@ -653,10 +749,16 @@ bool AthanComponent::begin_preview_(int list) {
     this->set_sound_status_("A sound is playing: preview after it");  // never cut the athan or the tick
     return false;
   }
+  if (this->writing_) {
+    this->set_sound_status_("Saving a sound: preview after it");  // it would stutter through the flash writes
+    return false;
+  }
   if (this->preview_volume_cb_)
     this->preview_volume_cb_(list);  // Fajr or normal volume, before a single sample plays
   this->preview_list_ = list;
   this->preview_started_ = millis();
+  if (this->radio_station_ >= 0)
+    this->set_radio_status_("Radio off: a preview replaced it");  // the menu brings it back when it closes
   this->radio_station_ = -1;  // a preview replaces the radio
   this->radio_token_++;
   return true;
@@ -703,6 +805,7 @@ void AthanComponent::stop_media_pipeline_() {
   this->media_started_ = false;
   this->media_stop_pending_ = true;
   this->media_stop_sent_at_ = millis();
+  this->media_stuck_stopped_ = false;
   this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(false).perform();
 }
 
@@ -750,17 +853,21 @@ void AthanComponent::stop_preview() {
 }
 
 void AthanComponent::stop_media() {
+  const bool had_radio = this->radio_station_ >= 0;
   this->pending_preview_list_ = -1;
   this->stream_pending_ = false;
   this->cancel_pending_slot_preview_();  // a preview from flash still waiting for its pipeline: it must not start later
   this->tawashih_stream_ = false;
+  this->tawashih_retried_ = false;  // only the end of the tawashih clears it otherwise: the next day's retry
   this->preview_list_ = -1;
   this->radio_token_++;
   this->radio_station_ = -1;
   this->radio_waiting_net_ = false;
+  this->radio_paused_write_ = false;
   this->stop_media_pipeline_();
   this->stop_slot_preview_();
-  this->set_radio_status_("Radio off");
+  if (had_radio)
+    this->set_radio_status_("Radio off");  // otherwise the line keeps what it said (a station not reachable)
 }
 
 // ---------------- clean starts ----------------
@@ -789,10 +896,11 @@ void AthanComponent::start_stream_(const std::string &url) {
   if (this->player_ == nullptr)
     return;
   this->stop_media_pipeline_();  // the stream before it, if any
+  if (url != this->stream_url_)
+    this->stream_restarts_ = 0;  // per link: a reconnect of the same one keeps counting toward the 3
   this->stream_url_ = url;
   this->stream_pending_ = true;
   this->stream_pending_since_ = millis();
-  this->stream_restarts_ = 0;
   this->pump_starts_();  // at once when nothing plays
 }
 
@@ -823,6 +931,7 @@ void AthanComponent::pump_starts_() {
       this->fmt_reverify_ = false;
       // The backstop check 10 s in: away from the station's start burst and the player's own TLS handshake.
       this->fmt_next_check_ = millis() + 10000;
+      this->last_start_ms_ = millis();
       this->player_->make_call().set_media_url(this->stream_url_).set_announcement(false).perform();
     }
   }
@@ -845,10 +954,12 @@ void AthanComponent::pump_starts_() {
       }
       this->player_->play_file(file, true, false);
       this->announce_started_at_ = millis();
+      this->last_start_ms_ = millis();
       this->announce_check_slot_ = stored ? this->playing_slot_ : -1;
       if (stored) {
         this->playing_since_ = millis();
         this->playing_seen_ = false;
+        this->stuck_step_ = 0;
       }
     }
   }
@@ -893,6 +1004,7 @@ void AthanComponent::job_check_stream_(Job &job) {
     const auto &info = this->media_speaker_->get_audio_stream_info();
     if (info.get_sample_rate() == rate && info.get_channels() == channels) {
       this->fmt_reverify_ = false;
+      this->stream_restarts_ = 0;  // the 3 restarts are for one bad spell, not for the station's life
       ESP_LOGD(TAG, "Stream format confirmed: %u Hz, %u ch", (unsigned) rate, (unsigned) channels);
       return;
     }
@@ -1001,8 +1113,9 @@ bool AthanComponent::play_random_tawashih() {
     pick = static_cast<int>(esp_random() % n);
     if (n > 1 && pick == this->tawashih_last_)
       pick = (pick + 1 + static_cast<int>(esp_random() % (n - 1))) % n;  // another than last time
-    url = this->catalog_[SLOT_TAWASHIH][pick].url;
-    name = this->catalog_[SLOT_TAWASHIH][pick].name;
+    const CatalogEntry &e = this->catalog_[SLOT_TAWASHIH][pick];
+    url.assign(e.url.data(), e.url.size());
+    name = numbered(pick, std::string(e.name.data(), e.name.size()));
   }
   this->tawashih_last_ = pick;
   this->preview_list_ = -1;
@@ -1021,6 +1134,8 @@ void AthanComponent::stop_tawashih() {
   if (!this->tawashih_stream_)
     return;
   this->tawashih_stream_ = false;
+  this->tawashih_retried_ = false;
+  this->set_sound_status_("Pre-Fajr Tawashih stopped");  // the line said which one played
   this->stream_pending_ = false;
   this->stop_media_pipeline_();
 }
@@ -1051,6 +1166,13 @@ void AthanComponent::stop_announcements() {
     this->announce_stop_sent_ = true;
     this->player_->make_call().set_command(media_player::MEDIA_PLAYER_COMMAND_STOP).set_announcement(true).perform();
   }
+  // A stored sound still announced past its own length (see the 5 s bound in loop()): the STOP does not reach its
+  // pipeline any more, stopping its resampler does.
+  if (this->playing_slot_ >= 0 && this->announce_speaker_ != nullptr && !this->announce_speaker_->is_stopped()) {
+    const uint32_t len = this->slots_.duration_ms(this->playing_slot_);
+    if (len > 0 && millis() - this->playing_since_ > len + 1000)
+      this->announce_speaker_->stop();
+  }
 }
 
 void AthanComponent::set_wifi_low_latency(bool on) {
@@ -1068,6 +1190,7 @@ bool AthanComponent::play_slot(int slot) {
   this->playing_slot_ = slot;
   this->playing_since_ = millis();
   this->playing_seen_ = false;
+  this->stuck_step_ = 0;
   this->slot_preview_ = false;  // preview_catalog() sets it again for a preview
   this->slot_stop_sent_ = false;
   this->start_announcement_(file);  // waits for a tone or preview before it to stop (clean starts)
@@ -1117,36 +1240,53 @@ int AthanComponent::selected_entry(int slot) const {
   const bool legacy = this->slots_.legacy(slot);  // stored before the link was recorded: match the name
   if (source == 0 && !legacy)
     return -1;  // an uploaded file
-  const std::string label = legacy ? this->slots_.label(slot) : std::string();
   std::lock_guard<std::mutex> lock(this->mutex_);
-  for (size_t e = 0; e < this->catalog_[slot].size(); e++) {
-    const NamedUrl &n = this->catalog_[slot][e];
-    if (legacy ? n.name == label : AudioSlots::source_id(n.url) == source)
-      return static_cast<int>(e);
+  // The menus ask on every draw (menu_item() and menu_size() through has_custom(), once per item), so the answer is
+  // kept until the list or the stored sound changes: a long list is searched once, not once per item per draw.
+  Selected &c = this->selected_[slot];
+  if (c.gen == this->catalog_gen_ && c.source == source && c.legacy == legacy)
+    return c.entry;
+  const std::string label = legacy ? this->slots_.label(slot) : std::string();
+  int found = -1;
+  const CatalogList &list = this->catalog_[slot];
+  for (size_t e = 0; e < list.size() && found < 0; e++) {
+    if (legacy ? std::string_view(list[e].name.data(), list[e].name.size()) == label : list[e].source == source)
+      found = static_cast<int>(e);
   }
-  return -1;
+  c = Selected{this->catalog_gen_, source, legacy, found};
+  return found;
+}
+
+std::string AthanComponent::sound_name(int slot) const {
+  if (slot < 0 || slot >= NUM_SLOTS || !this->slots_.valid(slot))
+    return "";
+  const int e = this->selected_entry(slot);
+  return e >= 0 ? numbered(e, this->catalog_name(slot, e)) : this->slots_.label(slot);
 }
 
 void AthanComponent::download_from_catalog(int slot, int entry) {
   if (slot < 0 || slot >= NUM_SLOTS)
     return;
-  NamedUrl e;
+  NamedUrl e;  // its name (the label the slot stores) and its link
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
     if (entry < 0 || entry >= static_cast<int>(this->catalog_[slot].size())) {
       this->sound_status_ = "That entry is not in the list";
       return;
     }
-    e = this->catalog_[slot][entry];
+    const CatalogEntry &c = this->catalog_[slot][entry];
+    e.name.assign(c.name.data(), c.name.size());
+    e.url.assign(c.url.data(), c.url.size());
   }
+  const std::string shown = numbered(entry, e.name);
   if (entry == this->selected_entry(slot)) {
     if (slot == SLOT_TAWASHIH && this->tawashih_random_) {
       this->set_tawashih_random(false);  // still stored (not freed yet): it is simply used again
-      this->set_sound_status_(e.name + " selected");
+      this->set_sound_status_(shown + ": already downloaded, in use again (Random off)");
       return;
     }
     // Never downloaded again. To refresh it from the server, download another entry, then this one.
-    this->set_sound_status_(e.name + " is already selected");
+    this->set_sound_status_(shown + " is already downloaded and in use");
     return;
   }
   if (this->playing_slot_ >= 0 && !this->slot_preview_) {
@@ -1165,8 +1305,34 @@ void AthanComponent::download_from_catalog(int slot, int entry) {
   job.slot = slot;
   job.url = e.url;
   job.label = e.name;
-  this->set_sound_status_("Downloading " + e.name);
+  job.shown = shown;
+  this->set_sound_status_("Downloading " + shown);
   this->enqueue_(std::move(job));
+}
+
+// The /audio page's Download, for what its dropdown shows: a list entry is downloaded (download_from_catalog()); the
+// Random and Custom lines download nothing, and the status bar says what is in use.
+void AthanComponent::web_download_(int slot, int entry) {
+  if (slot < 0 || slot >= NUM_SLOTS)
+    return;
+  if (entry >= 0) {
+    this->download_from_catalog(slot, entry);
+  } else if (entry == MENU_RANDOM && slot == SLOT_TAWASHIH) {
+    // Chosen again even when it is in use: a tawashih download started since (Random stays shown until it is
+    // stored) then ends freed instead of turning Random off (set_tawashih_random() counts the choice).
+    const bool was = this->tawashih_random_;
+    this->set_tawashih_random(true);  // frees the stored tawashih once nothing plays from it
+    this->set_sound_status_(was ? "Random is already in use: a different tawashih each day"
+                                : "Random in use: a different tawashih each day, streamed");
+  } else if (entry == MENU_CUSTOM && this->has_custom(slot)) {
+    const std::string shown = "Custom: " + this->slots_.label(slot);
+    if (slot == SLOT_TAWASHIH && this->tawashih_random_) {
+      this->set_tawashih_random(false);  // still stored (not freed yet): it is simply used again
+      this->set_sound_status_(shown + " is in use again (Random off)");
+    } else {
+      this->set_sound_status_(shown + " is already on the clock and in use");
+    }
+  }
 }
 
 void AthanComponent::job_download_url_(Job &job) {
@@ -1175,20 +1341,22 @@ void AthanComponent::job_download_url_(Job &job) {
   HttpResult r = this->http_get_(job.url, SLOT_MAX_BYTES[job.slot], &buf, &len, job.slot);
   if (r != HttpResult::OK) {
     switch (r) {
-      case HttpResult::NOT_FOUND: this->set_sound_status_(job.label + ": file not found on GitHub"); break;
+      case HttpResult::NOT_FOUND: this->set_sound_status_(job.shown + ": file not found on GitHub"); break;
       case HttpResult::TOO_BIG:
-        this->set_sound_status_(job.label + ": too big (limit " + fmt_mb(SLOT_MAX_BYTES[job.slot]) + "), current sound kept");
+        this->set_sound_status_(job.shown + ": too big (limit " + fmt_mb(SLOT_MAX_BYTES[job.slot]) + "), current sound kept");
         break;
       case HttpResult::NO_MEMORY: this->set_sound_status_("Not enough memory to download"); break;
-      default: this->set_sound_status_(job.label + ": download failed, current sound kept"); break;
+      default: this->set_sound_status_(job.shown + ": download failed, current sound kept"); break;
     }
     this->sound_busy_ = false;
     return;
   }
-  this->job_commit_(job.slot, buf, len, job.label, AudioSlots::source_id(job.url));
+  this->job_commit_(job.slot, buf, len, job.label, AudioSlots::source_id(job.url), job.shown);
 }
 
-void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source) {
+void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source,
+                                 const std::string &shown) {
+  const std::string name = shown.empty() ? label : shown;  // in the messages: "2. Abdul Basit", or the file's name
   auto fail = [this, data](const std::string &msg) {
     heap_caps_free(data);
     this->set_sound_status_(msg);
@@ -1199,24 +1367,26 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
     return;
   }
   if (len > SLOT_MAX_BYTES[slot]) {
-    fail(label + ": too big (" + fmt_mb(len) + ", limit " + fmt_mb(SLOT_MAX_BYTES[slot]) + "), current sound kept");
+    fail(name + ": too big (" + fmt_mb(len) + ", limit " + fmt_mb(SLOT_MAX_BYTES[slot]) + "), current sound kept");
     return;
   }
   Mp3Info info = mp3_scan(data, len);
   if (!info.ok) {
-    fail(label + ": " + (info.error ? info.error : "not an MP3") + ", current sound kept");
+    fail(name + ": " + (info.error ? info.error : "not an MP3") + ", current sound kept");
     return;
   }
   if (info.duration_ms > SLOT_MAX_MS[slot]) {
-    fail(label + ": too long (" + fmt_duration(info.duration_ms) + ", limit " + fmt_duration(SLOT_MAX_MS[slot]) +
+    fail(name + ": too long (" + fmt_duration(info.duration_ms) + ", limit " + fmt_duration(SLOT_MAX_MS[slot]) +
          "), current sound kept");
     return;
   }
-  // Every check passed. Ask the main loop to hide the slot (refused if that sound is playing right now).
-  // The handshake state is shared, so a late answer after a timeout never touches this stack frame.
+  // Every check passed. Ask the main loop to hide the slot (refused if that sound is playing right now) and to make
+  // way for the write (pause_media_for_write_()). The handshake state is shared, so a late answer after a timeout
+  // never touches this stack frame, and does nothing (state: 0 waiting, 1 answered, 2 given up).
   struct Handshake {
     SemaphoreHandle_t sem{xSemaphoreCreateBinary()};
-    std::atomic<bool> refused{false};
+    std::atomic<int> state{0};
+    bool refused{false};  // written before the semaphore is given, read after it is taken
     ~Handshake() {
       if (sem != nullptr)
         vSemaphoreDelete(sem);
@@ -1228,42 +1398,58 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
     return;
   }
   this->defer([this, slot, hs]() {
+    int waiting = 0;
+    if (!hs->state.compare_exchange_strong(waiting, 1))
+      return;  // the worker gave up waiting
     if (this->playing_slot_ == slot) {
       hs->refused = true;
     } else {
       this->slots_.invalidate(slot);
       this->refresh_slot_view_();
+      this->pause_media_for_write_();
     }
     xSemaphoreGive(hs->sem);
   });
   if (xSemaphoreTake(hs->sem, pdMS_TO_TICKS(10000)) != pdTRUE) {
-    fail("Device busy, current sound kept");
-    return;
+    int waiting = 0;
+    if (hs->state.compare_exchange_strong(waiting, 2)) {
+      fail("Device busy, current sound kept");
+      return;
+    }
+    xSemaphoreTake(hs->sem, portMAX_DELAY);  // answered just now: the semaphore is given right after
   }
   if (hs->refused) {
     fail("That sound is playing now: try again after it");
     return;
   }
-  this->set_sound_status_("Saving " + label);
+  this->set_sound_status_("Saving " + name);
+  this->write_wait_left_ms_ = 8 * 60 * 1000UL;
   bool ok = this->slots_.write(
       slot, data, len, info.duration_ms, label, source,
       [](void *ctx, int pct) {
         static_cast<AthanComponent *>(ctx)->set_sound_status_("Saving " + std::to_string(pct) + "%");
       },
-      this);
+      [](void *ctx, uint32_t pause_ms) { static_cast<AthanComponent *>(ctx)->write_pace_(pause_ms); }, this);
   heap_caps_free(data);
-  this->defer([this, slot, ok, label, info, source]() {
-    this->slots_.reload(slot);
+  // Read back from flash here: its CRC over up to 3 MB and its frames took the main loop about a quarter of a second
+  // (seen on the prototype). The main loop only takes the result.
+  const AudioSlots::Verified v = ok ? this->slots_.verify(slot) : AudioSlots::Verified{};
+  this->defer([this, slot, ok, info, source, v]() {
+    this->slots_.adopt(slot, v);
     this->refresh_slot_view_();
+    this->resume_media_after_write_();
     this->sounds_changed_++;  // the slot changed either way (new sound, or empty after a failed write)
     if (ok && this->slots_.valid(slot)) {
-      this->set_sound_status_(std::string(source != 0 ? "Downloaded " : "Uploaded ") + label + " (" +
-                              fmt_duration(info.duration_ms) + ")");
-      if (slot == SLOT_TAWASHIH) {
-        if (this->tawashih_job_gen_ == this->tawashih_gen_)
+      // "2. Abdul Basit downloaded and in use (3:12)": its number in the list now, or the uploaded file's name.
+      const std::string done = this->sound_name(slot) + (source != 0 ? " downloaded" : " uploaded");
+      const std::string length = " (" + fmt_duration(info.duration_ms) + ")";
+      if (slot == SLOT_TAWASHIH && this->tawashih_job_gen_ != this->tawashih_gen_) {
+        this->clear_tawashih_ = true;  // Random was chosen while it downloaded
+        this->set_sound_status_(done + length + ", but Random is in use");
+      } else {
+        if (slot == SLOT_TAWASHIH)
           this->set_tawashih_random(false);  // the owner chose this one
-        else
-          this->clear_tawashih_ = true;  // Random was chosen while it downloaded
+        this->set_sound_status_(done + " and in use" + length);
       }
     } else {
       this->set_sound_status_("Saving failed: the " + std::string(SLOT_NAMES[slot]) +
@@ -1273,14 +1459,72 @@ void AthanComponent::job_commit_(int slot, uint8_t *data, size_t len, const std:
   });
 }
 
+// ---------------- a sound's flash write ----------------
+// Each erase of a 64 KB block stops the cache on both cores for 0.1-0.3 s, far longer than the I2S speaker's 50 ms of
+// DMA. Saved over the radio, the radio stuttered and the I2S speaker restarted ("Event/record queues desynced", seen
+// on the prototype, 2026-10-15), and such a restart can leave the next stored sound announced past its end. So the
+// radio pauses for the few seconds of the write and comes back after it (radio_play() waits too), a preview stops and
+// new ones wait (begin_preview_()), and the worker waits for a stored sound that plays meanwhile (write_pace_()).
+void AthanComponent::pause_media_for_write_() {
+  this->writing_ = true;
+  if (this->preview_list_ >= 0)
+    this->stop_preview();
+  if (this->radio_station_ >= 0 && !this->radio_waiting_net_ && !this->radio_paused_write_) {
+    ESP_LOGI(TAG, "Radio paused while a sound is saved");
+    this->radio_paused_write_ = true;
+    this->stream_pending_ = false;
+    this->stop_media_pipeline_();
+    this->set_radio_status_("Radio " + std::to_string(this->radio_station_ + 1) + ": paused while a sound is saved");
+  }
+}
+
+void AthanComponent::resume_media_after_write_() {
+  this->writing_ = false;
+  if (!this->radio_paused_write_)
+    return;
+  this->radio_paused_write_ = false;
+  if (this->radio_station_ >= 0 && !this->radio_waiting_net_) {
+    ESP_LOGI(TAG, "Sound saved: radio again");
+    this->radio_retries_ = 0;
+    this->radio_play(this->radio_station_, this->radio_subscribed_);
+  }
+}
+
+// Worker task, before the erase and between erase blocks and write chunks: the pause gives the main loop its time
+// (the clock, the keys, the web page). Something that plays (the radio still stopping, an athan or the tick that
+// started meanwhile) is waited for first, at most 8 min, then what the mixer and the I2S speaker still hold.
+void AthanComponent::write_pace_(uint32_t pause_ms) {
+  if (pause_ms > 0)
+    vTaskDelay(pdMS_TO_TICKS(pause_ms));
+  // 8 min for the whole write (write_wait_left_ms_, set in job_commit_()), then on without waiting: audio the clock
+  // did not start (a stream from Home Assistant) must not hold the slot empty for hours.
+  if (this->audio_quiet_ || this->write_wait_left_ms_ == 0)
+    return;
+  const uint32_t start = millis();
+  bool told = false;
+  while (!this->audio_quiet_ && millis() - start < this->write_wait_left_ms_) {
+    if (!told && millis() - start > 2000) {
+      told = true;
+      this->set_sound_status_("Saving paused while a sound plays");
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+  const uint32_t waited = millis() - start;
+  this->write_wait_left_ms_ = waited >= this->write_wait_left_ms_ ? 0 : this->write_wait_left_ms_ - waited;
+  vTaskDelay(pdMS_TO_TICKS(600));
+}
+
 // ---------------- upload from the /audio page (web server task) ----------------
 bool AthanComponent::upload_begin(int slot, const std::string &filename) {
   std::lock_guard<std::mutex> lock(this->mutex_);
-  if (slot == SLOT_TAWASHIH)
-    this->tawashih_job_gen_ = this->tawashih_gen_.load();
-  if (this->upload_.buf != nullptr)
+  if (this->upload_.buf != nullptr) {
+    // The web server handles one request at a time: a buffer still here belongs to an upload that broke off (the
+    // server does not tell the handler), and it holds sound_busy_ too.
     heap_caps_free(this->upload_.buf);
+    this->sound_busy_ = false;
+  }
   this->upload_ = Upload{};
+  this->upload_open_ = false;
   if (slot < 0 || slot >= NUM_SLOTS) {
     this->sound_status_ = "Upload: unknown slot";
     return false;
@@ -1289,6 +1533,8 @@ bool AthanComponent::upload_begin(int slot, const std::string &filename) {
     this->sound_status_ = "Busy with another sound, upload ignored";
     return false;
   }
+  if (slot == SLOT_TAWASHIH)
+    this->tawashih_job_gen_ = this->tawashih_gen_.load();  // only once it is ours: a running download keeps its own
   size_t cap = SLOT_MAX_BYTES[slot] + 1;
   this->upload_.buf = static_cast<uint8_t *>(heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (this->upload_.buf == nullptr) {
@@ -1298,12 +1544,24 @@ bool AthanComponent::upload_begin(int slot, const std::string &filename) {
   }
   this->upload_.slot = slot;
   this->upload_.cap = cap;
-  std::string name = filename;
-  size_t dot = name.rfind('.');
+  this->upload_open_ = true;
+  this->upload_seen_ms_ = millis();
+  // The label the screens show: printable ASCII only (the display fonts have nothing else: other characters drew as
+  // boxes), without the extension, at most 40 characters.
+  std::string base = filename;
+  const size_t dot = base.rfind('.');
   if (dot != std::string::npos && dot > 0)
-    name = name.substr(0, dot);
-  if (name.size() > 60)
-    name = name.substr(0, 60);
+    base = base.substr(0, dot);
+  std::string name;
+  for (char c : base)
+    if (c >= 0x20 && c < 0x7f)
+      name += c;
+  while (!name.empty() && name.back() == ' ')
+    name.pop_back();
+  while (!name.empty() && name.front() == ' ')
+    name.erase(0, 1);
+  if (name.size() > 40)
+    name = name.substr(0, 40);
   this->upload_.name = name.empty() ? "Uploaded" : name;
   this->sound_status_ = "Receiving " + filename;
   return true;
@@ -1311,6 +1569,7 @@ bool AthanComponent::upload_begin(int slot, const std::string &filename) {
 
 void AthanComponent::upload_data(const uint8_t *data, size_t len) {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  this->upload_seen_ms_ = millis();  // also past the size limit: the upload is alive and ends as "too big"
   if (this->upload_.buf == nullptr || this->upload_.overflow)
     return;
   if (this->upload_.len + len > this->upload_.cap - 1) {
@@ -1323,6 +1582,7 @@ void AthanComponent::upload_data(const uint8_t *data, size_t len) {
 
 void AthanComponent::upload_end() {
   std::lock_guard<std::mutex> lock(this->mutex_);
+  this->upload_open_ = false;
   if (this->upload_.buf == nullptr)
     return;
   if (this->upload_.overflow) {
@@ -1439,7 +1699,18 @@ void AthanComponent::radio_play(int station, bool subscribed) {
   this->radio_subscribed_ = subscribed;
   this->radio_retries_ = retries;
   this->radio_started_ = millis();
+  this->radio_sound_ms_ = millis();
   uint32_t token = ++this->radio_token_;
+  if (this->writing_) {
+    // A sound is being saved (pause_media_for_write_()): the radio starts once it is. That start looks at the network
+    // again, so a network wait (net_watch_() calls this when the network is back) ends here.
+    this->stream_pending_ = false;
+    this->stop_media_pipeline_();
+    this->radio_waiting_net_ = false;
+    this->radio_paused_write_ = true;
+    this->set_radio_status_("Radio " + std::to_string(station + 1) + ": starts once the sound is saved");
+    return;
+  }
   if (!network::is_connected()) {
     // Started without network (Up pressed during a router restart): it starts when the network is back.
     this->stream_pending_ = false;
@@ -1514,7 +1785,7 @@ std::string AthanComponent::station_name(int station) const {
 static const uint8_t RADIO_RETRIES = 6;
 
 void AthanComponent::radio_tick_() {
-  if (this->radio_station_ < 0 || this->player_ == nullptr || this->radio_waiting_net_)
+  if (this->radio_station_ < 0 || this->player_ == nullptr || this->radio_waiting_net_ || this->radio_paused_write_)
     return;
   // Sound really flows: the media pipeline's first speaker runs. Not the player's state: while ESPHome's player
   // retries a link that does not open, it stays PLAYING without a sound.
@@ -1523,16 +1794,20 @@ void AthanComponent::radio_tick_() {
                                                      : st == media_player::MEDIA_PLAYER_STATE_PLAYING;
   if (sound) {
     this->radio_retries_ = 0;
+    this->radio_sound_ms_ = millis();
     return;
   }
   // No sound: still starting (link, connection and first audio take up to about 8 s), or the stream ended or failed.
   // A failed link leaves the player idle at once (components/speaker, ATHAN PATCH 2): the first retry follows at
   // once (backup.qurango.net, nine of the ten stations, answers about one request in four with HTTP 500), the next
   // ones 3.5, 6, 8.5, 11 and 13.5 s after their start. Still PLAYING without sound (an open link that sends nothing):
-  // 20 s.
+  // 20 s since it was last heard, not since its start: a stream that restarts its speaker for a new format (ATHAN
+  // PATCH 1, half a second) or for the backstop format check (a few seconds) is silent meanwhile, and a full
+  // reconnect then was a needless new connection.
   const bool idle = !this->stream_pending_ && st != media_player::MEDIA_PLAYER_STATE_PLAYING &&
                     st != media_player::MEDIA_PLAYER_STATE_PAUSED && st != media_player::MEDIA_PLAYER_STATE_ANNOUNCING;
-  if (millis() - this->radio_started_ < (idle ? 1000u + 2500u * this->radio_retries_ : 20000u))
+  if (idle ? millis() - this->radio_started_ < 1000u + 2500u * this->radio_retries_
+           : millis() - this->radio_sound_ms_ < 20000u)
     return;
   if (this->radio_retries_ < RADIO_RETRIES) {
     this->radio_retries_++;
@@ -1847,15 +2122,17 @@ void AthanComponent::job_prayer_(Job &job) {
   const PrayerPurpose purpose = job.purpose;
   this->defer([this, key, year, purpose, outcome]() {
     this->prayer_job_pending_ = false;
+    if (outcome == O_STORED)
+      ESP_LOGI(TAG, "Prayer times %s %d stored", key.c_str(), year);
+    if (key != this->location_)
+      return;  // the location changed while it ran: set_location() set the new one's retries, they stand
     if (purpose != PrayerPurpose::NEXT)
       this->prayer_tried_ = true;
     const uint64_t ms = millis_64();
     if (outcome == O_STORED) {
-      ESP_LOGI(TAG, "Prayer times %s %d stored", key.c_str(), year);
       if (purpose == PrayerPurpose::CURRENT)
         this->cur_not_published_ = false;
-      if (key == this->location_)
-        this->loaded_key_.clear();  // reload tables (and the time zone) on the next tick
+      this->loaded_key_.clear();  // reload tables (and the time zone) on the next tick
       return;
     }
     switch (purpose) {
@@ -1967,19 +2244,25 @@ std::string AthanComponent::prayer_status() const {
 static const char AUDIO_FONT[] = "font-family:-apple-system,Segoe UI,Roboto,sans-serif;";
 
 PsramString AthanComponent::render_audio_page() {
-  // Copies taken under one lock: this runs on the web server's task, the main loop changes lists and slots.
-  std::vector<NamedUrl> lists[NUM_LISTS];
+  // Copies taken under one lock: this runs on the web server's task, the main loop changes lists and slots. The
+  // lists have any number of entries, so their names are copied into PSRAM.
+  PsramVector<PsramString> names[NUM_LISTS];
   SlotView views[NUM_SLOTS];
+  size_t entries = 0;
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
-    for (int l = 0; l < NUM_LISTS; l++)
-      lists[l] = this->catalog_[l];
+    for (int l = 0; l < NUM_LISTS; l++) {
+      names[l].reserve(this->catalog_[l].size());
+      for (const CatalogEntry &e : this->catalog_[l])
+        names[l].push_back(e.name);
+      entries += this->catalog_[l].size();
+    }
     for (int s = 0; s < NUM_SLOTS; s++)
       views[s] = this->slot_view_[s];
   }
   const std::string g = std::to_string(this->sounds_changed_.load());
   PsramString h;
-  h.reserve(14000);
+  h.reserve(7000 + entries * 64);  // about 60 bytes per list entry (its <option>)
   h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
        "<title>Athan sounds</title><style>body{";
@@ -1988,61 +2271,75 @@ PsramString AthanComponent::render_audio_page() {
        "h2{font-size:1.1em;margin-top:1.6em;border-top:1px solid #ddd;padding-top:.8em;scroll-margin-top:72px}"
        ".bar{position:sticky;top:0;z-index:1;background:#fafafa;padding:6px 0}"
        ".bar iframe{display:block;width:100%;height:48px;border:0;border-radius:6px}"
-       "table{border-collapse:collapse;width:100%}td{padding:4px 6px;border-bottom:1px solid #eee}"
        "form{display:inline;margin:0}button{padding:4px 10px}.hint{color:#6b7280;font-size:.9em}"
-       ".ok{color:#047857;font-size:.85em;font-weight:600;margin-left:6px}"
+       ".pick{display:flex;flex-wrap:wrap;gap:8px;align-items:center}"
+       "select{flex:1 1 220px;min-width:0;max-width:100%;padding:4px}"
        "</style></head><body>";
   h += "<p><a href=\"/\">&larr; Device page</a></p><h1>Athan sounds</h1>";
   h += "<div class=\"bar\"><iframe name=\"st\" title=\"Status\" src=\"/audio/status?g=" + g + "\"></iframe></div>";
-  h += "<p class=\"hint\">Preview plays the selected sound from the clock and any other from the internet. "
-       "Download fetches the entry then replaces the sound on the clock. "
-       "An uploaded sound shows as Custom until a download replaces it.</p>";
+  h += "<p class=\"hint\">Choose a sound in a list. Preview plays it: the one in use from the clock, any other from "
+       "the internet. Download stores it on the clock and makes it the one in use. An uploaded sound shows as "
+       "Custom.</p>";
+  // One <option>: its value is what the form sends as `entry`; the one in use is preselected and marked.
+  auto option = [&h](int value, const char *prefix, const char *text, size_t len, bool in_use) {
+    h += "<option value=\"" + std::to_string(value) + "\"";
+    if (in_use)
+      h += " selected";
+    h += ">";
+    h += prefix;
+    append_escaped(h, text, len);
+    if (in_use)
+      h += " &#10004;";
+    h += "</option>";
+  };
   const bool random = this->tawashih_random_.load();
   for (int s = 0; s < NUM_SLOTS; s++) {
     const SlotView &v = views[s];
     const bool rnd = s == SLOT_TAWASHIH && random;  // the tawashih streams a random entry, nothing stored
-    const int selected = rnd ? -1 : v.selected;
-    h += "<h2 id=\"s" + std::to_string(s) + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>Selected: ";
-    if (rnd)
-      h += "<b>Random</b> (a different entry each day, streamed at Pre-Fajr: nothing stored on the clock)";
-    else if (v.valid)
-      h += "<b>" + html_escape(v.label) + "</b> (" + fmt_duration(v.duration_ms) + ")";
-    else
-      h += "<i>none</i>";
-    h += "</p>";
     const bool custom = v.custom && !rnd;
-    if (lists[s].empty() && !custom) {
+    const int selected = rnd || custom ? -1 : v.selected;
+    const std::string list = std::to_string(s);
+    h += "<h2 id=\"s" + list + "\">" + std::string(LIST_TITLES[s]) + "</h2><p>In use: ";
+    if (rnd) {
+      h += "<b>Random</b> (a different one each day, streamed at Pre-Fajr: nothing stored on the clock)";
+    } else if (v.valid) {
+      h += "<b>";
+      if (selected >= 0 && selected < static_cast<int>(names[s].size())) {
+        h += std::to_string(selected + 1) + ". ";
+        append_escaped(h, names[s][selected].data(), names[s][selected].size());
+      } else {
+        if (custom)
+          h += "Custom: ";
+        append_escaped(h, v.label.data(), v.label.size());
+      }
+      h += "</b> (" + fmt_duration(v.duration_ms) + ")";
+    } else {
+      h += "<i>none</i>";
+    }
+    h += "</p>";
+    if (names[s].empty() && !custom) {
       h += "<p class=\"hint\">Suggested list not loaded yet (no internet?).</p>";
     } else {
-      h += "<table>";
+      // The whole list in one dropdown, so the section stays this size however long the list is. Preview and
+      // Download act on what it shows (formaction: no JavaScript), into the status bar.
+      const std::string q = "?list=" + list + "&amp;g=" + g;
+      h += "<form class=\"pick\" method=\"post\" target=\"st\" action=\"/audio/download" + q +
+           "\"><select name=\"entry\" aria-label=\"" + std::string(LIST_TITLES[s]) + "\">";
       if (s == SLOT_TAWASHIH) {
-        h += "<tr><td>Random: one a day, streamed";
-        if (rnd)
-          h += "<span class=\"ok\">selected</span></td><td></td></tr>";
-        else
-          h += "</td><td><form method=\"post\" target=\"st\" action=\"/audio/random?g=" + g +
-               "\"><button>Use</button></form></td></tr>";
+        const char *text = "Random: a different one each day";
+        option(MENU_RANDOM, "", text, std::strlen(text), rnd);
       }
-      if (custom) {
-        // The uploaded sound, first: it can be previewed like the others, and it stays until a download replaces it.
-        h += "<tr><td>Custom: " + html_escape(v.label) + "<span class=\"ok\">selected</span></td><td>";
-        h += "<form method=\"post\" target=\"st\" action=\"/audio/preview?list=" + std::to_string(s) + "&amp;entry=" +
-             std::to_string(MENU_CUSTOM) + "&amp;g=" + g + "\"><button>Preview</button></form></td></tr>";
+      if (custom)
+        option(MENU_CUSTOM, "Custom: ", v.label.data(), v.label.size(), true);
+      for (size_t e = 0; e < names[s].size(); e++) {
+        const std::string number = std::to_string(e + 1) + ". ";
+        option(static_cast<int>(e), number.c_str(), names[s][e].data(), names[s][e].size(),
+               static_cast<int>(e) == selected);
       }
-      for (size_t e = 0; e < lists[s].size(); e++) {
-        std::string q = "?list=" + std::to_string(s) + "&amp;entry=" + std::to_string(e) + "&amp;g=" + g;
-        h += "<tr><td>" + html_escape(lists[s][e].name);
-        if (static_cast<int>(e) == selected)
-          h += "<span class=\"ok\">selected</span>";
-        h += "</td><td>";
-        h += "<form method=\"post\" target=\"st\" action=\"/audio/preview" + q + "\"><button>Preview</button></form> ";
-        h += "<form method=\"post\" target=\"st\" action=\"/audio/download" + q + "\"><button>Download</button></form>";
-        h += "</td></tr>";
-      }
-      h += "</table>";
+      h += "</select> <button formaction=\"/audio/preview" + q + "\">Preview</button> <button>Download</button></form>";
     }
-    h += "<p>Upload your own: <form method=\"post\" target=\"st\" action=\"/audio/upload?slot=" + std::to_string(s) +
-         "&amp;g=" + g + "\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" "
+    h += "<p>Upload your own: <form method=\"post\" target=\"st\" action=\"/audio/upload?slot=" + list + "&amp;g=" + g +
+         "\" enctype=\"multipart/form-data\"><input type=\"file\" name=\"file\" "
          "accept=\".mp3,audio/mpeg\" required> <button>Upload</button></form></p>";
     h += "<p class=\"hint\">MP3, at most " + fmt_mb(SLOT_MAX_BYTES[s]) + " and " + fmt_duration(SLOT_MAX_MS[s]) +
          " min. Mono, or stereo with the whole sound in the left channel: the clock plays only the left "
@@ -2052,7 +2349,7 @@ PsramString AthanComponent::render_audio_page() {
   return h;
 }
 
-PsramString AthanComponent::render_audio_status(uint32_t gen) {
+PsramString AthanComponent::render_audio_status(uint32_t gen, bool acted) {
   std::string status;
   {
     std::lock_guard<std::mutex> lock(this->mutex_);
@@ -2065,6 +2362,8 @@ PsramString AthanComponent::render_audio_status(uint32_t gen) {
   h += "<!DOCTYPE html><html><head><meta charset=\"utf-8\">";
   if (busy)
     h += "<meta http-equiv=\"refresh\" content=\"2\">";  // reloads only this bar, never the page
+  else if (acted)  // right after an action: once more a second later, when the clock has carried it out
+    h += "<meta http-equiv=\"refresh\" content=\"1;url=/audio/status?g=" + std::to_string(gen) + "\">";
   h += "<style>body{margin:0;";
   h += AUDIO_FONT;
   h += "font-size:15px;color:#1f2937;background:#eef6f3}"

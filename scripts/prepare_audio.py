@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Build the version 3 sound library (docs/audio/<list>/NN.mp3) from the V2 SD-card recordings.
 
-The V2 repository keeps its recordings as SDCard_files/A1..A10 (athans), F1..F10 (Fajr athans), D1..D10 (tawashih)
-and B1..B10 (hourly ticks), in whatever form they were downloaded: 16 to 48 kHz, mono or stereo, 16 to 321 kbps,
-with tags and cover art. Every one is rebuilt here into ONE uniform, plain format, so the clock never has to guess:
+The V2 repository keeps its recordings as SDCard_files/A1, A2, ... (athans), F1, ... (Fajr athans), D1, ...
+(tawashih) and B1, ... (hourly ticks), ten of each today, in whatever form they were downloaded: 16 to 48 kHz, mono
+or stereo, 16 to 321 kbps, with tags and cover art. Every numbered file there is built (a list has no length
+limit): A12.mp3 becomes athan/12.mp3, and its entry in docs/audio/catalog.json is entry 12. Every one is rebuilt here into ONE uniform, plain format, so the clock never has to guess:
 
-    MP3 (MPEG-1 Layer III), mono, 48 kHz (the clock's own output rate, so it never resamples),
+    MP3 (MPEG-1 Layer III), mono, 44.1 kHz (the clock's own output rate, so it never resamples),
     constant bitrate 64 kbps (lower only if a long file would not fit its size limit),
     no ID3 tags, no cover art, no Xing/LAME info frame: just audio frames.
 
@@ -19,16 +20,17 @@ Per recording:
      MP3, decoded, never peaks above -1 dBFS (MP3 coding overshoots a little; if it does, the gain is lowered by
      that much and the file encoded again). Nothing clips, and the recordings come out at similar loudness. Quiet
      files are raised by at most +20 dB.
-  3. Resampled once to 48 kHz with a long, high-quality filter, then encoded.
-  4. Checked: 48 kHz, mono, MP3, within the size and length limits, and exactly as long as the source (nothing is
-     ever sped up or cut). A recording longer than its limit is refused; shorten it at the source.
+  3. Resampled once to 44.1 kHz with a long, high-quality filter, then encoded.
+  4. Checked: 44.1 kHz, mono, MP3, within the size and length limits, and exactly as long as the source (nothing is
+     ever sped up or cut). A recording longer than its limit is refused; shorten it at the source. Each file is
+     encoded next to its target and replaces it only once every check passed, so a failure keeps the old file.
 
 Limits the clock enforces (README 1.5): athan, fajr, tawashih at most 3,000,000 bytes and 5:00; tick 400,000 bytes
 and 1:00. C1-C4 (V2 menu tones) and Z_fallback_* are not part of the library.
 
 Usage (needs ffmpeg and ffprobe; from the root of this repository, V2 repository next to it):
     python3 scripts/prepare_audio.py --check              # report only, write nothing
-    python3 scripts/prepare_audio.py                      # rebuild docs/audio/athan/01.mp3 ... tick/10.mp3
+    python3 scripts/prepare_audio.py                      # rebuild docs/audio/athan/01.mp3 ... tick/NN.mp3
     python3 scripts/prepare_audio.py --src /path/to/SDCard_files --out /tmp/audio_test
 
 Names shown on the clock come from docs/audio/catalog.json (plain ASCII, at most 12 characters).
@@ -36,6 +38,7 @@ Names shown on the clock come from docs/audio/catalog.json (plain ASCII, at most
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -47,7 +50,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 LISTS = {"A": "athan", "F": "fajr", "D": "tawashih", "B": "tick"}
 MAX_BYTES = {"athan": 3_000_000, "fajr": 3_000_000, "tawashih": 3_000_000, "tick": 400_000}
 MAX_SECONDS = {"athan": 300, "fajr": 300, "tawashih": 300, "tick": 60}
-RATE = 48000
+RATE = 44100                             # the I2S output's rate (firmware/athan.yaml), so nothing resamples on the clock
 BITRATES = (64, 56, 48, 40, 32)          # kbps, first that fits wins
 PEAK_DB = -1.5                           # loudest sample after the gain, before encoding
 DECODED_MAX_DB = -1.0                    # loudest sample of the finished MP3 when decoded (MP3 adds overshoot)
@@ -102,6 +105,19 @@ def khz(rate: int) -> str:
 
 
 def build(src: pathlib.Path, dst: pathlib.Path, lst: str) -> tuple[bool, str]:
+    """Encode src into a hidden file next to dst and move it over dst only when every check passed: a file that
+    fails (or a run that is interrupted) leaves the sound that was there."""
+    part = dst.with_name(f".{dst.name}.part")
+    try:
+        ok, note = encode(src, part, lst)
+        if ok:
+            os.replace(part, dst)
+        return ok, note
+    finally:
+        part.unlink(missing_ok=True)
+
+
+def encode(src: pathlib.Path, dst: pathlib.Path, lst: str) -> tuple[bool, str]:
     info = probe(src)
     if info["duration"] > MAX_SECONDS[lst]:
         d = info["duration"]
@@ -140,7 +156,8 @@ def build(src: pathlib.Path, dst: pathlib.Path, lst: str) -> tuple[bool, str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--src", type=pathlib.Path, default=ROOT.parent / "esp_athan" / "SDCard_files",
-                    help="folder with A1..A10, F1..F10, D1..D10, B1..B10 (default: ../esp_athan/SDCard_files)")
+                    help="folder with A1.mp3, A2.mp3, ..., F1.mp3, ..., D1.mp3, ..., B1.mp3, ... "
+                         "(default: ../esp_athan/SDCard_files)")
     ap.add_argument("--out", type=pathlib.Path, default=ROOT / "docs" / "audio", help="default: docs/audio")
     ap.add_argument("--check", action="store_true", help="build into a temporary folder and report; write nothing")
     a = ap.parse_args()
@@ -159,15 +176,33 @@ def main() -> int:
         for prefix, lst in LISTS.items():
             (out_root / lst).mkdir(parents=True, exist_ok=True)
             print(f"== {lst}  (limit {MAX_BYTES[lst] / 1e6:g} MB, {MAX_SECONDS[lst] // 60}:00)")
-            for k in range(1, 11):
-                src = a.src / f"{prefix}{k}.mp3"
-                if not src.is_file():
-                    print(f" ✗ {src.name:8} missing")
+            # Every numbered recording there, in order (A1, A2, ... A23; A05 is entry 5): a list has any number of
+            # entries. Two files for one entry (A5.mp3 and A05.mp3) are refused: which one is meant is unclear.
+            found: dict[int, list[pathlib.Path]] = {}
+            for f in sorted(a.src.iterdir()):
+                m = re.fullmatch(prefix + r"(\d+)\.mp3", f.name)
+                if m and int(m.group(1)) > 0:
+                    found.setdefault(int(m.group(1)), []).append(f)
+            if not found:
+                print(f" ✗ no {prefix}1.mp3, {prefix}2.mp3, ... in {a.src}")
+                failed += 1
+                continue
+            gaps = sorted(set(range(1, max(found) + 1)) - set(found))
+            if gaps:
+                print(f" ✗ missing {', '.join(f'{prefix}{k}.mp3' for k in gaps)}: the numbers are the list's entries")
+                failed += len(gaps)
+            for k, files in sorted(found.items()):
+                if len(files) > 1:
+                    print(f" ✗ {' and '.join(f.name for f in files)} are all entry {k}: keep one")
                     failed += 1
                     continue
-                ok, note = build(src, out_root / lst / f"{k:02d}.mp3", lst)
+                src, name = files[0], f"{k:02d}.mp3"
+                try:
+                    ok, note = build(src, out_root / lst / name, lst)
+                except (subprocess.CalledProcessError, OSError, KeyError, IndexError, ValueError) as e:
+                    ok, note = False, f"ffmpeg/ffprobe could not read it ({e.__class__.__name__}): nothing replaced"
                 failed += 0 if ok else 1
-                print(f" {'✓' if ok else '✗'} {src.name:8} → {lst + '/' + f'{k:02d}.mp3':16} {note}")
+                print(f" {'✓' if ok else '✗'} {src.name:8} → {lst + '/' + name:16} {note}")
     print("\n(check only: nothing was written)" if a.check else f"\nWritten to {a.out}.")
     if failed:
         print(f"✗ {failed} file(s) missing or not usable", file=sys.stderr)

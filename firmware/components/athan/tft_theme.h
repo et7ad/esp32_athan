@@ -37,7 +37,8 @@ inline const Palette &palette(int i) { return PALETTES[(i >= 0 && i < NUM_PALETT
 }  // namespace tft
 
 // Material Symbols Rounded (Google's open icon font) code points, UTF-8. The icon fonts in displays/tft.yaml list
-// the same code points (tests/run_tests.sh checks it): a glyph missing there draws nothing.
+// the same code points (tests/run_tests.sh checks it): a glyph missing from the font an icon is drawn with shows as an
+// empty box instead (ESPHome draws one in place of any glyph it lacks, and logs a warning at every draw).
 namespace sym {
 // menu rows (MenuRow::symbol)
 constexpr const char *RADIO = "\ue03e";

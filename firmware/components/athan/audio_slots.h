@@ -10,7 +10,8 @@
 // header LAST, so a power cut while writing leaves the slot without a valid header (= empty), never half-valid.
 // Playback memory-maps the region and hands it to the media player as an in-memory audio file: no RAM copy.
 //
-// Threading: write() runs on the component's worker task; everything else on the main loop.
+// Threading: write() and verify() run on the component's worker task; everything else on the main loop. Every
+// region is mapped once, in begin(), so verify() reads a fresh write through the same mapping.
 
 #include <atomic>
 #include <cstdint>
@@ -33,6 +34,27 @@ static const char *const SLOT_NAMES[NUM_SLOTS] = {"athan", "fajr", "tawashih", "
 
 class AudioSlots {
  public:
+  // The 4 KB header sector, written last.
+  struct Header {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t length;
+    uint32_t data_crc;
+    uint32_t duration_ms;
+    char label[64];
+    // Version 2. A version 1 header ends here with its header_crc where source_crc now sits.
+    uint32_t source_crc;
+    uint32_t header_crc;  // CRC of every field above
+  };
+  // What verify() found: the header, and where the first real frame starts.
+  struct Verified {
+    bool ok{false};
+    Header header{};
+    size_t skip{0};  // bytes before the first real frame (tags, junk)
+    uint32_t rate{0};
+    uint8_t channels{0};
+  };
+
   /// Finds the partition, reads every header and verifies every file's CRC. Main loop, once.
   bool begin();
   bool ready() const { return this->part_ != nullptr; }
@@ -53,33 +75,29 @@ class AudioSlots {
   /// The mapped file for playback, or nullptr if the slot is empty or being rewritten.
   audio::AudioFile *file(int slot);
 
-  /// Main loop: hide the slot before a rewrite starts (playback refused until reload()).
+  /// Any task: read the slot's header and check its data (CRC over up to 3 MB, the frames' format). Changes nothing.
+  Verified verify(int slot) const;
+  /// Main loop: use what verify() found (or mark the slot empty).
+  void adopt(int slot, const Verified &v);
+
+  /// Main loop: hide the slot before a rewrite starts (playback refused until reload() or adopt()).
   void invalidate(int slot);
-  /// Main loop: re-read the header after a write and re-validate the data.
+  /// Main loop: re-read the header and re-validate the data (verify() + adopt()).
   void reload(int slot);
   /// Worker task: empty the slot for good (erases its header sector; the audio stays but is never read). The main
   /// loop has invalidated it first.
   bool clear(int slot);
 
   /// Worker task: erase + write + header. `progress` gets 0..100. Returns false on a flash error.
-  /// `source` is source_id() of the download link, 0 for an upload.
+  /// `source` is source_id() of the download link, 0 for an upload. `pace` is called before the erase and between
+  /// erase blocks and write chunks, with the pause the main loop and the audio get there (each erase or write stops
+  /// the cache on both cores: everything else waits while it runs).
   bool write(int slot, const uint8_t *data, size_t len, uint32_t duration_ms, const std::string &label,
-             uint32_t source, void (*progress)(void *ctx, int percent), void *ctx);
+             uint32_t source, void (*progress)(void *ctx, int percent), void (*pace)(void *ctx, uint32_t pause_ms),
+             void *ctx);
 
  protected:
-  struct Header {
-    uint32_t magic;
-    uint32_t version;
-    uint32_t length;
-    uint32_t data_crc;
-    uint32_t duration_ms;
-    char label[64];
-    // Version 2. A version 1 header ends here with its header_crc where source_crc now sits.
-    uint32_t source_crc;
-    uint32_t header_crc;  // CRC of every field above
-  };
   bool read_header_(int slot, Header *h) const;
-  bool check_slot_(int slot);
   const uint8_t *map_(int slot);
 
   const esp_partition_t *part_{nullptr};

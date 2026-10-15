@@ -51,6 +51,42 @@ enum class RowStyle : uint8_t {
 /// rows: a clock for the tick hours, a sun and a moon for the screen's brightness and night.
 enum class RowIcon : uint8_t { NONE, CLOCK, SPEAKER, LOCK, EXIT, SUN, MOON };
 
+/// A suggested-list entry as the menu, the /audio page and the web page show it: its number in the list, then its
+/// name ("2. Abdul Basit"). `entry` counts from 0. The lists have any number of entries (docs/audio/catalog.json).
+inline std::string numbered(int entry, const std::string &name) { return std::to_string(entry + 1) + ". " + name; }
+
+/// Where an item too wide for one line breaks into two (both menu views): the position of a space whose two lines
+/// both fit, `width(line)` being a line's width in the font tried and `max_w` the room; std::string::npos when none
+/// does (one word, or every split too wide). Of the spaces that fit, one that keeps an entry number ("12.", or the
+/// radio's "1") with the first word of the name: "12. Abdul" / "Basit", "123. Mohammed" / "Ali", "1 Cairo" / "Quran";
+/// of those the most even split ("Ya Rabbi" / "Ya Rabbi"). The number stands alone ("7." / "Al-Majali") only when it
+/// does not fit together with the first word.
+template<typename Width> size_t item_break(const std::string &s, Width &&width, int max_w) {
+  // An entry number: digits, a dot or not, then a space ("12. Abdul Basit", "1 Cairo Quran"; not "2.5 Hours").
+  const size_t digits = s.find_first_not_of("0123456789");
+  size_t after_number = std::string::npos;
+  if (digits != 0 && digits != std::string::npos) {
+    const size_t sp = s[digits] == '.' ? digits + 1 : digits;
+    if (sp < s.size() && s[sp] == ' ')
+      after_number = sp;
+  }
+  size_t best = std::string::npos;
+  bool best_alone = false;
+  int best_w = 0;
+  for (size_t sp = s.find(' '); sp != std::string::npos; sp = s.find(' ', sp + 1)) {
+    const int w1 = width(s.substr(0, sp)), w2 = width(s.substr(sp + 1)), w = w1 > w2 ? w1 : w2;
+    if (w > max_w)
+      continue;
+    const bool alone = sp == after_number;
+    if (best == std::string::npos || (best_alone && !alone) || (alone == best_alone && w < best_w)) {
+      best = sp;
+      best_alone = alone;
+      best_w = w;
+    }
+  }
+  return best;
+}
+
 struct MenuRow {
   /// The full name: the right pane's header.
   const char *title{""};

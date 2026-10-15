@@ -2,4 +2,5 @@
 	(version 7)
 	(lib (name "SKRHABE010") (type "KiCad") (uri "${KIPRJMOD}/libs/SKRHABE010/easyeda2kicad.kicad_sym") (options "") (descr ""))
 	(lib (name "SKQUAAA010") (type "KiCad") (uri "${KIPRJMOD}/libs/SKQUAAA010/SKQUAAA010.kicad_sym") (options "") (descr ""))
+	(lib (name "LCD_OLED_128X64_1p3_I2C") (type "KiCad") (uri "${KIPRJMOD}/libs/LCD_OLED_128X64_1p3_I2C") (options "") (descr ""))
 )

@@ -180,6 +180,19 @@ static void test_value() {
   CHECK(m.item_right() == -1 && m.item_left() == 1, "no neighbour past the end");
   m.key(MenuKey::SELECT);
   CHECK(!m.is_open() && !called("V apply 2"), "VALUE: Select closes");
+
+  // The value changed elsewhere (the web page) while the row is open: the row follows it, and the next press
+  // steps from there, not from the value it showed before.
+  TestRow w{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}, 5};
+  Menu n;
+  n.add_row(make_row("W", RowKind::VALUE, &w, false));
+  n.open();
+  w.active_id = 8;
+  n.refresh();
+  CHECK(n.item() == 8, "VALUE: follows a value set elsewhere (got %d)", n.item());
+  calls.clear();
+  n.key(MenuKey::RIGHT);
+  CHECK(n.item() == 9 && called("W apply 9"), "VALUE: the next press steps from the new value (got %d)", n.item());
 }
 
 static void test_action_and_small_rows() {
@@ -251,7 +264,39 @@ static void test_hook_closes() {
   CHECK(closes == 1, "on_close once (got %d)", closes);
 }
 
+// A suggested-list entry is shown with its number. A long one breaks into two lines that both fit: the number stays
+// with the first word of the name ("12. Abdul" / "Basit") whenever that fits, and stands alone ("7." / "Al-Majali")
+// only when it does not. Widths here: 6 px a character.
+static void test_entry_labels() {
+  CHECK(numbered(0, "Athan 1") == "1. Athan 1", "numbered(0) is \"%s\"", numbered(0, "Athan 1").c_str());
+  CHECK(numbered(11, "Abdul Basit") == "12. Abdul Basit", "numbered(11) is \"%s\"", numbered(11, "Abdul Basit").c_str());
+  CHECK(numbered(299, "Al-Haddad") == "300. Al-Haddad", "numbered(299)");
+  const auto w6 = [](const std::string &s) { return 6 * static_cast<int>(s.size()); };
+  const auto brk = [&w6](const char *s, int max_w) { return item_break(s, w6, max_w); };
+  const size_t none = std::string::npos;
+  CHECK(brk("Abdul", 18) == none, "one word: no break");
+  CHECK(brk("Abdul Basit", 30) == 5, "plain name: at the space");
+  CHECK(brk("Abdul Basit", 24) == none, "no split fits: no break");
+  CHECK(brk("12. Abdul Basit", 54) == 9, "numbered: after the name's first word (got %zu)", brk("12. Abdul Basit", 54));
+  CHECK(brk("1. Ya Rabbi", 30) == 5, "numbered: \"1. Ya\" / \"Rabbi\", not \"1.\" alone (got %zu)",
+        brk("1. Ya Rabbi", 30));
+  CHECK(brk("123. Mohammed Ali", 78) == 13, "3-digit number with the first word (got %zu)",
+        brk("123. Mohammed Ali", 78));
+  CHECK(brk("12. Abdulrahman A", 80) == 3, "the number alone when it does not fit with the first word (got %zu)",
+        brk("12. Abdulrahman A", 80));
+  CHECK(brk("7. Al-Majali", 54) == 2, "one-word name: the number alone, the only split");
+  CHECK(brk("123. Al-Haddad", 54) == 4, "3-digit number, one-word name: the number alone");
+  CHECK(brk("1 Cairo Quran", 42) == 7, "radio label (no dot): \"1 Cairo\" / \"Quran\" (got %zu)",
+        brk("1 Cairo Quran", 42));
+  CHECK(brk("8 Al-Dosari", 54) == 1, "radio label, one-word name: the number alone");
+  CHECK(brk("2.5 Hours", 30) == 3, "a decimal: at its space");
+  CHECK(brk("2.5 Ho Hum", 60) == 3, "a decimal is not an entry number: the even split may leave it alone (got %zu)",
+        brk("2.5 Ho Hum", 60));
+  CHECK(brk("Ya Rabbi Ya Rabbi", 100) == 8, "words only: the most even split (got %zu)", brk("Ya Rabbi Ya Rabbi", 100));
+}
+
 int main() {
+  test_entry_labels();
   test_rows_go_round();
   test_exit();
   test_choice();

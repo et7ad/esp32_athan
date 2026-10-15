@@ -2,7 +2,7 @@
 
 How the firmware is put together, for anyone changing it. Owner-facing behaviour is in `README.md`, the board and
 the prototype's acceptance checklist in `HARDWARE.md`, why this chip in `microcontroller_demand.md`, and the short
-list of rules in `CLAUDE.md`.
+list of rules the code depends on in [firmware_rules.md](firmware_rules.md).
 
 ## 1. Files
 
@@ -16,12 +16,12 @@ list of rules in `CLAUDE.md`.
 | `athan.h/.cpp` | `AthanComponent`, the worker task, `AudioWebHandler` (the `/audio` page) |
 | `audio_slots.h/.cpp` | The four stored sounds |
 | `prayer_store.h/.cpp` | Yearly file parser + the stored years |
-| `day_window.h` | The hourly tick's and the screen's night windows: an end is an hour or a prayer (Maghrib, Isha / Fajr, Dhuhr) at today's times, stored in the same int settings (`WINDOW_PRAYER` + the prayer's index); the menu rows and web selects share its choice order (no ESPHome dependency, tested in `test_helpers.cpp`) |
+| `day_window.h` | The hourly tick's and the screen's night windows: an end is an hour or a prayer at today's times, stored in the same int settings (`WINDOW_PRAYER` + the prayer's index). `WindowKind`: the night runs from Maghrib or Isha until Fajr or Dhuhr, the tick's day window from Fajr or Dhuhr until Maghrib or Isha; the menu rows and web selects share its choice order. `window_sanitize()` (on_boot) turns an end a window no longer offers into the first hour at or after that prayer (no ESPHome dependency, tested in `test_helpers.cpp`) |
 | `tz_posix.h/.cpp` | POSIX TZ parser, offset/UTC conversion, calendar helpers (no ESPHome dependency) |
 | `mp3_check.h/.cpp` | MP3 validity and duration (no ESPHome dependency) |
 | `menu.h/.cpp`, `menu_frame.h` | The menu's navigation (host-tested), and the `Frame` both drawings read (`frame_of()`, the redraw fingerprint) |
 | `menu_view.h/.cpp`, `menu_view_tft.cpp` | `draw_menu()` for the OLED (`menu_view.cpp`) or the TFT (`menu_view_tft.cpp`): one of them is compiled (`ATHAN_DISPLAY_TFT`) |
-| `tft_theme.h`, `tft_draw.h/.cpp` | The TFT's colours (neutrals, the five Screen Colour palettes) and Material Symbols code points (`sym::`); shapes with smoothed edges (rounded boxes, circles, ring arcs) and `icon()` |
+| `tft_theme.h`, `tft_draw.h/.cpp` | The TFT's colours (neutrals, the five Screen Colour palettes) and Material Symbols code points (`sym::`); `ring()` (the clock's ring: filled part and track in one pass, about 9 ms of a 50 ms frame); shapes with smoothed edges (rounded boxes, circles, ring arcs) and `icon()` |
 | `firmware/tests/` | `run_tests.sh` (host unit tests), `syntax_check.sh` (type check), `idf_stubs/` (SDK stand-ins) |
 | `firmware/sounds/` | `click.wav`, `volume.wav`: built-in tones (`media_player: files:`), mono 16-bit 44.1 kHz WAV (no decoding, no MP3 encoder padding ahead of the sound) |
 
@@ -34,8 +34,10 @@ list of rules in `CLAUDE.md`.
       the audio pipeline's tasks, which a TLS handshake at a higher priority held off for hundreds of ms).
    4. Registers the `/audio` handler on `web_server_base`.
 2. `esphome: on_boot` (priority -100):
-   1. Copies `volume_level` into `fajr_volume_level` the first time (when it is -1).
-   2. Calls `set_location(selected_location_key)`.
+   1. Copies `volume_level` into `fajr_volume_level` the first time (when it is -1), and switches the relay off when
+      Pre-Fajr had it on at the restart (`relay_by_prefajr`).
+   2. `window_sanitize()` on the four window ends, then `set_location(selected_location_key)`, and the component's
+      two callbacks (`set_preview_volume_callback`, `set_hard_stop_callback`).
    3. Adds the menu's rows (`menu_setup`).
    4. Handles the two power-up gestures of the 5-way switch: Select held forgets Wi-Fi and restarts; any
       direction held unlocks the buttons.
@@ -51,7 +53,7 @@ list of rules in `CLAUDE.md`.
 4. The yaml's 1 s interval watches `schedule_version()` and reruns `load_today` when it changes (new day, new
    data, new location).
 
-Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switches use `restore_mode: DISABLED`.
+Nothing in a setup-time trigger may draw or play (`firmware_rules.md` 3.2). Template switches use `restore_mode: DISABLED`.
 
 ## 3. Component API (called from yaml lambdas as `id(athan_core).…`)
 
@@ -64,17 +66,18 @@ Nothing in a setup-time trigger may draw or play (`CLAUDE.md`). Template switche
 | `set_wifi_bg_only(on)` (yaml `wifi_bg_only:`) | Wi-Fi 802.11b/g only (`esp_wifi_set_protocol`), set in `setup()` during ESPHome's first scan and at every `WIFI_EVENT_STA_START` |
 | `set_wifi_low_latency(on)` | Wi-Fi modem sleep off (`on`) or back on. Only while Bluetooth is off: the yaml calls it after `ble.disable` has finished and before `ble.enable` (`ble_when_offline`, 15 s after Wi-Fi went) |
 | `slot_playing()` | True from `play_slot()` until the player leaves `ANNOUNCING` (or 5 s if it never got there) |
-| `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`. The selected entry is never downloaded again ("already selected"); downloading another entry first fetches it anew |
-| `selected_entry(list)` | Index of the list entry (the selected one) whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound |
+| `download_from_catalog(list, entry)` | Downloads → checks → writes; progress in `sound_status()`, then "2. Abdul Basit downloaded and in use (3:12)". The selected entry is never downloaded again ("already downloaded and in use"); downloading another entry first fetches it anew |
+| `selected_entry(list)` | Index of the list entry (the selected one) whose link matches the slot's stored source CRC (version 1 headers: the label), -1 for an upload or an unlisted sound. Each entry's CRC is worked out when the list loads, and the answer is kept per slot (`selected_`) until the list (`catalog_gen_`) or the stored sound changes: the menu asks once per item per draw, and a list can be long |
+| `sound_name(s)` | The slot's sound as the menu and web page name it: "2. Abdul Basit" (a list entry, `numbered()`), the file's name (an upload), "" (empty). The web page's Selected Sounds |
 | `sound_busy()`, `sound_status()` | One download/upload at a time |
-| `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists |
+| `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists, any number of entries each. `catalog_name` is the bare name; `athan::numbered(e, name)` (`menu.h`) gives "e+1. name" |
 | `has_custom(list)` | The slot holds a sound that is not a list entry: an upload (source 0), or a download the loaded list no longer has. Shown as "Custom" in the menu and on `/audio` |
 | `menu_size(l, off)`, `menu_item(l, off, i)`, `menu_index(l, off, item)` | The OLED sound list: `MENU_OFF` (tick only), `MENU_RANDOM` (tawashih, first), `MENU_CUSTOM` (while `has_custom`), then the entries. `MENU_NONE` for an index with nothing there |
 | `tawashih_random()`, `set_tawashih_random(on)` | The Random tawashih (default, saved as a preference). On frees the stored tawashih (`CLEAR_SLOT` once nothing plays from it); a download or upload started after the choice turns it off |
 | `play_random_tawashih()`, `tawashih_streaming()`, `stop_tawashih()` | Pre-Fajr with Random: streams a random entry (not the last one), one retry with another entry if it fails at once; false without internet or list |
 | `has_stored_times()` | The location has stored prayer times: the timetable shows the last day's times and the next prayer (saved globals) struck through until the clock is set |
-| `request_preview(l, item, ms)` | How the menu and `/audio` start previews: stops the current preview at once (one STOP), starts the new one (`preview_catalog` or `preview_stored`) after `ms` without another request. Menu Left/Right use 500 ms, reaching a sound row 800 ms, `/audio` 300 ms. Keeps fast browsing to one stream and a few media commands (CLAUDE.md, "Never send media player commands in bursts") |
-| `preview_stored(list)` | Plays the stored sound from flash as a preview (the Custom item; `/audio/preview?entry=-1`) |
+| `request_preview(l, item, ms)` | How the menu and `/audio` start previews: stops the current preview at once (one STOP), starts the new one (`preview_catalog` or `preview_stored`) after `ms` without another request. Menu Left/Right use 500 ms, reaching a sound row 800 ms, `/audio` 300 ms. Keeps fast browsing to one stream and a few media commands (`firmware_rules.md` 3.1, "Never send media player commands in bursts") |
+| `preview_stored(list)` | Plays the stored sound from flash as a preview (the Custom item; `/audio`'s Custom line, `entry=-1`) |
 | `preview_catalog(l, e)` | Nothing stored. The selected entry plays from flash (`play_slot`, marked as a preview); any other streams on the media pipeline. Either replaces the radio. Refused while the athan, tawashih or tick plays |
 | `stop_media()` | Stops the media pipeline (preview or radio) and a preview playing from flash, never the athan or the tick. Drops a stream still waiting to start |
 | `stop_preview()` | Stops a preview (and one still waiting for its pause) silently (`hard_stop_cb`); nothing else. The radio plays on unless a preview had replaced it. The menu calls it when it leaves a sound row |
@@ -96,7 +99,7 @@ open menu.
 
 - **Main loop:** the yaml, `loop()`, the media player calls, entity publishing, the stored-sound map.
 - **Worker task:** a FIFO of `Job`s (`CATALOG`, `STATIONS`, `STATION_PLAY`, `DOWNLOAD_URL`, `COMMIT_BUFFER`,
-  `PRAYER_YEAR`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
+  `PRAYER_YEAR`, `CHECK_STREAM`, `CLEAR_SLOT`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
   limit before and during the read, PSRAM buffer), JSON parsing and flash erase/write. Results come back with
   `defer()`.
 - **httpd task:** `AudioWebHandler` renders the page (a `PsramString`, about 14 KB) from copies taken under one
@@ -169,7 +172,7 @@ the player keeps announcing until other audio plays. On the prototype every atha
 did this, and the athan screen stayed to `make_athan`'s 7 min timeout. The cause: the announcement reader fills its
 ring buffer from flash in one `xRingbufferSend`, which ESP-IDF copies inside a critical section; at ESPHome's 1 MB
 `buffer_size` that is far longer than 50 ms with interrupts off. `buffer_size` 128 KB fixed it (0 restarts in 6
-starts, 3 of 3 before); athan.yaml now uses 48 KB, for the Wi-Fi (CLAUDE.md). As a bound, the end tracking in `loop()` stops a stored sound still announced 5 s
+starts, 3 of 3 before); athan.yaml now uses 48 KB, for the Wi-Fi (`firmware_rules.md` 3.1). As a bound, the end tracking in `loop()` stops a stored sound still announced 5 s
 past its length (`AudioSlots::duration_ms`).
 
 **Instant stops**: `hard_mute` mutes the I2S speaker and calls `begin_drain_watch()`, which notes the pipelines
@@ -195,9 +198,11 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 
 ## 6. Lists and radio
 
-- **Catalog** `docs/audio/catalog.json` (≤ 64 KB): lists `athan`, `fajr`, `tawashih`, `tick`, each ≤ 10
-  `{name, url}`. A relative URL resolves against `<data_url>/audio/`. It is fetched at boot, then every 12 h
-  (retry every 1 min on failure), and kept in RAM only.
+- **Catalog** `docs/audio/catalog.json` (≤ 64 KB, over 1,000 entries in all): lists `athan`, `fajr`,
+  `tawashih`, `tick`, each any number of `{name, url}`, numbered in file order on the clock and the web page
+  (`numbered()`). A relative URL resolves against `<data_url>/audio/`. It is fetched at boot, then every 12 h
+  (retry every 1 min on failure), and kept in RAM only: `CatalogList` (PSRAM), each entry with its full link and
+  that link's source CRC.
 - **Stations** `docs/radio/stations.json` (≤ 16 KB): 10 `{name, url}`, kept in memory (`stations_`). Fetched at
   boot and every 6 h (retry every 1 min until a first copy exists, then every 30 min), and early when a
   subscribed station gives up after 6 reconnects (about a minute) (at most every 10 min, `stations_fetched_at_`). `radio_play()`
@@ -209,8 +214,9 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
   dropped.
 - **`radio_tick_()`:** sound means the media speaker runs, never the player's state. A link that fails leaves the
   player idle at once (`components/speaker`, ATHAN PATCH 2: upstream reopens it many times a second, for ever), and
-  it tries again 3, 6 and 9 s later; a link that stays open without sound gets 20 s. Then it gives up with "station
-  not reachable".
+  it tries again up to 6 times, 1, 3.5, 6, 8.5, 11 and 13.5 s after each start; a link that stays open without sound
+  gets 20 s since it was last heard (a format restart's half second of silence is no reason). Then it gives up with
+  "station not reachable". While a sound is saved the radio is paused, not retried (`radio_paused_write_`).
 - **`net_watch_()`** (every loop): the network gone stops a stream at once (a streamed preview ends; the radio
   waits, "waiting for Wi-Fi") and the radio starts again when it is back, or goes off after 10 minutes.
   `radio_play()` without network waits the same way.
@@ -239,7 +245,7 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 
 | Purpose | When | Retry after |
 |---|---|---|
-| CURRENT | Current year not stored, or Refresh pressed | 404: 30 min if nothing to stand in, else 6 h · invalid: 30 min · network: 2 min |
+| CURRENT | Current year not stored, or Refresh pressed | 404: 30 min if nothing to stand in, else 6 h · invalid: 30 min · network: 2 min, 20 s while no times at all are loaded |
 | PREVIOUS | Current year 404 and no previous year stored (new device in January) | network: 5 min · otherwise 6 h |
 | NEXT | December and next year not stored | 404/invalid: 24 h · network: 1 h |
 
@@ -248,18 +254,23 @@ month/day (29 Feb → 28 Feb), each value converted through UTC with that date's
 to 00:00–23:59.
 
 **The yaml side:**
-- `load_today` copies the 7 times into `prayer_hours`/`prayer_minutes` (not persisted) and runs
-  `compute_coming_prayer`.
+- `load_today` copies the 7 times into `prayer_hours`/`prayer_minutes` (persisted: the screen shows them, struck
+  through, after a power cut until SNTP answers) and runs `compute_coming_prayer` (the first prayer at or after now).
 - The 1 s interval fires the athan when the next prayer's minute is reached. After Isha it waits for midnight
-  before matching tomorrow's Fajr. Then `jump_to_next_prayer` runs.
-- Pre-Fajr Tawashih fires once at Fajr − `prefajr_offset_min`.
+  before matching tomorrow's Fajr. Then `jump_to_next_prayer` runs. Each prayer is called once a day
+  (`prayer_called`, persisted): a reload of the times in its minute, or a restart, finds it again.
+- Pre-Fajr Tawashih fires at Fajr − `prefajr_offset_min`, or up to 5 min late (a missed minute, a clock that
+  jumped), never at or after Fajr, once per Fajr (`prefajr_called`, persisted).
 
 ## 8. The yaml
 
 **Persisted globals (NVS, keyed by id):** `volume_level`, `fajr_volume_level` (-1 = copy from volume at boot),
 `athan_enabled[7]` (indices 0, 3, 4, 5, 6 used), `buttons_locked`, `clock_12h`, `htick_enabled`,
 `htick_start_hour`, `htick_end_hour`, `prefajr_enabled`, `selected_location_key` (string, max 31),
-`radio_subscribed[10]`, `radio_slot`. The ten `radio_url_N` text entities persist themselves
+`radio_subscribed[10]`, `radio_slot`, `screen_brightness`, `screen_night`, `night_from_hour`, `night_until_hour`,
+`screen_colour` (tft.yaml); today's times and the next prayer (`prayer_hours[7]`, `prayer_minutes[7]`,
+`next_prayer_index/hour/minute`), what was called (`prayer_called`, `prefajr_called`) and `relay_by_prefajr` (the
+relay is on because of Pre-Fajr: on_boot switches it off). The ten `radio_url_N` text entities persist themselves
 (`restore_value: true`). The relay uses `RESTORE_DEFAULT_OFF`.
 
 **Scripts:**
@@ -273,7 +284,7 @@ to 00:00–23:59.
 | `volume_step(delta)` | Left/Right on the clock: ±10 % on the volume of what plays, stopping at 10 %; pop-up; a tone when nothing plays |
 | `show_toast(kind)` | The clock's 2 s pop-up (`toast_kind`: 1 volume, 2 Fajr volume, 3 relay) |
 | `ui_key(button)` | Every key (`athan::MenuKey` 0–4): lock, clock-screen keys, or `menu.key()`. The only place keys are decided |
-| `menu_setup` | Adds the menu's rows at boot, each defined once (CLAUDE.md "Keys and the menu") |
+| `menu_setup` | Adds the menu's rows at boot, each defined once (`firmware_rules.md` 2) |
 | `stop_sound` | Stop the athan, tawashih, tick or a preview, not the radio; silent at once when no radio plays |
 | `radio_off` | Radio off on purpose (Up, the menu, web Stop Radio): silent at once, no automatic resume |
 | `fajr_volume_feedback` | Fajr volume changed (menu or web): tone at the new Fajr level, then `apply_playing_volume`; while a Fajr sound plays it just takes the new level |
@@ -287,16 +298,18 @@ to 00:00–23:59.
 | `play_tick` | Tick over the ducked radio |
 | `check_update` | `update.check`, then sets `update_check_state` for the menu |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
-| `sync_web_state` (1 s interval) | Publish entities only on change; unchanged values are compared in a buffer, without allocating |
-| `screen_refresh` (1 s interval, and after a change) | The screen's level: Brightness (0 % = dark), or at night (Night From to Until) the same, `screen_dim_pct` or dark. A screen that would be dark is lit dim for `screen_wake_s` (120 s) after a key, and while the athan or the Pre-Fajr Tawashih plays (the 120 s start when it ends); `screen_dark_in` holds the seconds left (-1 when it stays lit), redrawn each second, and the display files draw it as a tab in a corner. Brightness set to 0 % sets `screen_force_dark`: dark at once, until the next key. Calls the display file's `apply_screen` only when the level changes (`screen_pct_applied`; 0 = dark, which `ui_key` reads: that key press only lights the screen) |
+| `sync_web_state` (1 s interval) | Publish entities only on change: values are formatted into a buffer and compared in place; the status lines are copied each second (short strings, under the component's lock) |
+| `screen_refresh` (1 s interval, and after a change) | The screen's level: Brightness (0 % = dark), or at night (Night From to Until) by Screen at Night (`night_level()` in `day_window.h`): the same as by day (Normal, which never looks at the window), `screen_dim_pct` (Dim) or dark (Turned off). A screen that would be dark is lit dim for `screen_wake_s` (120 s) after a key, and while the athan or the Pre-Fajr Tawashih plays (the 120 s start when it ends); `screen_dark_in` holds the seconds left (-1 when it stays lit), redrawn each second, and the display files draw it as a tab in a corner. Brightness set to 0 % sets `screen_force_dark`: dark at once, until the next key or the athan / Pre-Fajr Tawashih. Calls the display file's `apply_screen` only when the level changes (`screen_pct_applied`; 0 = dark, which `ui_key` reads: that key press only lights the screen) |
 | `apply_screen`, `menu_display_rows` | In the display file. OLED: contrast (scaled by `oled_contrast`) or panel off; no rows. TFT: the backlight light (gamma 2); the Screen Colour row |
-| `update_display` | In the display file. TFT: `id(tft).update()`, which runs the display's `lambda:` (mipi_spi draws only inside `update()`); asked every second by `tft.yaml`'s 1 s interval while the clock shows (its seconds, and the time left in seconds in the last minute). OLED: the whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`, 26 px), the status marks and the weekday with the date under them, the five prayers with the next one (the calling one during the athan) in a 29-px box, its time in `font3` (Dhuhr only outlined while Sunrise or Doha is next; with Fajr highlighted the other columns move right 1-2 px, clear of its box), and a framed box at the bottom: the next prayer small and its time in `font3`, the time left large (`font1`); while the athan plays it turns white with the prayer's name and ATHAN TIME, joined to its column |
+| `update_display` | In the display file. TFT: `id(tft).update()`, which runs the display's `lambda:` (mipi_spi draws only inside `update()`, and does not clear its buffer: `auto_clear_enabled: false`); asked with each new second of the clock (a 50 ms interval watching `time()`, so the seconds change within 50 ms of the real second; a 1 s interval would keep its boot-time phase) while the clock shows. The lambda draws the whole face (filling it black first, about 50 ms) at least every `tft_ring_update_s` (30 s), when the minute changes, every second in the last minute before a prayer, and when a fingerprint of all else it shows changes; otherwise only the seconds' box (about 2.5 ms, about 1 KB sent). OLED: the whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`, 26 px), the status marks and the weekday with the date under them, the five prayers with the next one (the calling one during the athan) in a 29-px box, its time in `font3` (Dhuhr only outlined while Sunrise or Doha is next; with Fajr highlighted the other columns move right 1-2 px, clear of its box), and a framed box at the bottom: the next prayer small and its time in `font3`, the time left large (`font1`); while the athan plays it turns white with the prayer's name and ATHAN TIME, joined to its column |
 
-**Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 10 s
+**Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 100 ms
+window-settings fingerprint (runs `sync_web_state` at once when it changes), 10 s
 OLED watchdog (`displays/oled.yaml` only) (ESPHome setup for a never-initialised display; one in-place `setup()` per boot for a display that
-came back).
+came back). `displays/tft.yaml`: 50 ms (a frame with each new second of the clock; the ring's flash), 1 s (the web
+Screen Colour select follows the menu).
 
-**Keys and the menu:** CLAUDE.md "Keys and the menu". Navigation is `components/athan/menu.h` (host-tested in
+**Keys and the menu:** [firmware_rules.md](firmware_rules.md) sections 1 and 2. Navigation is `components/athan/menu.h` (host-tested in
 `firmware/tests/test_menu.cpp`), drawing `menu_view.h` (`menu_view.cpp` OLED, `menu_view_tft.cpp` TFT), the rows script
 `menu_setup` (plus `menu_display_rows` from the display file, after Night Until). No row numbers anywhere.
 The rows go round (`ring_row()`); the last, Exit (`MenuRow::exit`), closes on Select, Left or Right. Two panes: five
@@ -324,10 +337,18 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
   Radio Stations, Location and Prayer Times, System.
 - `/audio` (custom handler): `GET /audio` renders the page. Its sticky status bar is an iframe named `st` showing
   `GET /audio/status?g=`, and every form posts into it (`target="st"`), so an action never reloads or scrolls the
-  page. `POST /audio/download|preview|stop|random?list=&entry=&g=` queue an action and redirect to the bar
-  (`random`: the Random tawashih).
-  `POST /audio/upload?slot=&g=` is a multipart upload. The bar refreshes itself every 2 s while a download or
-  upload is busy. `g` is `sounds_changed_` when the page was drawn: once a slot changed, the bar offers
+  page. Each sound is one form: a `<select name="entry">` with the whole list (Random and Custom first where they
+  apply, then "1. Athan 1", …; the sound in use preselected with ✔), a **Preview** button (`formaction`) and
+  **Download**, so the section stays the same size however long the list is. `POST /audio/download|preview?list=&g=`
+  with `entry` in the form's body (`arg()` reads the body and the link) queue the action and redirect to the bar;
+  `entry` -4 (`MENU_RANDOM`) and -1 (`MENU_CUSTOM`) download nothing (`web_download_()`: Random is chosen, or the
+  bar says what is in use), and Preview on Random plays a random entry. `POST /audio/stop` stops what Up, Select or Down stop while a sound plays (the yaml's `stop_sound`, through
+  `set_stop_sound_callback`): a preview, the Pre-Fajr Tawashih, the athan or the tick, silent at once. The radio
+  plays on (web Stop Radio).
+  `POST /audio/upload?slot=&g=` is a multipart upload. Every action redirects the bar to `/audio/status?g=&a=1`:
+  the main loop carries the action out a moment after the bar is drawn, so `a=1` makes the bar load once more a
+  second later (`render_audio_status(gen, acted)`), and it shows the action's result ("already downloaded and in
+  use", "Stopped"). The bar refreshes itself every 2 s while a download or upload is busy. `g` is `sounds_changed_` when the page was drawn: once a slot changed, the bar offers
   **Reload page**. Plain HTML, no JavaScript.
 - ESPHome's page loads one script, `firmware/web_audio_link.js` (`web_server: js_include`, served as `/0.js`). It
   underlines the **Change Sounds At** value and opens `/audio` on click, without replacing ESPHome's elements.
@@ -338,17 +359,32 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
 ## 10. Checks you can run without hardware
 
 `firmware/tests/run_tests.sh`:
-- `partitions.csv`: overlaps, alignment, 16 MB, the component's region sizes, and ESP-IDF's own
-  `gen_esp32part.py` when a build has downloaded it.
+- `partitions.csv`: overlaps, alignment, 16 MB, and ESP-IDF's own `gen_esp32part.py` when a build has downloaded
+  it; the component's sound regions (ascending, disjoint, 4 KB aligned, each holding its 4 KB header and the largest
+  file `audio_slots.h` allows), the prayer slots (a leap year fits), and the partitions it looks up by subtype and
+  name.
 - Calendar helpers.
 - The POSIX TZ parser against Python `zoneinfo`, every 30 min over 2025–2028 for PST8PDT, Cairo, Berlin and
   Riyadh (280,512 vectors).
-- With MP3 paths as arguments, `mp3_scan` against `ffprobe`.
+- With MP3 paths as arguments (relative to the current folder or absolute), `mp3_scan` against `ffprobe`.
+- The device menu's navigation (`test_menu.cpp`).
+- The day windows, `night_level()` and other helpers (`test_helpers.cpp`); every `sym::` icon code point in the TFT's
+  icon fonts.
+- The TFT's ring drawing (`test_tft_draw.cpp`, against a stand-in `display.h` in `tests/host_display/`): `arc()` and
+  `ring()` draw the same pixels as a plain scan that works out the angle of every pixel, for 5,820 rings and arcs.
+- `docs/` (`check_docs.py`): the catalog (at most 64 KB, names ASCII and at most 12 characters, no duplicate links,
+  relative links that exist, the slot limits; sample rate and stereo as warnings), the 10 stations, the mosque keys
+  (mosques.json = the Location options = README 1.7 = the folders) and every yearly file (its structure, plus the
+  day-to-day and year-to-year warnings). Errors fail the run, warnings are listed.
+- With ArduinoJson on the computer (a build_firmware.sh build, syntax_check.sh's download, or `ARDUINOJSON=`):
+  the clock's own `parse_year_file()` on every yearly file and its time zone parser against the scripts'
+  (`test_year_files.cpp`, stand-ins in `tests/host_prayer/`); skipped with a message otherwise.
 
 `firmware/tests/syntax_check.sh`:
 - Runs once per display (`display_type` oled, then tft; `DISPLAYS=tft` for one).
 - Generates the C++ with `esphome compile --only-generate` on a temp copy (placeholder tones if
-  `firmware/sounds/` is empty).
+  `firmware/sounds/` is empty). `ESPHOME_DATA_DIR` is unset, so nothing lands in a real build; the generated folder
+  is found whatever `device_name` is, and a missing `main.cpp` or component source fails the check.
 - Type-checks the component sources (`-Wall -Wextra`) and `main.cpp` (all lambdas) with `clang++
   -fsyntax-only` against the real ESPHome headers. `idf_stubs/` stands in for ESP-IDF and library headers; a header
   with no stand-in fails the check (clang would otherwise stop there and pass everything after it).
@@ -362,7 +398,8 @@ only hardware can confirm:
 - `play_file()` of a memory-mapped `AudioFile` from the `audio` partition (the mmap stays valid while playing;
   `invalidate()` refuses a playing slot).
 - How the player reports state while an announcement plays over the radio. `slot_playing()` relies on
-  `ANNOUNCING`.
+  `ANNOUNCING`. Seen on the prototype (2026-10-15): the player's own state is ANNOUNCING (its log says so, and the
+  past-its-length bound, which needs it, fired), while the API reports an announcement as PLAYING.
 - `esp_http_client` redirects for `releases/latest/download` (handled by ESPHome's `update` component) and for
   raw.githubusercontent.com (no redirect normally).
 - Stream reconnect behaviour after a router restart.
@@ -384,3 +421,4 @@ None of these is needed; each is independent. Hardware options are in `HARDWARE.
 | **Names for own radio links** | The screen shows a name for a slot that plays its own link (it says "own link" now) | One more text entity per slot, or a "name, then link" field format |
 | **AAC and HLS stations** | Stations that are not MP3, Opus, FLAC or WAV | Home Assistant's transcoding proxy where HA is used; natively a different audio library (ESP32-audioI2S, Arduino, not ESPHome) |
 | **A CDN fallback for GitHub** (jsDelivr) | Keeps working if raw.githubusercontent.com rate-limits or is blocked. A clock makes one prayer-times request a year and a few list and sound requests, far below GitHub's limits | A second base URL, tried after a failure; jsDelivr serves GitHub repositories over HTTPS |
+| **One audio controller** (owner's choice: later) | The rules of who plays what in one place. Today they are spread over about 20 yaml scripts (`make_athan`, `run_prefajr`, `play_tick`, `stop_sound`, `silence_audio`, `radio_start`/`radio_off`, `hard_mute`, the volume scripts) and about 25 flags (`athan_playing`, `prefajr_playing`, `radio_resume`, `menu_radio_resume`, `preview_list_`, `tawashih_stream_`, …), and each sound checks the others: the 2026-10-15 review found several bugs where one place missed a rule (the tick over the Random tawashih, the athan losing a radio a menu preview had paused, the keys and `/audio` Stop stopping different things) | A small C++ API in the component (play a sound, stop, stop all, radio on/off, what plays) that owns radio pause and resume, the volume per sound, mute and drain, ducking, the amp and end detection; the yaml only calls it. A rewrite of working code: worth it before more audio features, checked with the on-device tests |

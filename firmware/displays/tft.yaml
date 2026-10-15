@@ -36,9 +36,15 @@ substitutions:
   tft_offset_width: "0"
   # SPI clock. 40 MHz over a short trace and the header; 10-20 MHz if the display sits on a cable.
   tft_data_rate: 40MHz
-  # The ring's flashes in the last minute before an athan: each on and each off lasts this long. 500 = once a second,
-  # an even blink (the owner's choice after comparing 250/250 up to 750/250 live; 2 frames a second, that minute only).
+  # The ring's flashes in the last minute before an athan: each second it is lit this long, then dark for the rest of
+  # the second. 500 = an even blink once a second (the owner's choice after comparing 250/250 up to 750/250 live).
+  # Exactly 2 frames a second, that minute only: the lit one with the new second, the dark one this long after.
   tft_flash_ms: "500"
+  # The clock face as a whole (the ring's progress and its knob) is redrawn at least this often, in seconds; in between,
+  # each second redraws and sends only the seconds digits (about 1 KB instead of the whole 115 KB frame). The whole
+  # face is also redrawn when the minute changes, at once when anything else on it changes, and every second in the
+  # last minute before a prayer. Measured on the prototype: a whole face about 50 ms, the seconds alone about 2 ms.
+  tft_ring_update_s: "30"
 
 spi:
   clk_pin: ${pin_scl}
@@ -78,7 +84,7 @@ select:
           id(screen_colour) = (int) idx.value();
           id(web_screen_colour).publish_state(idx.value());
           id(update_display).execute();
-    web_server: {sorting_group_id: grp_screen, sorting_weight: 5}
+    web_server: {sorting_group_id: grp_screen, sorting_weight: 6}   # after Night Window (athan.yaml)
 
 interval:
   - interval: 1s
@@ -88,19 +94,28 @@ interval:
           const size_t want = (size_t) std::max(0, std::min(athan::tft::NUM_PALETTES - 1, id(screen_colour)));
           auto cur = id(web_screen_colour).active_index();
           if (!id(web_screen_colour).has_state() || !cur.has_value() || cur.value() != want) id(web_screen_colour).publish_state(want);
-          // The clock shows seconds: redraw it every second (about 25 ms of SPI). Not while the menu is open (it
-          // redraws itself when it changes) or the screen is dark; without a time the common 5 s redraw runs.
-          if (id(sntp_time).now().is_valid() && !id(athan_core).menu().is_open() && id(screen_pct_applied) != 0)
-            id(update_display).execute();
-  # The ring's flashes: in the last minute before an athan (ring_flashing, set by the clock's drawing) the ring flips
-  # every ${tft_flash_ms} ms and the screen redraws; at any other time this does nothing. Not while the menu covers
-  # the clock or the screen is dark.
-  - interval: ${tft_flash_ms}ms
+  # The clock shows seconds: a frame with each new second of the clock, within 50 ms of it. Not from a 1 s interval:
+  # that runs at whatever phase it started with, so the seconds (and the minute) changed up to a second late, and the
+  # ring's flash lit mid-second (seen on the prototype). The drawing decides how much: usually the seconds alone, the
+  # whole face every ${tft_ring_update_s} s and whenever more changed (display lambda below). Not while the menu is
+  # open (it redraws itself when it changes) or the screen is dark; without a time the common 5 s redraw runs.
+  - interval: 50ms
     then:
       - lambda: |-
-          if (!id(ring_flashing) || id(athan_core).menu().is_open() || id(screen_pct_applied) == 0) return;
-          id(ring_flash_on) = !id(ring_flash_on);
-          id(update_display).execute();
+          static time_t shown = 0;
+          const time_t t = ::time(nullptr);
+          if (t == shown) return;
+          shown = t;
+          if (id(sntp_time).now().is_valid() && !id(athan_core).menu().is_open() && id(screen_pct_applied) != 0) {
+            // The last minute before an athan (ring_flashing, set by the clock's drawing): the frame of each new second
+            // shows the ring lit, and ring_flash_off darkens it ${tft_flash_ms} ms later: the ring lights as the time
+            // left counts down.
+            if (id(ring_flashing)) {
+              id(ring_flash_on) = true;
+              id(ring_flash_off).execute();
+            }
+            id(update_display).execute();
+          }
 
 display:
   - platform: mipi_spi
@@ -117,12 +132,17 @@ display:
     dc_pin: ${pin_tft_dc}
     reset_pin: ${pin_tft_res}
     data_rate: ${tft_data_rate}
-    # Drawn only when the update_display script asks (update()). The driver draws inside update() alone: it clears
-    # its buffer, runs this lambda and sends the frame (115 KB, about 25 ms at 40 MHz).
+    # Drawn only when the update_display script asks (update()). The driver draws inside update() alone: it runs this
+    # lambda and sends what the lambda drew. It does not clear its buffer first (auto_clear_enabled: false): the lambda
+    # either fills the whole frame black and draws all of it (about 50 ms: 30 to send the 115 KB at 40 MHz, 20 to
+    # draw), or redraws only the seconds, and then only their small box is sent (about 2 ms).
+    auto_clear_enabled: false
     update_interval: never
     lambda: |-
       auto &d = it;
-      id(ring_flashing) = false;   // set again below while the clock is in the last minute before an athan
+      // set again below while the clock is in the last minute before an athan; was_flashing: the frame before was
+      const bool was_flashing = id(ring_flashing);
+      id(ring_flashing) = false;
       namespace tft = athan::tft;
       namespace sym = athan::sym;
       using display::TextAlign;
@@ -130,7 +150,7 @@ display:
       const Color acc(pal.accent), ath(pal.athan), black(0, 0, 0);
       const Color fg(tft::FG), sub(tft::SUB), dim(tft::DIM), rule(tft::LINE), card(tft::CARD);
 
-      // A screen lit only for a while (Brightness 0 % or Screen at Night: Dark, woken by a key): the seconds until it
+      // A screen lit only for a while (Brightness 0 % or Screen at Night: Turned off, woken by a key): the seconds until it
       // goes dark (screen_refresh), on a pill with a moon laid over that corner: under the time on the clock,
       // bottom left in the menu, beside the title on the Wi-Fi setup screen.
       auto draw_countdown = [&](int x, int y) {
@@ -144,15 +164,6 @@ display:
         tft::icon(d, x + 6, y + 4, id(i_16), 16, sym::DARK_MODE, acc, card);
         d.print(x + 26, y + 17, id(t_label), fg, TextAlign::BASELINE_LEFT, num, card);
       };
-
-      // The menu draws itself (components/athan/menu_view_tft.cpp).
-      auto &menu = id(athan_core).menu();
-      if (menu.is_open()) {
-        athan::draw_menu(d, menu, {id(t_row), id(t_label), id(t_item), id(t_head), id(t_small), id(t_time),
-                                   id(i_22), id(i_16), pal.accent});
-        draw_countdown(6, 210);
-        return;
-      }
 
       static const char *names[7] = {"Fajr", "Sunrise", "Doha", "Dhuhr", "Asr", "Maghrib", "Isha"};
       static const char *days[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
@@ -188,9 +199,75 @@ display:
         if (pct > 0) tft::fill_round_rect(d, 46, 154, std::max(10, 148 * pct / 100), 10, 5, acc, rule);
       };
 
+      auto &menu = id(athan_core).menu();
       auto now = id(sntp_time).now();
       const bool time_ok = now.is_valid();
       const bool wifi_ok = wifi::global_wifi_component->is_connected();
+
+      // ---- the seconds alone, most seconds. The clock face is drawn whole at least every ${tft_ring_update_s} s (the
+      // ring's progress and its knob move then), when the minute changes, every second in the last minute before a
+      // prayer (the time left counts seconds; before an athan the ring flashes), and at once when anything else it
+      // shows has changed: a fingerprint of all of it, compared each time. Anything the fingerprint missed is on screen
+      // at the next whole face at the latest. In between, only the seconds' box is cleared and drawn again, and the
+      // driver sends only that box (about 1 KB instead of 115 KB).
+      static bool face_ok = false;   // the panel shows a whole clock face, drawn at face_ms
+      static uint32_t face_sig = 0, face_ms = 0;
+      static int face_minute = -1;
+      const bool clock_face = !menu.is_open() && time_ok;
+      uint32_t sig = 2166136261u;
+      if (clock_face) {
+        auto mix = [&sig](int v) { sig = (sig ^ (uint32_t) v) * 16777619u; };
+        for (int v : std::initializer_list<int>{
+                 wifi_ok, id(clock_12h), id(times_loaded), id(athan_playing), id(next_prayer_index),
+                 id(current_athan_prayer_index), id(next_prayer_hour), id(next_prayer_minute),
+                 id(athan_core).times_standin(), id(buttons_locked), id(athan_core).radio_active(), id(screen_colour),
+                 id(screen_dark_in), id(toast_kind), id(volume_level), id(fajr_volume_level), id(external_relay).state,
+                 id(ring_flash_on), now.day_of_month})
+          mix(v);
+        for (int i = 0; i < 7; i++) {
+          mix(id(prayer_hours)[i]);
+          mix(id(prayer_minutes)[i]);
+          mix(id(athan_enabled)[i]);
+        }
+        const int minute = now.hour * 60 + now.minute;
+        const int rem_s = ((id(next_prayer_hour) * 60 + id(next_prayer_minute)) * 60 - (minute * 60 + now.second) +
+                           86400) % 86400;   // to the next prayer
+        const bool last_minute = id(times_loaded) && rem_s < 60;
+        if (face_ok && sig == face_sig && minute == face_minute && !last_minute &&
+            millis() - face_ms < ${tft_ring_update_s} * 1000UL - 500) {
+          // Where the seconds sit (the time is the same as on the face: the minute has not changed), and the widest
+          // they get: their box, under the AM/PM (baseline 20) and above the countdown pill (44), clear of the time
+          // (it ends 4 px before) and of the status marks on the right.
+          hhmm(line, sizeof(line), now.hour, now.minute);
+          const int sx = 10 + tw(id(t_time), line) + 4;
+          static int sec_w = 0;
+          if (sec_w == 0) {
+            char b[4];
+            for (int s = 0; s < 60; s++) {
+              snprintf(b, sizeof(b), "%02d", s);
+              sec_w = std::max(sec_w, tw(id(t_head), b));
+            }
+          }
+          char sec[4];
+          snprintf(sec, sizeof(sec), "%02d", now.second);
+          d.start_clipping(sx - 2, 21, sx + sec_w + 3, 41);
+          d.filled_rectangle(sx - 2, 21, sec_w + 5, 20, black);
+          d.print(sx, 38, id(t_head), sub, TextAlign::BASELINE_LEFT, sec);   // exactly as the whole face draws them
+          d.end_clipping();
+          return;
+        }
+      }
+      d.fill(black);   // a whole frame: the driver does not clear its buffer (auto_clear_enabled: false)
+      face_ok = false;
+
+      // The menu draws itself (components/athan/menu_view_tft.cpp).
+      if (menu.is_open()) {
+        athan::draw_menu(d, menu, {id(t_row), id(t_label), id(t_item), id(t_head), id(t_small), id(t_time),
+                                   id(i_22), id(i_16), pal.accent});
+        draw_countdown(6, 210);
+        return;
+      }
+
       // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: how to connect (README 1.1). Bluetooth: the state,
       // and the page to open on a phone or computer (Web Bluetooth: Chrome or Edge, not Safari). Hotspot: its name and
       // password once it is on.
@@ -277,7 +354,7 @@ display:
         d.print(120, CY + 34, id(t_label), ath, TextAlign::BASELINE_CENTER, "ATHAN TIME");
       } else {
         const Color track(tft::TRACK);
-        tft::arc(d, cx, cy, ro, ri, 0, 1, track, black, black);
+        bool ring_drawn = false;   // the ring is drawn once: filled and track in one pass (tft::ring), or whole
         int rem_s = 0;   // seconds to the next prayer
         if (times_ok) {
           const int nx = id(next_prayer_hour) * 60 + id(next_prayer_minute);
@@ -290,18 +367,27 @@ display:
           const float f = nx > prev ? std::max(0.0f, std::min(1.0f, (float) (c_s - prev * 60) / (float) ((nx - prev) * 60))) : 0.0f;
           const float mid = (ro + ri) / 2, rc = (ro - ri) / 2, a = f * 6.2831853f;
           // The last minute before an athan (not Sunrise or Doha, not an athan switched off): the ring flashes, whole
-          // in the athan's colour and dark in turn, ${tft_flash_ms} ms each (the fast interval flips ring_flash_on and
-          // redraws), to be seen across a room.
+          // in the athan's colour and dark in turn, to be seen across a room: lit for ${tft_flash_ms} ms of each second
+          // (the frame of each new second lights it, script ring_flash_off darkens it), each a whole frame.
           const bool athan_due = rem_s < 60 && npi != 1 && npi != 2 && id(athan_enabled)[npi];
+          if (athan_due && !was_flashing) {
+            // The flash starts: this frame lit (the last flash may have ended dark), dark ${tft_flash_ms} ms later, as
+            // in every second after it (the new second's frame came before this one knew). Only at the start: on every
+            // frame it would keep the ring lit for the whole minute.
+            id(ring_flash_on) = true;
+            id(ring_flash_off).execute();
+          }
           id(ring_flashing) = athan_due;
           if (athan_due) {
-            if (id(ring_flash_on)) tft::arc(d, cx, cy, ro, ri, 0, 1, ath, black, black);
+            tft::arc(d, cx, cy, ro, ri, 0, 1, id(ring_flash_on) ? ath : track, black, black);
           } else {
-            tft::arc(d, cx, cy, ro, ri, 0, f, acc, black, track);
+            tft::ring(d, cx, cy, ro, ri, f, acc, track, black);
             tft::fill_circle(d, cx, cy - mid, rc, acc, track);
             tft::fill_circle(d, cx + mid * sinf(a), cy - mid * cosf(a), rc + 2, fg, black);
           }
+          ring_drawn = true;
         }
+        if (!ring_drawn) tft::arc(d, cx, cy, ro, ri, 0, 1, track, black, black);   // no times: the empty ring
         const char *nm = known ? names[npi] : "Next";
         const bool muted = known && npi != 1 && npi != 2 && !id(athan_enabled)[npi];
         const int nw = tw(id(t_head), nm), gw = nw + (muted ? 20 : 0);
@@ -374,6 +460,12 @@ display:
       }
       draw_countdown(6, 44);   // under the time, clear of the ring
       draw_toast();
+      if (clock_face) {   // the next frames may draw only the seconds over this one
+        face_ok = true;
+        face_sig = sig;
+        face_minute = now.hour * 60 + now.minute;
+        face_ms = millis();
+      }
 
 font:
   # Roboto, smoothed (bpp 4: 16 levels per pixel). Medium (500) unless noted. menu_view_tft.cpp's layout and the clock
@@ -480,6 +572,17 @@ script:
             return false;
           };
           id(athan_core).menu().add_row(std::move(r));
+
+  # The flashing ring's dark half: ${tft_flash_ms} ms after the new second's frame drew it lit (only in the last minute
+  # before an athan, and not while the menu covers the clock or the screen is dark).
+  - id: ring_flash_off
+    mode: restart
+    then:
+      - delay: ${tft_flash_ms}ms
+      - lambda: |-
+          if (!id(ring_flashing) || id(athan_core).menu().is_open() || id(screen_pct_applied) == 0) return;
+          id(ring_flash_on) = false;
+          id(update_display).execute();
 
   # Redraws the TFT (each display file has its own update_display; athan.yaml only asks for it). mode: restart and
   # the delay of 0 fold every request made during one pass of the loop into one draw, as on the OLED.

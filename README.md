@@ -123,7 +123,8 @@ it, in colour:
 - **At the top:** the time on the left, with its seconds beside it (AM/PM small above them on the 12-hour clock);
   the date and the status marks on the right. The marks are a radio with the
   slot number, a padlock, a crossed-out Wi-Fi sign, and a clock-with-arrow for estimated times.
-- **In the middle:** a **ring** that fills from the last prayer time to the next one. Inside it are the next prayer,
+- **In the middle:** a **ring** that fills from the last prayer time to the next one (it moves on every 30 seconds;
+  the seconds beside the time tick every second). Inside it are the next prayer,
   the time left (large: "1h 29m", "37m", and in the last minute the seconds, "45s") and the prayer's time.
 - **At the bottom:** the five prayers in a strip. The next one sits in a filled box of the accent colour, easy to
   find from across a room; while Sunrise or Doha comes first, Dhuhr is only framed, as on the OLED. The ones that have
@@ -156,7 +157,7 @@ While the athan, the tawashih, the tick or a preview plays, **Up**, **Down** and
 radio is the exception: it keeps playing, so Up stops it, Select opens the menu and Down switches the relay as usual.
 Stopping the athan also cancels the radio's automatic resume.
 
-While the screen is dark (**Brightness 0 %**, or **Screen at Night: Dark** at night: 1.3 menu), the first press of
+While the screen is dark (**Brightness 0 %**, or **Screen at Night: Turned off** at night: 1.3 menu), the first press of
 any key only lights it, dim, and does nothing else. It stays lit for 2 minutes after the last press, and a small tab
 with a moon counts the seconds down in a corner (under the time on the colour screen, top right on the OLED, bottom
 left in the menu). The athan and the Pre-Fajr Tawashih light it too, and the 2 minutes start when they end.
@@ -183,19 +184,19 @@ Buttons. The colour screen gives every row an icon and shows full names where th
 | Row | Left/Right | Select |
 |---|---|---|
 | **Radio** | The ten radio slots (opens on the one chosen last) | Plays the slot shown, or stops it if it is playing, and returns to the clock |
-| **Athan** | The suggested athans, and **Custom** first if you uploaded one. Rest on one for half a second and its preview plays; the one in use plays from the device. The row opens on the athan in use and previews it (not while the radio plays: then only Left/Right preview, and the radio comes back when the menu closes) | Downloads the one shown and makes it the athan. Progress shows under it; the old sound stays until the new one has passed every check, then the check mark moves. Custom disappears once a download replaces it |
+| **Athan** | The suggested athans, numbered ("1. Athan 1", "2. Abdul Basit", …), as many as the project's list has (a slider under a long list shows where you are), and **Custom** first if you uploaded one. Rest on one for half a second and its preview plays; the one in use plays from the device. The row opens on the athan in use and previews it (not while the radio plays: then only Left/Right preview, and the radio comes back when the menu closes) | Downloads the one shown and makes it the athan. Progress shows under it; the old sound stays until the new one has passed every check, then the check mark moves. Custom disappears once a download replaces it |
 | **Fajr Athan** | The same, for the Fajr athan. Previews play at the Fajr volume | The same |
 | **Tawashih** | **Random** first (the default: a different list entry each day, streamed, nothing stored), then as for the athan | Random takes effect at once and frees the stored tawashih. An entry is downloaded as for the athan and replaces Random |
 | **Pre-Fajr** | Off, On, side by side | Takes it |
 | **Hourly Tick** | The ticks, with **Off** first | Takes it; any tick switches the hourly tick on |
-| **Tick From**, **Tick Until** | From: **Maghrib**, **Isha**, then every hour; Until: **Fajr**, **Dhuhr**, then every hour. A prayer moves with the prayer times every day (from Isha until Fajr follows the seasons by itself). The line under it shows the window the choice shown would make ("until Fajr, 10 h"); From = Until means all day | Takes it (a check marks the one in use) |
+| **Tick From**, **Tick Until** | The ticks play by day: From: **Fajr**, **Dhuhr**, then every hour; Until: **Maghrib**, **Isha**, then every hour. A prayer moves with the prayer times every day (from Fajr until Isha follows the seasons by itself). The line under it shows the window the choice shown would make ("until Isha, 14 h"); From = Until means all day | Takes it (a check marks the one in use) |
 | **Athan On/Off** | Fajr, Dhuhr, Asr, Maghrib, Isha: the prayer and On or Off, and under them all five by initial with a box (filled = on), the framed one switches | Switches the framed prayer |
 | **Volume**, **Fajr Volume** | 0–100 %, at once, with a tone at the new level | Closes |
 | **Location** | The mosques | Takes it; the clock downloads its prayer times |
 | **Clock** | 24-hour, 12-hour | Takes it |
 | **Brightness** | 0–100 %, at once (the colour screen's backlight, the OLED's contrast: a smaller range). **0 %** turns the screen dark at once, by day too; a key then lights it dim for 2 minutes, counting down | Closes |
-| **Screen at Night** | **Off** (as by day), **Dim** (10 %), **Dark** (off; a key lights it for 2 minutes, counting down; the athan and the Pre-Fajr Tawashih while they play) from Night From to Night Until | Takes it |
-| **Night From**, **Night Until** | The same choices as for the tick: Maghrib, Isha or an hour; Fajr, Dhuhr or an hour | Takes it |
+| **Screen at Night** | **Normal** (the night changes nothing: the screen is exactly as by day), **Dim** (10 %), **Turned off** (dark; a key lights it for 2 minutes, counting down; the athan and the Pre-Fajr Tawashih while they play) from Night From to Night Until | Takes it |
+| **Night From**, **Night Until** | The tick's choices the other way round: From: **Maghrib**, **Isha** or an hour; Until: **Fajr**, **Dhuhr** or an hour. The line under it shows the night the choice shown would make ("until Fajr, 10 h") | Takes it |
 | **Screen Colour** (colour screen only) | Gold, Teal, Green, Blue, White: the name and a dot in each colour | Takes it |
 | **Update** | — | Checks GitHub for new firmware; when there is one, the item becomes **Install 3.x.y** and Select installs it. `Check failed` means GitHub has no release yet or the clock is offline |
 | **Lock Buttons** | — | Locks the buttons and returns to the clock |
@@ -212,15 +213,16 @@ Open **<http://athan.local>**. If that doesn't work, use the IP address from the
 grouped:
 
 - **Now:** Stop Audio, Athan Playing, Next Prayer, Today's Times, Buttons Locked, 12-hour Clock.
-- **Athan:** Volume, Fajr Volume, Pre-Fajr Tawashih, Hourly Tick, Tick Window Start / End (lists: Maghrib, Isha or an
-  hour; Fajr, Dhuhr or an hour).
+- **Athan:** Volume, Fajr Volume, Pre-Fajr Tawashih, Hourly Tick, Tick Window Start / End (lists: Fajr, Dhuhr or an
+  hour; Maghrib, Isha or an hour) and Tick Window, the window they make ("Fajr to Isha (14 h)", "all day", "tick off").
 - **Athan On/Off per Prayer:** one switch per prayer.
 - **Sounds:** the selected sounds, the last download's status, and the link to the sounds page (1.5).
 - **Radio:** Radio Station, Play Radio, Stop Radio, Radio Status.
 - **Radio Stations:** the ten slots (1.6).
 - **Location and Prayer Times:** Location, Refresh Prayer Times, Prayer Data (which years are stored).
-- **Screen:** Screen Brightness, Screen at Night, Night From, Night Until (as in the menu), and Screen Colour on a
-  colour-screen clock.
+- **Screen:** Screen Brightness, Screen at Night, Night From, Night Until (as in the menu), Night Window, the night
+  they make ("Isha to Fajr (10 h)", "all day", or "same as day" while Screen at Night is Normal), and Screen Colour on
+  a colour-screen clock. Screen at Night's choices there: Normal (same as day), Dim, Turned off.
 - **System:** Firmware Version (this build, and whether GitHub has a newer one), Firmware (install updates), Check
   For Update, Restart, External Relay, IP address, **Wi-Fi Signal**, **Wi-Fi Drops** (when and why the router dropped
   the clock, the last three), memory.
@@ -233,22 +235,29 @@ The same entities show up in Home Assistant when you add the device there (ESPHo
 ### 1.5 Changing the sounds: <http://athan.local/audio>
 
 Open it from the **Change Sounds At** link on the device page, or type the address. A status bar stays at the top
-of the page, with a **Stop** button for previews. Every button reports there, so the page never reloads or jumps
-back to the top. After a download or upload, the bar offers **Reload page** to show the new sound. For each of
-the four sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
+of the page, with a **Stop** button: it stops what plays (a preview, the Pre-Fajr Tawashih, the athan or the tick,
+like Up, Select or Down on the clock), while the radio plays on. Every button reports there, so the page never
+reloads or jumps back to the top. After a download or upload, the bar offers **Reload page** to show the new sound.
+For each of the four sounds (athan, Fajr athan, tawashih, hourly tick), the page shows:
 
-- **Selected:** the name and length of the sound stored on the clock, the one it plays.
-- **The suggested list** from this project, with **Preview** and **Download** for each entry. The selected entry is
-  marked *selected*. Preview stores nothing: the selected entry plays from the clock, any other streams from the
-  internet. Download fetches the entry, checks it, and only then replaces the selected sound. Downloading the
-  selected entry does nothing. To fetch it again, download another entry and then this one.
+- **In use:** the sound stored on the clock, the one it plays: its number and name in the list ("8. Jazy") and its
+  length.
+- **The list:** every sound this project suggests for it, in one dropdown, numbered ("1. Athan 1", "2. Abdul
+  Basit", …). It is as long as the project's list, which can have any number of entries. It opens on the sound in
+  use, marked ✔. Choose one, then:
+  - **Preview** to listen. Nothing is stored: the sound in use plays from the clock, any other streams from the
+    internet.
+  - **Download** to make it the sound in use. The clock fetches it, checks it, and only then replaces the old one;
+    the status bar then says "8. Jazy downloaded and in use". Download on the sound already in use fetches
+    nothing and says so ("already downloaded and in use"). To fetch it again, download another entry, then this
+    one.
 - **Upload your own:** pick an MP3 file on your phone or computer and press Upload. The uploaded sound then shows
-  at the top of the list as **Custom**, with **Preview**, and in the clock's menu as **Custom** too. It stays
-  until you download a list entry for that sound, which replaces it.
-- **Tawashih only: Random.** The first line of the tawashih list. With **Use**, the Pre-Fajr Tawashih becomes a
-  different list entry each day, streamed from GitHub when it plays, and the stored tawashih is freed. It is the
-  default. Downloading or uploading a tawashih switches Random off. Without internet at Pre-Fajr time nothing plays
-  (the relay still switches).
+  at the top of the dropdown as **Custom** (marked ✔ while it is in use), and in the clock's menu as **Custom**
+  too. It stays until you download a list entry for that sound, which replaces it.
+- **Tawashih only: Random.** The first line of the tawashih dropdown. With **Download**, the Pre-Fajr Tawashih
+  becomes a different list entry each day, streamed from GitHub when it plays, and the stored tawashih is freed
+  (Preview plays one of them). It is the default. Downloading or uploading a tawashih switches Random off. Without
+  internet at Pre-Fajr time nothing plays (the relay still switches).
 
 Limits, checked before anything is replaced:
 
@@ -343,8 +352,8 @@ it opened.
 - **If Wi-Fi drops** (the router restarts, or drops the clock for a moment), the radio pauses and starts again by
   itself as soon as Wi-Fi is back; after 10 minutes without Wi-Fi it switches off. Pressing Up while Wi-Fi is down
   starts the radio once it is back.
-- **If the station itself fails** (down, or no internet behind the router), the clock tries three more times, 3, 6
-  and 9 seconds apart, then stops and shows the reason under Radio Status.
+- **If the station itself fails** (down, or no internet behind the router), the clock tries up to six more times
+  over about 15 seconds, then stops and shows the reason under Radio Status.
 - **Right speed, always:** stations sometimes change format between recordings (mono or stereo, 44.1 or 22 kHz),
   and the clock joins a live stream in the middle of its data. The player follows every format change on its own,
   so Quran never plays sped up or slowed down. As a second check, the clock reads the station's format itself 10
@@ -369,6 +378,35 @@ order:
    ESP32's 802.11b/g/n radio does not use). On a TP-Link Deco: also Fast Roaming, and Mesh Technology for the clock.
 5. If drops come at a fixed interval, raise the router's group key update interval (for example to 3600 s).
 6. Update the router's firmware.
+
+#### More Quran stations from mp3quran.net, step by step
+
+The project's list fills the ten slots, but any slot can play another station instead.
+[mp3quran.net/eng/radios](https://www.mp3quran.net/eng/radios) has over 170 Quran stations by reciter, all links
+the clock plays. To put one on a slot:
+
+1. Search for the reciter.
+2. Press **•••** on the station.
+3. Press **Copy Link** (the link icon). The station's link is now copied, for example
+   `https://backup.qurango.net/radio/mahmoud_ali__albanna`.
+
+![mp3quran.net radio page: the search box, the station's ••• button and its Copy Link button](images/radio_mp3quran_copy_link.png)
+
+On the clock's page (<http://athan.local>), under **Radio Stations**, take any slot (here 10):
+
+4. Switch **Radio 10 follows project list** off.
+5. Paste the link into **Radio 10 own link** and press Enter.
+
+![The clock's page: Radio 10 follows project list switched off, the copied link in Radio 10 own link](images/radio_own_link.png)
+
+Then, under **Radio**:
+
+6. Choose **Radio 10 (own link)** in **Radio Station**. If it still shows the old name, reload the page.
+7. Press **Play Radio**. **Radio Status** shows the slot while it plays. On the clock, Up plays the slot chosen last.
+
+![The clock's page: Radio 10 (own link) chosen, Play Radio pressed, Radio Status showing it](images/radio_play_own_link.png)
+
+Switch **follows project list** back on to give the slot the project's station again.
 
 #### Adding your own station
 
@@ -396,8 +434,8 @@ plenty for one speaker.
 **Where to find links:**
 
 - **Quran stations:** [mp3quran.net/eng/radios](https://www.mp3quran.net/eng/radios) lists over 170 stations by
-  reciter, all MP3 over HTTPS. The project's own list uses these. The same list as data, with each station's
-  `url`: <https://www.mp3quran.net/api/v3/radios?language=eng>.
+  reciter, all MP3 over HTTPS (step by step above). The project's own list uses these. The same list as data, with
+  each station's `url`: <https://www.mp3quran.net/api/v3/radios?language=eng>.
 - **Any station:** [radio-browser.info](https://www.radio-browser.info) is an open directory of tens of thousands
   of stations. Search for one, check that its codec says **MP3**, and copy its stream link.
 - **A station's own website:** look for "direct link", "listen in your player" or a `.m3u` / `.pls` download.
@@ -464,7 +502,7 @@ Then:
 
 Expect a delay of a few seconds, because the clock buffers the stream: fine for music and recitations, not for
 watching a video. The athan still interrupts it and resumes it afterwards. When the computer stops streaming, the
-clock tries three more times and then switches the radio off.
+clock tries up to six more times (about 15 seconds) and then switches the radio off.
 
 ### 1.7 Prayer times
 
@@ -516,9 +554,11 @@ succeeded once. That needs a published release (3.4) and internet.
 The full parts list, the pin map, and instructions for the PCB and the enclosure are in
 [HARDWARE.md](HARDWARE.md). The amplifier circuit is in [max98357a_amplifier.md](max98357a_amplifier.md).
 
-**The board** (KiCad project in `hardware/pcb/`): 56 × 47 mm, two layers, all parts hand-soldered. The front carries
-the module and the flat parts; the back, the side you look at, carries the 5-way switch, the connectors and the display
-headers. Every resistor and capacitor has its value printed next to it.
+**The board** (KiCad project in `hardware/pcb/`): 59.6 × 50 mm, two layers, all parts hand-soldered. The front, the
+side you look at, carries one display (TFT or OLED, on long pin headers so small parts fit under it), the 5-way switch,
+the status LED, the USB-C and barrel jacks and the screw terminals. The back carries the ESP32 module (its antenna on the
+bottom edge, with no copper under it), the amplifier, the regulator and the small parts. Every resistor and capacitor
+has its value printed next to it, and the programming header J6 is labelled on both sides.
 
 | Side | Bare board (before soldering) | Assembled (after soldering) |
 |---|---|---|
@@ -532,7 +572,8 @@ channel). Left unconnected, SD puts the breakout in its mono-mix mode, which giv
 
 ### 2.2 Firmware
 
-You need [ESPHome](https://esphome.io) **2026.9 or newer**. The firmware was written against 2026.9.1. The
+You need [ESPHome](https://esphome.io) **2026.9.1**: the firmware carries a copy of that version's speaker component
+(`firmware/components/speaker`, its README says how to move it to another version). The
 easiest way is **`./build_firmware.sh`** in the repository root (macOS or Linux, Python 3.12–3.14). It installs
 that exact ESPHome into its own environment on the first run, with no Docker or dashboard. It keeps ESPHome, the
 toolchain (about 1 GB) and the build in `~/.cache/esp32_athan`, so nothing is written into the repository except
@@ -548,8 +589,9 @@ the finished binaries in `firmware/binaries/`.
 | `./build_firmware.sh clean [all]` | Delete the build (`all`: also ESPHome and the toolchain) |
 
 **Which display.** The firmware is built for one display: the 128×64 OLED (the default) or the 240×240 colour TFT
-(wiring: [HARDWARE.md](HARDWARE.md) 3.2). Add `--display tft` to any command above (or set `display_type: tft` at
-the top of `firmware/athan.yaml`) for the TFT. Its files carry `-tft`: `athan-v3-tft-<version>.factory.bin`,
+(wiring: [HARDWARE.md](HARDWARE.md) 3.2). Add `--display tft` to any command above for the TFT, or set
+`display_type: tft` at the top of `firmware/athan.yaml`: the scripts follow it whenever `--display` is not given.
+Its files carry `-tft`: `athan-v3-tft-<version>.factory.bin`,
 `athan-v3-tft.ota.bin`, `manifest-tft.json`, and a TFT clock updates only to TFT releases (its screens: 1.2). ST7789
 modules differ: a new TFT clock opens on the Wi-Fi setup screen, whose Wi-Fi icon is teal and "Press Select"
 orange. If they look yellow-green and blue, or the background is white, change the panel settings at the top of
@@ -568,7 +610,8 @@ building, use **`./flash_firmware.sh`**:
 
 Add `-f FILE` to flash another file, `--display tft` for the TFT build's files. Every file is checked to be an ESP32-S3 image of the right kind first.
 Wi-Fi updates (from both scripts) go only to a clock that serves the V3 `/audio` page. A V2 clock also answers to
-`athan.local` and an ESP32 image would brick it.
+`athan.local` and an ESP32 image would brick it. They also refuse a clock that runs the other display's build (it
+would show a dark screen); `--any-display` sends it anyway.
 
 1. **Put the two menu tones** in `firmware/sounds/`: `click.wav` (the menu click) and `volume.wav` (the volume
    tone), short **mono 16-bit 44.1 kHz WAV** files (the repository has ones; keep them under about 50 ms). They are
@@ -598,9 +641,9 @@ Wi-Fi updates (from both scripts) go only to a clock that serves the V3 `/audio`
    Releases (3.4).
 
 **ESPHome dashboard (Docker) instead of the command line:** copy the *contents* of `firmware/` into the dashboard's
-config folder: `athan.yaml`, `partitions.csv`, `web_audio_link.js`, `components/` and `sounds/`. The yaml finds
-them by relative path.
-Make sure the dashboard image is 2026.9 or newer (`docker pull esphome/esphome:latest`).
+config folder: `athan.yaml`, `partitions.csv`, `web_audio_link.js`, `components/`, `displays/` and `sounds/`. The
+yaml finds them by relative path.
+Use the 2026.9.1 image (`docker pull esphome/esphome:2026.9.1`), for the reason above.
 
 **A V2 clock on the same network** is also called `athan`. Give one of them another `device_name` (substitution at
 the top of the yaml, for example `athan3`), or `athan.local`, Home Assistant and the dashboard will mix them up.
@@ -626,9 +669,10 @@ firmware update.
 
 One file per mosque per year: `docs/athantimes/<key>/<year>.json`. The format is in
 [prayertimes_specs.md](prayertimes_specs.md): one list of 12 `HH:MM` times per day, true 24-hour, at most 100 KB.
-All scripts are in `scripts/` and write exactly that one file. They check the times, warn about suspicious days
-(adhan out of order, iqama before adhan, a change of more than 3 minutes from the same date last year), and
-refuse a broken year.
+All scripts are in `scripts/` and write exactly that one file. They refuse a year the clock would refuse (adhan
+out of order, a wrong number of days, a key or time zone the clock does not take) and warn about suspicious days:
+an iqama before its adhan, a change of more than 3 minutes from the same date last year, and a step of more than 5
+minutes from the day before (both through UTC, so DST changes don't count).
 
 | Your source | Script |
 |---|---|
@@ -637,8 +681,9 @@ refuse a broken year.
 | MCA Santa Clara PDF | `python3 scripts/santaclara_prayer_times_parser.py --key sclaramca 2027_MCA_Prayer_Time.pdf` |
 | A year that only exists as V2 daily files | `python3 scripts/make_yearly_json.py --key davis --year 2027` (reads `../esp_athan`) |
 
-Add `--dry-run` to check without writing. `python3 scripts/plot_prayer_times.py docs/athantimes` draws every
-year as an HTML chart next to its file (needs `pip install plotly`), handy for spotting a typo by eye.
+Add `--dry-run` to check without writing. The PDF and HTML parsers need `pip install pdfplumber` and `pip install
+beautifulsoup4`. `python3 scripts/plot_prayer_times.py docs/athantimes` draws every year as an HTML chart next to its
+file, plus a page linking them all (`docs/index.html`; needs `pip install plotly`), handy for spotting a typo by eye.
 
 **Publish each new year as soon as the mosque publishes its timetable,** whether that is in November or some days
 into January. V3 clocks pick it up within a day in December, or within 6 hours from 1 January. Until then they use
@@ -662,15 +707,19 @@ V2 clocks read **daily** files from the V2 repository. Produce those with the V2
 
 `python3 scripts/prepare_audio.py` builds the whole library from the V2 SD-card recordings
 (`../esp_athan/SDCard_files`: A → athan, F → fajr, D → tawashih, B → tick). Every file is rebuilt into one plain
-format: MP3, mono, 48 kHz (the clock's own rate, so it never resamples), constant 64 kbps, no tags, no cover art,
+format: MP3, mono, 44.1 kHz (the clock's own output rate, so it plays them without resampling), constant 64 kbps, no
+tags, no cover art,
 no info frame. Each gets one plain gain so its decoded peak sits near −2 dBFS (no clipping, similar loudness),
 and is checked to be exactly as long as its source; nothing is ever sped up or cut, and a recording over the
-length limit is refused. Add `--check` to see what it would do without writing anything.
+length limit is refused. Add `--check` to see what it would do without writing anything. A file that fails a check
+keeps the file that was there. `A05.mp3` counts as entry 5; two files for one entry are refused.
 
-- The files go in `docs/audio/athan/`, `fajr/`, `tawashih/` and `tick/`, named `01.mp3` … `10.mp3`.
-- Names and links go in [docs/audio/catalog.json](docs/audio/catalog.json). Each list holds up to 10 entries.
-  Entry 1 is the default that new clocks download. A `url` can be relative to `docs/audio/` (`athan/01.mp3`) or a
-  full https link.
+- The files go in `docs/audio/athan/`, `fajr/`, `tawashih/` and `tick/`, named `01.mp3`, `02.mp3`, and so on.
+- Names and links go in [docs/audio/catalog.json](docs/audio/catalog.json). A list can have any number of entries
+  (the whole file at most 64 KB, over 1,000 entries); the clock and its web page number them in the file's order
+  ("1. Athan 1", "2. Abdul Basit"). Add new ones at the end, so the numbers owners know stay the same. Entry 1 is
+  the default that new clocks download. A `url` can be relative to `docs/audio/` (`athan/01.mp3`) or a full https
+  link.
 - Names are plain ASCII and at most 12 characters, so they fit the screen.
 - Every file must already pass the clock's checks (1.5). Re-encode big ones with the `ffmpeg` line in 1.5; use
   `48k` for ticks.
@@ -702,6 +751,9 @@ radiojar link, written with `http://`, is the fallback if the relay goes away.
    ```bash
    python3 scripts/make_release_manifest.py path/to/firmware.ota.bin --version 3.0.1 --summary "What changed"
    ```
+
+   It refuses a factory image, an image built for another display than `--display` (`--display tft` for TFT
+   builds), and a `--version` the image was not built with; nothing is written then.
 
 3. Create a GitHub Release with tag `v3.0.1`, attach the two files it wrote (`athan-v3.ota.bin` and
    `manifest.json`), and mark it **latest**. Clocks see it within 6 hours.
@@ -737,9 +789,8 @@ hardware/enclosure/        3D files (to be drawn from HARDWARE.md)
 images/                    photos for this README
 build_firmware.sh          build / flash / OTA / logs without Docker (2.2)
 flash_firmware.sh          flash existing binaries over Wi-Fi or USB, no build (2.2)
-README.md  HARDWARE.md  DEVELOPER.md  prayertimes_specs.md
+README.md  HARDWARE.md  DEVELOPER.md  firmware_rules.md  prayertimes_specs.md
 max98357a_amplifier.md  microcontroller_demand.md
-CLAUDE.md                  notes for AI coding agents working in this repository
 ```
 
 ## License

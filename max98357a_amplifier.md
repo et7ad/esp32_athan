@@ -1,9 +1,8 @@
 # MAX98357A amplifier: replicating the Adafruit 3006 board on the version 3 PCB
 
-Date: 2026-10-04. Companion to `version3_planning.md` (sections 3.1, 3.3 and 3.5) and `HARDWARE.md`. In the
-firmware, SD_MODE is `output: amp_enable` (GPIO15, `pin_amp_sd` in `firmware/athan.yaml`): switched on before any
-playback (`amp_wake`) and off 5 s after the player goes idle (`amp_idle_off`), also when a requested sound never
-started.
+Date: 2026-10-04. Companion to `HARDWARE.md` (parts, pin map and power: sections 3 and 4). In the firmware,
+SD_MODE is `output: amp_enable` (GPIO15, `pin_amp_sd` in `firmware/athan.yaml`): switched on before any playback
+(`amp_wake`) and off 5 s after the player goes idle (`amp_idle_off`), also when a requested sound never started.
 
 The version 3 board uses the bare MAX98357A chip (MAX98357AETE+T, LCSC/JLCPCB C910544) wired the way Adafruit wires
 its [MAX98357A I2S amp breakout, product 3006](https://www.adafruit.com/product/3006), with three changes: SD_MODE is
@@ -107,7 +106,7 @@ and hundreds of ohms at MHz, where the switching noise is.
 ## 3. Our version (on the version 3 PCB)
 
 Same circuit, with SD_MODE fed from an ESP GPIO, a jumper block on GAIN, and the speaker wired straight to OUTP/OUTN
-(no output filter). The pins match `version3_planning.md` section 3.3.
+(no output filter). The pins match `HARDWARE.md` section 3.2 and the `pin_*` substitutions in `firmware/athan.yaml`.
 
 ```text
                            +5V (main rail; the 470 uF bulk cap sits next to the amp)
@@ -297,7 +296,7 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 - Speaker: 4 Ω or more, with a voice-coil inductance above 10 µH (normal for real speakers). Never connect OUTP or
   OUTN to ground or to another amplifier's input: the outputs are bridge-tied.
 
-## 7. Prototype checks (feed into checklist item 6 of `version3_planning.md`)
+## 7. Prototype checks (part of items 6 and 11 of the checklist in `HARDWARE.md` section 9)
 
 1. 9 dB: play the loudest athan at 100 %. Listen for crackle on the loudest syllables; note how loud it is in the
    room.

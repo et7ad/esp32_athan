@@ -76,7 +76,16 @@
           "width": 0.0
         }
       ],
-      "drc_exclusions": [],
+      "drc_exclusions": [
+        [
+          "npth_inside_courtyard|114050000|147400000|7ed7e368-3bab-48a8-9ece-f3d15a2dad9b|5fd4a0be-5fac-46bd-ac44-088cccbe73df",
+          "OLED standoff hole beside the ESP antenna, inside the module courtyard: accepted on this board size (use a nylon screw there)."
+        ],
+        [
+          "npth_inside_courtyard|145550000|147400000|97a3563f-4d1e-4c68-885d-6d63ef54fd2f|5fd4a0be-5fac-46bd-ac44-088cccbe73df",
+          "OLED standoff hole beside the ESP antenna, inside the module courtyard: accepted on this board size (use a nylon screw there)."
+        ]
+      ],
       "meta": {
         "version": 2
       },
@@ -863,7 +872,7 @@
         "uuid": "6c2452ef-45b6-4fa3-afe0-a595c894c1ac"
       }
     ],
-    "used_designators": "#FLG1-2,H1-4,SW1-2,D1,#PWR1-26,C1-7,JP1-4,R1-13,J1-7,U1-3,U5",
+    "used_designators": "DS1,#FLG1-2,JP1-4,R1-13,H1-4,D1,#PWR1-26,C1-7,U1-3,U5,SW1-2,#SYM1-2,J1-7",
     "variants": []
   },
   "sheets": [

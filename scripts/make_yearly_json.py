@@ -58,6 +58,7 @@ def main() -> int:
         return 1
 
     failed = 0
+    done = set()  # (key, year) found in the V2 data and converted (or tried)
     for key_dir in sorted(p for p in daily_root.iterdir() if p.is_dir()):
         key = key_dir.name
         if a.key and key not in a.key:
@@ -66,6 +67,7 @@ def main() -> int:
         for year in years:
             if a.year and year not in a.year:
                 continue
+            done.add((key, year))
             warnings: list = []
             try:
                 tz_text = mosque(key)["tz"]
@@ -78,7 +80,17 @@ def main() -> int:
             except (DataError, KeyError, ValueError) as e:
                 print(f"✗ {key}/{year}: {e}")
                 failed += 1
-    return 1 if failed else 0
+    # Say what matched nothing (a mistyped key, a year the V2 repository does not have) instead of a silent success.
+    if a.key and a.year:
+        missing = [f"{k}/{y}" for k in a.key for y in a.year if (k, y) not in done]
+    else:
+        missing = [f"key {k!r}" for k in a.key or [] if all(d[0] != k for d in done)]
+        missing += [f"year {y}" for y in a.year or [] if all(d[1] != y for d in done)]
+    if not done and not missing:
+        missing = ["any mosque"]
+    for m in missing:
+        print(f"✗ no V2 daily data for {m} in {daily_root}")
+    return 1 if failed or missing else 0
 
 
 if __name__ == "__main__":

@@ -11,17 +11,22 @@
 #
 # Options:  -f FILE         flash another file, for example athan-v3.ota.bin downloaded from a GitHub Release
 #           -y              don't ask before usb-full
-#           --display tft   the TFT build's files (default oled; ATHAN_DISPLAY works too)
+#           --display tft   the TFT build's files (default: display_type in firmware/athan.yaml, oled as shipped;
+#                           ATHAN_DISPLAY works too)
+#           --any-display   ota: send the file even to a clock that runs the other display's build
 #
 # Default files (written by ./build_firmware.sh): ota and usb send firmware/binaries/athan-v3.ota.bin, usb-full
 # the newest firmware/binaries/athan-v3-<version>.factory.bin (TFT: athan-v3-tft.ota.bin, athan-v3-tft-<version>.
-# factory.bin). A clock flashed with the other display's build runs with a dark screen; flash the right one. Without PORT, the USB port is found by itself (asks if
-# there are several). On the V3 board that port is a 3.3 V USB-serial adapter on J6 (GND 1, adapter RX 4, TX 5):
-# put the jumper on J6 pins 1-2 before powering the board, and remove it afterwards.
+# factory.bin). A clock flashed with the other display's build runs with a dark screen; flash the right one.
+# Without PORT, the USB port is found by itself (asks if there are several). On the V3 board that port is a 3.3 V
+# USB-serial adapter on J6 (GND 1, adapter RX 4, TX 5): put the jumper on J6 pins 1-2 before powering the board, and
+# remove it afterwards.
 #
 # Safety: every file is checked to be an ESP32-S3 image of the right kind before anything is sent. Wi-Fi updates
-# go only to a clock that serves the version 3 /audio page: a V2 clock also answers to athan.local and an ESP32
-# image would brick it. USB writes use --chip esp32s3, so esptool refuses any other chip.
+# go only to a clock that serves the version 3 /audio page (a V2 clock also answers to athan.local and an ESP32
+# image would brick it) and runs the same display's build as the file (the other one would show a dark screen);
+# the name is resolved once, so the checks and the upload reach the same clock. USB writes use --chip esp32s3, so
+# esptool refuses any other chip.
 #
 # Needs: curl (Wi-Fi); esptool for USB (taken from build_firmware.sh's ESPHome environment, or installed alone
 # into the same cache folder on first use).
@@ -120,11 +125,24 @@ newest_factory() {
   ls -t "$OUT"/athan-v3"$(variant_suffix)"-[0-9]*.factory.bin 2>/dev/null | head -1 || true
 }
 
+# image_display FILE: tft or oled, from the update manifest URL inside the image (each build checks its own:
+# .../download/manifest-tft.json or .../download/manifest.json); empty when the image has neither.
+image_display() {
+  python3 - "$1" <<'EOF'
+import re, sys
+found = set(re.findall(rb"/releases/latest/download/(manifest[A-Za-z0-9_-]*)\.json", open(sys.argv[1], "rb").read()))
+print({b"manifest": "oled", b"manifest-tft": "tft"}.get(found.pop(), "") if len(found) == 1 else "")
+EOF
+}
+
 flash_ota() {
-  local file="$1" host="$2" resp
+  local file="$1" name="$2" host want resp
   check_image "$file" app
+  host="$(resolve_host "$name")"
   ensure_v3_device "$host"
-  say "Sending $(basename "$file") to $host over Wi-Fi"
+  want="$(image_display "$file")"
+  ensure_same_display "$host" "${want:-$(display_type)}"
+  say "Sending $(basename "$file") to $name ($host) over Wi-Fi"
   resp="$(curl --fail --show-error --progress-bar --max-time 600 -F "update=@$file" "http://$host/update")" \
     || die "upload failed (connection lost?). The clock keeps its current firmware."
   case "$resp" in
@@ -176,6 +194,7 @@ flash_main() {
       -y|--yes) ASSUME_YES=1; shift ;;
       --display) [ $# -ge 2 ] || die "--display needs oled or tft"; set_display "$2"; shift 2 ;;
       --display=*) set_display "${1#--display=}"; shift ;;
+      --any-display) ATHAN_ANY_DISPLAY=1; shift ;;
       -h|--help|help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; return 0 ;;
       -*) die "unknown option $1" ;;
       *) args+=("$1"); shift ;;
@@ -199,4 +218,7 @@ flash_main() {
   esac
 }
 
-flash_main "$@"
+# Run only when executed, so the functions can be sourced for testing.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  flash_main "$@"
+fi

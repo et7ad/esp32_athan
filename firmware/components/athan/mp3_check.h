@@ -18,9 +18,10 @@ struct Mp3Info {
   size_t first_frame{0};  // byte offset of the first audio frame (after an ID3v2 tag)
 };
 
-/// Walks every MPEG audio Layer III frame and sums their durations. Skips leading ID3v2 tags and stops at a
-/// trailing ID3v1/APE tag or at the first bytes that are not a frame. Rejects data whose first frames do not
-/// chain (to avoid false sync words in non-MP3 files).
+/// Walks every MPEG audio Layer III frame and sums their durations. Skips leading ID3v2 tags; past bytes that are
+/// not a frame (a tag in the middle of joined files, a damaged frame) it goes on at the next three frames that chain
+/// at the same rate, as a decoder resyncs, and it stops at a trailing ID3v1/APE tag or junk. Rejects data whose first
+/// frames do not chain (to avoid false sync words in non-MP3 files).
 Mp3Info mp3_scan(const uint8_t *data, size_t len);
 
 }  // namespace athan

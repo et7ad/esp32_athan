@@ -1,5 +1,6 @@
 #include "audio_slots.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 
@@ -18,6 +19,7 @@ static const char *const TAG = "athan.slots";
 static const uint32_t REGION_OFFSET[NUM_SLOTS] = {0x000000, 0x2E0000, 0x5C0000, 0x8A0000};
 static const uint32_t REGION_SIZE[NUM_SLOTS] = {0x2E0000, 0x2E0000, 0x2E0000, 0x070000};
 static const uint32_t HEADER_SECTOR = 4096;
+static const uint32_t ERASE_BLOCK = 65536;  // the flash's block: one erase command each
 static const uint32_t MAGIC = 0x31485441;  // "ATH1"
 static const uint32_t VERSION = 2;  // 2 added source_crc; version 1 headers are still read
 static const esp_partition_subtype_t AUDIO_SUBTYPE = static_cast<esp_partition_subtype_t>(0x40);
@@ -34,7 +36,8 @@ bool AudioSlots::begin() {
     return false;
   }
   for (int s = 0; s < NUM_SLOTS; s++) {
-    this->valid_[s] = this->check_slot_(s);
+    this->map_(s);  // once, here: never mapped or unmapped later (verify() reads it from the worker task)
+    this->adopt(s, this->verify(s));
     if (this->valid_[s]) {
       ESP_LOGI(TAG, "Slot %s: '%s', %u bytes, %u s, %u Hz, %u ch", SLOT_NAMES[s], this->header_[s].label,
                (unsigned) this->header_[s].length, (unsigned) (this->header_[s].duration_ms / 1000),
@@ -97,32 +100,42 @@ const uint8_t *AudioSlots::map_(int slot) {
   return this->map_ptr_[slot];
 }
 
-bool AudioSlots::check_slot_(int slot) {
-  Header h;
-  if (!this->read_header_(slot, &h))
-    return false;
-  const uint8_t *data = this->map_(slot);
+AudioSlots::Verified AudioSlots::verify(int slot) const {
+  Verified v;
+  if (this->part_ == nullptr || slot < 0 || slot >= NUM_SLOTS || !this->read_header_(slot, &v.header))
+    return v;
+  const uint8_t *data = this->map_ptr_[slot];
   if (data == nullptr)
-    return false;
-  uint32_t crc = esp_rom_crc32_le(0, data, h.length);
-  if (crc != h.data_crc) {
+    return v;
+  if (esp_rom_crc32_le(0, data, v.header.length) != v.header.data_crc) {
     ESP_LOGW(TAG, "Slot %s: data CRC mismatch, treating it as empty", SLOT_NAMES[slot]);
-    return false;
+    return v;
   }
-  this->header_[slot] = h;
-  this->header_[slot].label[sizeof(h.label) - 1] = '\0';
+  v.header.label[sizeof(v.header.label) - 1] = '\0';
   // Hand the player the file from its first real frame: a decoder that syncs on a false header inside a tag or
   // junk takes that header's sample rate for the whole file (wrong speed and pitch). Also note the real format.
-  Mp3Info info = mp3_scan(data, h.length);
-  const size_t skip = (info.ok && info.first_frame < h.length) ? info.first_frame : 0;
-  this->rate_[slot] = info.ok ? info.sample_rate : 0;
-  this->channels_[slot] = info.ok ? info.channels : 0;
-  this->file_[slot].data = data + skip;
-  this->file_[slot].length = h.length - skip;
+  Mp3Info info = mp3_scan(data, v.header.length);
+  v.skip = (info.ok && info.first_frame < v.header.length) ? info.first_frame : 0;
+  v.rate = info.ok ? info.sample_rate : 0;
+  v.channels = info.ok ? info.channels : 0;
+  v.ok = true;
+  return v;
+}
+
+void AudioSlots::adopt(int slot, const Verified &v) {
+  if (slot < 0 || slot >= NUM_SLOTS)
+    return;
+  this->valid_[slot] = v.ok && this->map_ptr_[slot] != nullptr;
+  if (!this->valid_[slot])
+    return;
+  this->header_[slot] = v.header;
+  this->rate_[slot] = v.rate;
+  this->channels_[slot] = v.channels;
+  this->file_[slot].data = this->map_ptr_[slot] + v.skip;
+  this->file_[slot].length = v.header.length - v.skip;
 #ifdef USE_AUDIO_MP3_SUPPORT
   this->file_[slot].file_type = audio::AudioFileType::MP3;
 #endif
-  return true;
 }
 
 audio::AudioFile *AudioSlots::file(int slot) {
@@ -139,7 +152,7 @@ void AudioSlots::invalidate(int slot) {
 void AudioSlots::reload(int slot) {
   if (slot < 0 || slot >= NUM_SLOTS || this->part_ == nullptr)
     return;
-  this->valid_[slot] = this->check_slot_(slot);
+  this->adopt(slot, this->verify(slot));
 }
 
 bool AudioSlots::clear(int slot) {
@@ -153,17 +166,31 @@ bool AudioSlots::clear(int slot) {
 }
 
 bool AudioSlots::write(int slot, const uint8_t *data, size_t len, uint32_t duration_ms, const std::string &label,
-                       uint32_t source, void (*progress)(void *ctx, int percent), void *ctx) {
+                       uint32_t source, void (*progress)(void *ctx, int percent),
+                       void (*pace)(void *ctx, uint32_t pause_ms), void *ctx) {
   if (this->part_ == nullptr || slot < 0 || slot >= NUM_SLOTS || len == 0 || len > SLOT_MAX_BYTES[slot])
     return false;
   const uint32_t base = REGION_OFFSET[slot];
   // Erase the header sector first, then the data sectors the file needs: the slot reads as empty from now on.
-  uint32_t erase_len = (HEADER_SECTOR + len + 4095) & ~4095u;
-  esp_err_t err = esp_partition_erase_range(this->part_, base, erase_len);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Erase failed: %s", esp_err_to_name(err));
-    return false;
+  // One 64 KB block at a time (along the flash's own blocks): each erase takes 0.1-0.3 s with the cache off on
+  // both cores, so all of the clock stood still for the whole file (about 6 s for 2 MB, seen on the prototype, and
+  // the I2S speaker restarted). Between blocks the main loop and the audio get their time.
+  if (pace != nullptr)
+    pace(ctx, 0);
+  const uint32_t erase_len = (HEADER_SECTOR + len + 4095) & ~4095u;
+  for (uint32_t off = 0; off < erase_len;) {
+    const uint32_t at = this->part_->address + base + off;
+    const uint32_t n = std::min<uint32_t>(erase_len - off, ERASE_BLOCK - at % ERASE_BLOCK);
+    esp_err_t err = esp_partition_erase_range(this->part_, base + off, n);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Erase failed: %s", esp_err_to_name(err));
+      return false;
+    }
+    off += n;
+    if (pace != nullptr)
+      pace(ctx, 30);
   }
+  esp_err_t err = ESP_OK;
   // Flash writes from PSRAM go through a small internal-RAM buffer (the flash driver disables the cache that
   // PSRAM sits behind while it writes).
   const size_t CHUNK = 4096;
@@ -187,6 +214,8 @@ bool AudioSlots::write(int slot, const uint8_t *data, size_t len, uint32_t durat
       progress(ctx, pct);
       last_pct = pct;
     }
+    if (pace != nullptr && (off / CHUNK) % 4 == 3)
+      pace(ctx, 10);  // every 16 KB (about 50 ms of writing)
   }
   heap_caps_free(bounce);
 

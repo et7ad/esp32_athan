@@ -8,15 +8,17 @@
 #   ./build_firmware.sh                 build; binaries go to firmware/binaries/
 #   ./build_firmware.sh flash [PORT]    build, then flash over a serial port: the J6 USB-serial adapter (jumper J6
 #                                       1–2 at power-up) or a DevKitC's USB. First flash also writes the partitions
-#   ./build_firmware.sh ota [HOST]      build, then update over Wi-Fi (default: athan.local; V3 clocks only)
+#   ./build_firmware.sh ota [HOST]      build, then update over Wi-Fi (default: athan.local; V3 clocks of the same
+#                                       display only)
 #   ./build_firmware.sh logs [PORT|HOST]  show the device's log
 #   ./build_firmware.sh check           validate firmware/athan.yaml only (fast, no compile; both displays unless
 #                                       --display is given)
 #   ./build_firmware.sh clean [all]     delete the build folder (all: also ESPHome and the toolchain)
 #
-# Display: --display oled (default) or --display tft, before or after the command, builds for that display
-# (display_type in athan.yaml; wiring: HARDWARE.md 3.2). Each display has its own files below and its own update
-# manifest.
+# Display: --display oled or --display tft, before or after the command, builds for that display (wiring:
+# HARDWARE.md 3.2). Without it, display_type at the top of firmware/athan.yaml decides (oled as shipped). Each
+# display has its own files below and its own update manifest. ota refuses a clock that runs the other display's
+# build (it would show a dark screen); --any-display sends it anyway.
 #
 # Without PORT, ESPHome lists the serial ports it finds and asks. On macOS the board's USB port looks like
 # /dev/cu.usbmodem1101. To flash binaries that are already built, without building again: ./flash_firmware.sh
@@ -29,7 +31,7 @@
 # Settings (environment variables):
 #   ESPHOME_VERSION   ESPHome to use (default 2026.9.1, the version the firmware was checked against)
 #   ATHAN_CACHE       cache folder (default ~/.cache/esp32_athan)
-#   ATHAN_DISPLAY     oled or tft, like --display (default oled)
+#   ATHAN_DISPLAY     oled or tft, like --display (default: display_type in firmware/athan.yaml)
 #   PYTHON            Python 3.12-3.14 to create the environment with (default: the first one found)
 #
 # Needs: Python 3.12, 3.13 or 3.14 and internet on the first run. Before the first build, put click.wav and
@@ -41,8 +43,10 @@ YAML="$ROOT/firmware/athan.yaml"
 OUT="$ROOT/firmware/binaries"
 ESPHOME_VERSION="${ESPHOME_VERSION:-2026.9.1}"
 CACHE="${ATHAN_CACHE:-$HOME/.cache/esp32_athan}"
-# The display to build for. Empty = not chosen: oled, except that check then validates both.
+# The display to build for. Empty = not chosen: display_type in the yaml, except that check then validates both.
 ATHAN_DISPLAY="${ATHAN_DISPLAY:-}"
+# 1 = Wi-Fi updates skip the display check (--any-display).
+ATHAN_ANY_DISPLAY="${ATHAN_ANY_DISPLAY:-0}"
 VENV="$CACHE/esphome-$ESPHOME_VERSION"
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
@@ -88,7 +92,22 @@ ensure_esphome() {
 # Every ESPHome call builds for the chosen display (the display_type substitution picks displays/<type>.yaml).
 esphome() { "$VENV/bin/esphome" -s display_type "$(display_type)" "$@"; }
 
-display_type() { echo "${ATHAN_DISPLAY:-oled}"; }
+# The display: --display or ATHAN_DISPLAY, else display_type at the top of the yaml (oled when it has none). The
+# script passes it to ESPHome with -s, which overrides the yaml, so the yaml's value must be read here.
+display_type() {
+  if [ -n "$ATHAN_DISPLAY" ]; then
+    echo "$ATHAN_DISPLAY"
+    return 0
+  fi
+  local d
+  d="$(sed -n 's/^[[:space:]]*display_type:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\)"\{0,1\}.*/\1/p' "$YAML" | head -1)"
+  echo "${d:-oled}"
+}
+
+# Where the display comes from, for the messages.
+display_origin() {
+  if [ -n "$ATHAN_DISPLAY" ]; then echo "chosen"; else echo "display_type in firmware/athan.yaml"; fi
+}
 
 # File-name suffix of a display's build: none for the OLED (the original names), -tft for the TFT.
 variant_suffix() {
@@ -121,6 +140,17 @@ device_name() {
   sed -n 's/^[[:space:]]*device_name:[[:space:]]*"\{0,1\}\([^"#[:space:]]*\).*/\1/p' "$YAML" | head -1
 }
 
+# resolve_host HOST: the IPv4 address HOST stands for now (an address stays as it is). Each Wi-Fi update resolves
+# the name once and then talks to that address only, so the checks below and the upload reach the same clock even
+# when a V2 clock also answers to athan.local.
+resolve_host() {
+  local py="python3" ip
+  [ -x "$VENV/bin/python" ] && py="$VENV/bin/python"
+  ip="$("$py" -c 'import socket, sys; print(socket.gethostbyname(sys.argv[1]))' "$1" 2>/dev/null)" \
+    || die "cannot find $1 on the network, so nothing was sent. Use the IP address from the clock's Info screen."
+  echo "$ip"
+}
+
 # Refuse to send an image over Wi-Fi to anything but a version 3 clock. A V2 clock (ESP8266) also answers to
 # athan.local, would accept an ESP32 image (same 0xE9 first byte) and be bricked until a USB reflash. Only V3
 # serves the /audio page.
@@ -131,6 +161,32 @@ ensure_v3_device() {
     *"Athan sounds"*) ;;
     *) die "$host did not answer as a version 3 clock (no /audio page), so nothing was sent. A V2 clock also answers to athan.local; use the IP address from the Info screen, or flash over USB." ;;
   esac
+}
+
+# clock_display HOST: tft or oled, the build the clock runs now, from its web API: only TFT builds have the
+# Screen Colour select (GET /select/<name> answers 200 there, 404 on an OLED build). Empty when it does not answer.
+clock_display() {
+  local code
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$1/select/Screen%20Colour" 2>/dev/null || true)"
+  case "$code" in
+    200) echo tft ;;
+    404) echo oled ;;
+    *) echo "" ;;
+  esac
+}
+
+# ensure_same_display HOST DISPLAY: refuse to send the DISPLAY build to a clock that runs the other display's build:
+# it would come up with a dark screen and then follow the other display's update manifest. --any-display skips it
+# (a TFT clock still on a build from before the Screen Colour setting reads as OLED here).
+ensure_same_display() {
+  local host="$1" want="$2" have
+  [ "$ATHAN_ANY_DISPLAY" = 1 ] && return 0
+  have="$(clock_display "$host")"
+  if [ -z "$have" ]; then
+    printf '\033[33mWarning: %s did not say which display it has; sending the %s build.\033[0m\n' "$host" "$want" >&2
+    return 0
+  fi
+  [ "$have" = "$want" ] || die "$host runs the $have build and this is the $want build, which would show a dark screen there. Nothing was sent. Use --display $have (or -f the $have file), or --any-display if you are sure."
 }
 
 project_version() {
@@ -171,7 +227,7 @@ collect_binaries() {
 build() {
   check_sounds
   ensure_esphome
-  say "Compiling firmware/athan.yaml for the $(display_type) display with ESPHome $ESPHOME_VERSION (the first build takes a while)"
+  say "Compiling firmware/athan.yaml for the $(display_type) display ($(display_origin)) with ESPHome $ESPHOME_VERSION (the first build takes a while)"
   esphome compile "$YAML"
   collect_binaries
 }
@@ -199,10 +255,12 @@ main() {
     case "$1" in
       --display) [ $# -ge 2 ] || die "--display needs oled or tft"; set_display "$2"; shift 2 ;;
       --display=*) set_display "${1#--display=}"; shift ;;
+      --any-display) ATHAN_ANY_DISPLAY=1; shift ;;
       *) args+=("$1"); shift ;;
     esac
   done
   [ -z "$ATHAN_DISPLAY" ] || set_display "$ATHAN_DISPLAY"
+  variant_suffix >/dev/null  # an unknown display_type in the yaml stops here
   set -- "${args[@]+"${args[@]}"}"
   local cmd="${1:-build}"
   case "$cmd" in
@@ -215,10 +273,12 @@ main() {
       esphome upload "$YAML" ${2:+--device "$2"}
       ;;
     ota)
-      local host="${2:-$(device_name).local}"
+      local name="${2:-$(device_name).local}" host
       build
+      host="$(resolve_host "$name")"
       ensure_v3_device "$host"
-      say "Updating over Wi-Fi ($host)"
+      ensure_same_display "$host" "$(display_type)"
+      say "Updating over Wi-Fi ($name, $host)"
       esphome upload "$YAML" --device "$host"
       ;;
     logs)

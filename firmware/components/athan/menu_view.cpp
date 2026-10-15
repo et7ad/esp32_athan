@@ -87,6 +87,98 @@ void frame_drawn(const Frame &fr) { drawn_fingerprint = fingerprint(fr); }
 
 bool menu_changed(Menu &menu) { return menu.is_open() && fingerprint(frame_of(menu)) != drawn_fingerprint; }
 
+// ---- text, for both displays (menu_view.h)
+
+int width_of(Display &d, display::BaseFont *f, const std::string &s) {
+  int x1, y1, w, h;
+  d.get_text_bounds(0, 0, s.c_str(), f, TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
+  return w;
+}
+
+// Takes the last character off t (a whole UTF-8 sequence), and the spaces before it.
+static void drop_last_char(std::string &t) {
+  while (!t.empty()) {
+    const auto c = static_cast<unsigned char>(t.back());
+    t.pop_back();
+    if ((c & 0xC0) != 0x80)
+      break;  // ASCII, or the first byte of a sequence: one character gone
+  }
+  while (!t.empty() && t.back() == ' ')
+    t.pop_back();
+}
+
+std::string fit_text(Display &d, display::BaseFont *f, const std::string &s, int w, const char *ellipsis) {
+  if (width_of(d, f, s) <= w)
+    return s;
+  std::string t = s;
+  while (!t.empty()) {
+    drop_last_char(t);
+    if (width_of(d, f, t + ellipsis) <= w)
+      return t + ellipsis;
+  }
+  return width_of(d, f, ellipsis) <= w ? std::string(ellipsis) : std::string();
+}
+
+std::vector<std::string> wrap_words(Display &d, display::BaseFont *f, const std::string &s, int w, size_t max_lines,
+                                    const char *ellipsis) {
+  std::vector<std::string> out;
+  std::string line;
+  size_t i = 0;
+  while (i <= s.size()) {
+    size_t j = s.find(' ', i);
+    if (j == std::string::npos)
+      j = s.size();
+    const std::string word = fit_text(d, f, s.substr(i, j - i), w, ellipsis);
+    const std::string t = line.empty() ? word : line + " " + word;
+    if (line.empty() || width_of(d, f, t) <= w) {
+      line = t;
+    } else {
+      out.push_back(line);
+      line = word;
+    }
+    i = j + 1;
+  }
+  if (!line.empty())
+    out.push_back(line);
+  if (out.size() > max_lines) {  // more than fits: the last line kept ends in the ellipsis
+    out.resize(max_lines);
+    if (!out.empty())
+      out.back() = fit_text(d, f, out.back() + ellipsis, w, ellipsis);
+  }
+  return out;
+}
+
+bool only_digits_and_dots(const std::string &s) {
+  return !s.empty() && s.find_first_not_of("0123456789.") == std::string::npos;
+}
+
+ItemLines item_lines(Display &d, display::BaseFont *const fonts[3], const std::string &s, int w,
+                     const char *ellipsis) {
+  ItemLines out;
+  for (int k = 0; k < 3; k++) {
+    out.font = k;
+    if (width_of(d, fonts[k], s) <= w) {
+      out.line[0] = s;
+      return out;
+    }
+    if (k == 0)
+      continue;  // the large font: one line only
+    const size_t sp = item_break(s, [&](const std::string &l) { return width_of(d, fonts[k], l); }, w);
+    if (sp != std::string::npos) {
+      out.count = 2;
+      out.line[0] = s.substr(0, sp);
+      out.line[1] = s.substr(sp + 1);
+      return out;
+    }
+  }
+  // Too long for two lines of the small font (or a word wider than a line): as much as fits, cut short.
+  const auto lines = wrap_words(d, fonts[2], s, w, 2, ellipsis);
+  out.count = lines.size() > 1 ? 2 : 1;
+  for (size_t i = 0; i < lines.size(); i++)
+    out.line[i] = lines[i];
+  return out;
+}
+
 // ---- the OLED's drawing (the TFT's is menu_view_tft.cpp)
 #ifndef ATHAN_DISPLAY_TFT
 
@@ -101,12 +193,10 @@ const int PX = LW + 3, PW = W - PX;            // right pane: x 57..127
 const int PC = PX + PW / 2;                    // its centre
 const int ROW_H = 13, VISIBLE = 5, MIDDLE = 2;  // left pane: 5 rows of 13 px, the one on screen 3rd
 const int CAP_L = 14, CAP_M = 10, CAP_S = 5;   // capital heights of the large, medium and small fonts
-
-int width_of(Display &d, display::BaseFont *f, const std::string &s) {
-  int x1, y1, w, h;
-  d.get_text_bounds(0, 0, s.c_str(), f, TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
-  return w;
-}
+// The item's room: the pane but the arrows (x 58-61 and 123-126), 1 px clear of them.
+const int ITEM_W = PW - 13;
+// Text cut short ends in three dots: the pixel font has no ellipsis glyph.
+const char *const ELLIPSIS = "...";
 
 // A filled box with corners cut by r (1 or 2) pixels; `top_only` keeps the bottom corners square.
 void rounded_fill(Display &d, int x, int y, int w, int h, int r, bool top_only = false) {
@@ -202,30 +292,6 @@ int row_icon(Display &d, RowIcon icon, int x, int y, Color c) {
   }
 }
 
-// Words of s on lines at most w pixels wide (a word wider than w gets a line of its own).
-std::vector<std::string> wrap_words(Display &d, display::BaseFont *f, const std::string &s, int w) {
-  std::vector<std::string> out;
-  std::string line;
-  size_t i = 0;
-  while (i <= s.size()) {
-    size_t j = s.find(' ', i);
-    if (j == std::string::npos)
-      j = s.size();
-    const std::string word = s.substr(i, j - i);
-    const std::string t = line.empty() ? word : line + " " + word;
-    if (line.empty() || width_of(d, f, t) <= w) {
-      line = t;
-    } else {
-      out.push_back(line);
-      line = word;
-    }
-    i = j + 1;
-  }
-  if (!line.empty())
-    out.push_back(line);
-  return out;
-}
-
 // Where the item sits in its row: dots, or a slider for long rows (the hours of a day).
 void dots(Display &d, int n, int item, int y, int cx, int track) {
   if (n > 1 && n <= 16) {
@@ -241,10 +307,6 @@ void dots(Display &d, int n, int item, int y, int cx, int track) {
     d.horizontal_line(x0, y, track);
     d.filled_rectangle(x0 + item * (track - 5) / (n - 1), y - 1, 5, 3);
   }
-}
-
-bool only_digits_and_dots(const std::string &s) {
-  return !s.empty() && s.find_first_not_of("0123456789.") == std::string::npos;
 }
 
 }  // namespace
@@ -314,8 +376,8 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   d.print(PC, 6, f.small, TextAlign::BASELINE_CENTER, title.c_str());
 
   if (fr.item < 0) {  // nothing to show yet: say why ("Loading list...")
-    const auto lines = wrap_words(d, f.medium, fr.cap.empty() ? std::string("Empty") : fr.cap, PW - 4);
-    for (size_t i = 0; i < lines.size() && i < 3; i++)
+    const auto lines = wrap_words(d, f.medium, fr.cap.empty() ? std::string("Empty") : fr.cap, PW - 4, 3, ELLIPSIS);
+    for (size_t i = 0; i < lines.size(); i++)
       d.print(PC, 30 + static_cast<int>(i) * 15, f.medium, TextAlign::BASELINE_CENTER, lines[i].c_str());
     return;
   }
@@ -323,9 +385,9 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   // Exit: the clock it returns to (label: the time, caption: the next prayer) and which keys go back.
   if (fr.exit) {
     display::BaseFont *tf = width_of(d, f.large, fr.text) <= PW - 2 ? f.large : f.medium;
-    d.print(PC, 29, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
+    d.print(PC, 29, tf, TextAlign::BASELINE_CENTER, fit_text(d, tf, fr.text, PW - 2, ELLIPSIS).c_str());
     if (!fr.cap.empty())
-      d.print(PC, 41, f.small, TextAlign::BASELINE_CENTER, fr.cap.c_str());
+      d.print(PC, 41, f.small, TextAlign::BASELINE_CENTER, fit_text(d, f.small, fr.cap, PW - 2, ELLIPSIS).c_str());
     rounded_frame(d, PX + 2, 48, PW - 4, 14);
     const int hw = width_of(d, f.small, "or Select"), x0 = PC - (hw + 18) / 2;
     arrow_left(d, x0, 52, 5);
@@ -337,11 +399,8 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
   // The caption, in the small font on at most two lines at the bottom. A tab splits it into two lines (Info).
   const bool tabbed = fr.cap.find('\t') != std::string::npos;
   std::vector<std::string> cap;
-  if (!fr.cap.empty() && !tabbed) {
-    cap = wrap_words(d, f.small, fr.cap, PW - 2);
-    if (cap.size() > 2)
-      cap.resize(2);
-  }
+  if (!fr.cap.empty() && !tabbed)
+    cap = wrap_words(d, f.small, fr.cap, PW - 2, 2, ELLIPSIS);
   const int cap_y = cap.size() == 2 ? 53 : 61;
   auto draw_caption = [&]() {
     for (size_t i = 0; i < cap.size(); i++)
@@ -384,52 +443,43 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
         tf = f.medium;
       else if (f.numbers != nullptr && only_digits_and_dots(fr.text) && width_of(d, f.numbers, fr.text) <= PW - 2)
         tf = f.numbers;  // an IP address
-      d.print(PC, 22, tf, TextAlign::BASELINE_CENTER, fr.text.c_str());
+      d.print(PC, 22, tf, TextAlign::BASELINE_CENTER, fit_text(d, tf, fr.text, PW - 2, ELLIPSIS).c_str());
       for (int part = 0; part < 2; part++) {
         const std::string s = part == 0 ? fr.cap.substr(0, tab) : fr.cap.substr(tab + 1);
         display::BaseFont *pf = width_of(d, f.medium, s) <= PW ? f.medium : f.small;  // athan.local: 70 of 71
-        d.print(PC, part == 0 ? 41 : 58, pf, TextAlign::BASELINE_CENTER, s.c_str());
+        d.print(PC, part == 0 ? 41 : 58, pf, TextAlign::BASELINE_CENTER, fit_text(d, pf, s, PW, ELLIPSIS).c_str());
       }
       return;
     }
-    const int bw = std::min(PW - 2, width_of(d, f.medium, fr.text) + 12);
+    // The medium font while it fits the widest button ("Check now", "Installing..."), else the small one ("Install
+    // 3.0.1"), cut short only past that.
+    display::BaseFont *bf = width_of(d, f.medium, fr.text) <= PW - 2 ? f.medium : f.small;
+    const std::string label = fit_text(d, bf, fr.text, PW - 2, ELLIPSIS);
+    const int bw = std::min(PW - 2, width_of(d, bf, label) + 12);
     rounded_fill(d, PC - bw / 2, 16, bw, 19, 2);
-    d.print(PC, 30, f.medium, display::COLOR_OFF, TextAlign::BASELINE_CENTER, fr.text.c_str());
+    d.print(PC, bf == f.medium ? 30 : 28, bf, display::COLOR_OFF, TextAlign::BASELINE_CENTER, label.c_str());
     draw_caption();
     return;
   }
 
-  // The item as large as it fits (the medium font on two lines when one is too narrow: "8" / "Al-Dosari"), arrows
-  // where Left and Right lead, the marks under it, then dots, the level bar, or the caption.
-  const int max_w = PW - 14;
-  std::string lines[2] = {fr.text, ""};
-  int nl = 1, cap_h = CAP_L;
-  display::BaseFont *font = f.large;
-  if (width_of(d, f.large, fr.text) > max_w) {
-    font = f.medium;
-    cap_h = CAP_M;
-    const size_t sp = fr.text.find(' ');
-    if (width_of(d, f.medium, fr.text) > max_w) {
-      if (sp != std::string::npos && width_of(d, f.medium, fr.text.substr(sp + 1)) <= max_w) {
-        lines[0] = fr.text.substr(0, sp);
-        lines[1] = fr.text.substr(sp + 1);
-        nl = 2;
-      } else {
-        font = f.small;
-        cap_h = CAP_S;
-      }
-    }
-  }
-  const bool two = nl == 2;
-  const int vmid = two ? 17 : 23, amid = two ? 26 : vmid;
+  // The item as large as it fits between the arrows (item_lines(): the medium font on two lines when one is too
+  // narrow, "12. Abdul" / "Basit", "8" / "Al-Dosari"; then the small font on one line or two, cut short only past
+  // that), arrows where Left and Right lead, the marks under it, then dots, the level bar, or the caption.
+  display::BaseFont *const fonts[3] = {f.large, f.medium, f.small};
+  static const int CAPS[3] = {CAP_L, CAP_M, CAP_S};
+  const ItemLines item = item_lines(d, fonts, fr.text, ITEM_W, ELLIPSIS);
+  const bool two = item.count == 2, tall = two && item.font == 1;  // two lines of the medium font reach lower
+  const int lh = item.font == 2 ? 9 : 14;
+  const int vmid = tall ? 17 : 23, amid = tall ? 26 : vmid;
   if (fr.has_left)
     arrow_left(d, PX + 1, amid - 3, 7);
   if (fr.has_right)
     arrow_right(d, W - 5, amid - 3, 7);
-  for (int i = 0; i < nl; i++)
-    d.print(PC, vmid + cap_h / 2 + i * 14, font, TextAlign::BASELINE_CENTER, lines[i].c_str());
+  const int y0 = vmid + CAPS[item.font] / 2 - (two && !tall ? lh / 2 : 0);  // two small lines: around the middle
+  for (int i = 0; i < item.count; i++)
+    d.print(PC, y0 + i * lh, fonts[item.font], TextAlign::BASELINE_CENTER, item.line[i].c_str());
 
-  const int my = two ? 40 : 34;
+  const int my = tall ? 40 : 34;
   const int mw = (fr.in_use ? 9 : 0) + (fr.playing ? 7 : 0) + (fr.in_use && fr.playing ? 4 : 0);
   int x = PC - mw / 2;
   if (fr.in_use) {
@@ -446,7 +496,7 @@ void draw_menu(Display &d, Menu &menu, const MenuFonts &f) {
     if (fill > 0)
       d.filled_rectangle(bx + 1, 46, fill, 3);
   } else if (cap.size() <= 1) {
-    dots(d, fr.n, fr.item, two ? 54 : 49, PC, PW - 10);
+    dots(d, fr.n, fr.item, tall ? 54 : 49, PC, PW - 10);
   }
   draw_caption();
 }

@@ -75,6 +75,16 @@ void Menu::refresh() {
     this->remember_();
     return;
   }
+  if (row.kind == RowKind::VALUE && row.active) {
+    // A value row shows the value in use (Left/Right set it at once): it follows a change made elsewhere (the web
+    // page, Home Assistant) while the row is open, so the next press steps from there.
+    const int a = row.active();
+    if (a >= 0 && a < n) {
+      this->item_ = a;
+      this->remember_();
+      return;
+    }
+  }
   if (row.id_at && row.find) {
     const int p = row.find(this->item_id_);
     if (p >= 0 && p < n) {

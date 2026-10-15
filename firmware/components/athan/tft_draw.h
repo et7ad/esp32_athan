@@ -25,6 +25,10 @@ void circle_frame(display::Display &d, float cx, float cy, float r, float t, Col
 /// whole ring). Its inner and outer edges blend into `bg`, its two ends into `side` (the ring drawn under it).
 void arc(display::Display &d, float cx, float cy, float ro, float ri, float a0, float a1, Color c, Color bg,
          Color side);
+/// The clock's ring in one pass: the arc from the top to `f` (turns) in `c`, the rest of the ring in `track`, edges
+/// blended into `bg`. The same pixels as arc(..., 0, 1, track, bg, bg) followed by arc(..., 0, f, c, bg, track), at
+/// about half the work: each pixel is worked out and drawn once.
+void ring(display::Display &d, float cx, float cy, float ro, float ri, float f, Color c, Color track, Color bg);
 
 /// An icon (a glyph of an icon font of `size` px) with its square's top-left at x, y. Material Symbols puts the
 /// square on the baseline, so this prints at baseline y + size.

@@ -40,9 +40,8 @@
 namespace esphome {
 namespace athan {
 
-static const int NUM_LISTS = 4;  // athan, fajr, tawashih, tick: list i fills slot i
+static const int NUM_LISTS = 4;  // athan, fajr, tawashih, tick: list i fills slot i (any number of entries each)
 static const int NUM_STATIONS = 10;
-static const int MAX_ENTRIES = 10;
 // Positions in the device menu's sound lists that are not suggested-list entries (see menu_item()).
 static const int MENU_NONE = -3;    // nothing there (list not loaded yet)
 static const int MENU_OFF = -2;     // "Off", first in the tick list
@@ -53,6 +52,16 @@ struct NamedUrl {
   std::string name;
   std::string url;
 };
+
+/// One entry of a suggested list (docs/audio/catalog.json): its name, its full link, and the link's source id
+/// (AudioSlots::source_id(), what a slot records when it downloads the entry), worked out once when the list loads.
+/// A list has any number of entries, so they live in PSRAM.
+struct CatalogEntry {
+  PsramString name;
+  PsramString url;
+  uint32_t source{0};
+};
+using CatalogList = PsramVector<CatalogEntry>;
 
 class AudioWebHandler;
 
@@ -94,7 +103,11 @@ class AthanComponent : public Component {
   /// downloaded again (to refresh it, download another entry, then this one).
   void download_from_catalog(int slot, int entry);
   /// Index of the suggested-list entry selected in `slot` (stored there), -1 if the slot's sound is not listed.
+  /// Remembered per slot until the list or the slot's sound changes: menus ask for it on every draw.
   int selected_entry(int slot) const;
+  /// What the slot holds, as the menu and the web page name it: "2. Abdul Basit" for a list entry, the file's name
+  /// for an upload, "" when empty.
+  std::string sound_name(int slot) const;
   /// The slot holds a sound that is not in the suggested list: an upload, or a download the list no longer has.
   /// Menus show it as "Custom", so it can be previewed and kept.
   bool has_custom(int slot) const;
@@ -125,7 +138,9 @@ class AthanComponent : public Component {
   // ---------------- suggested lists ----------------
   void fetch_catalog();
   bool catalog_ready() const { return this->catalog_ready_.load(); }
+  /// Entries in a suggested list: as many as docs/audio/catalog.json has (the file is at most 64 KB).
   int catalog_size(int list) const;
+  /// An entry's name, without its number (numbered() in menu.h adds it).
   std::string catalog_name(int list, int entry) const;
   /// Listen to an entry, nothing stored: the selected entry plays from flash, any other streams (media pipeline).
   void preview_catalog(int list, int entry);
@@ -143,6 +158,9 @@ class AthanComponent : public Component {
   /// Called when a stop the owner asked for should be silent at once (a preview left while browsing, the /audio
   /// page's Stop): the yaml mutes the output while the pipelines stop (hard_mute).
   void set_hard_stop_callback(std::function<void()> cb) { this->hard_stop_cb_ = std::move(cb); }
+  /// The /audio page's Stop: the yaml stops what Up, Select or Down stop while a sound plays (stop_sound), and
+  /// returns whether a sound was playing. Set at boot.
+  void set_stop_sound_callback(std::function<bool()> cb) { this->stop_sound_cb_ = std::move(cb); }
   /// hard_mute: called when it mutes the output. audio_drained() then says when every pipeline that was playing
   /// has stopped and played out (its resampler stops only once its mixer input has), so the unmute leaves no tail.
   void begin_drain_watch();
@@ -199,7 +217,7 @@ class AthanComponent : public Component {
   Menu &menu() { return this->menu_; }
 
   // ---------------- used by the /audio web page (httpd task) ----------------
-  enum class WebAction : uint8_t { DOWNLOAD, PREVIEW, STOP, RANDOM };
+  enum class WebAction : uint8_t { DOWNLOAD, PREVIEW, STOP };
   void web_action(WebAction action, int list, int entry);
   bool upload_begin(int slot, const std::string &filename);
   void upload_data(const uint8_t *data, size_t len);
@@ -207,8 +225,9 @@ class AthanComponent : public Component {
   /// The page (about 14 KB) and its status bar are built in PSRAM: a page view never takes internal RAM.
   PsramString render_audio_page();
   /// The status bar of the /audio page (an iframe, so actions never reload or scroll the page). `gen` is the
-  /// sounds_changed_ value the page was drawn with: when it differs, the bar offers a reload.
-  PsramString render_audio_status(uint32_t gen);
+  /// sounds_changed_ value the page was drawn with: when it differs, the bar offers a reload. `acted`: drawn right
+  /// after an action, before the main loop carried it out, so it reloads itself once a second later.
+  PsramString render_audio_status(uint32_t gen, bool acted);
 
  protected:
   enum class JobType : uint8_t {
@@ -232,7 +251,8 @@ class AthanComponent : public Component {
     uint32_t token{0};
     PrayerPurpose purpose{PrayerPurpose::CURRENT};
     std::string url;
-    std::string label;
+    std::string label;  // the name stored with the sound
+    std::string shown;  // the name in status messages ("2. Abdul Basit" for a list entry); empty: label
     std::string key;
     uint8_t *data{nullptr};
     size_t len{0};
@@ -253,8 +273,10 @@ class AthanComponent : public Component {
   void job_check_stream_(Job &job);
   void job_catalog_();
   void job_stations_(Job &job, bool for_play);
+  void web_download_(int slot, int entry);
   void job_download_url_(Job &job);
-  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0);
+  void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0,
+                   const std::string &shown = "");
   void job_prayer_(Job &job);
   bool parse_stations_(const uint8_t *data, size_t len);
 
@@ -276,6 +298,11 @@ class AthanComponent : public Component {
   bool cancel_pending_slot_preview_();
   bool begin_preview_(int list);
   bool preview_from_flash_(int list, const std::string &name);
+  // A sound's flash write (job_commit_()): the radio pauses for it and previews wait (main loop), and the worker
+  // gives the main loop and the audio their time between erase blocks and write chunks.
+  void pause_media_for_write_();
+  void resume_media_after_write_();
+  void write_pace_(uint32_t pause_ms);
   // The only places that send STOP: each one only when something may be playing, so repeated presses or
   // timeouts never queue a STOP per call.
   void stop_media_pipeline_();
@@ -327,7 +354,17 @@ class AthanComponent : public Component {
 
   // state shared with the worker and the web page (guarded by mutex_)
   mutable std::mutex mutex_;
-  std::vector<NamedUrl> catalog_[NUM_LISTS];
+  CatalogList catalog_[NUM_LISTS];
+  uint32_t catalog_sig_{0};  // what the lists held when last loaded (a change bumps sounds_changed_)
+  uint32_t catalog_gen_{0};  // counts the lists loaded: a remembered selected entry is only valid for one
+  // selected_entry()'s answer per slot, for the sound stored when it was worked out (its source) and that list.
+  struct Selected {
+    uint32_t gen{UINT32_MAX};
+    uint32_t source{0};
+    bool legacy{false};
+    int entry{-1};
+  };
+  mutable Selected selected_[NUM_SLOTS];
   std::vector<NamedUrl> stations_;
   std::string sound_status_;
   std::string radio_status_;
@@ -348,6 +385,12 @@ class AthanComponent : public Component {
   std::atomic<bool> stations_ready_{false};
   std::atomic<bool> stations_pending_{false};
   std::atomic<bool> sound_busy_{false};
+  bool writing_{false};                    // a sound's erase and write run (main loop: from its handshake to its end)
+  std::atomic<bool> audio_quiet_{true};    // nothing plays or is about to start (loop(); read by write_pace_())
+  uint32_t last_start_ms_{0};              // a stream or stored sound was handed to the player (loop()'s quiet test)
+  uint32_t write_wait_left_ms_{0};         // worker: what write_pace_() may still wait for audio during this write
+  std::atomic<bool> upload_open_{false};   // an upload holds its buffer and sound_busy_ (loop() ends one that broke off)
+  std::atomic<uint32_t> upload_seen_ms_{0};  // its last piece
   // Random tawashih (set_tawashih_random()). gen_ counts the times it was chosen: a tawashih download or upload
   // started before the last choice (job_gen_ older) does not turn it off when it is stored, and is freed instead.
   std::atomic<bool> tawashih_random_{true};
@@ -370,8 +413,10 @@ class AthanComponent : public Component {
   int playing_slot_{-1};
   uint32_t playing_since_{0};
   bool playing_seen_{false};
+  uint8_t stuck_step_{0};  // the 5 s past-its-length bound: 1 resampler stopped, 2 STOP sent as well
   std::function<void(int)> preview_volume_cb_;
   std::function<void()> hard_stop_cb_;
+  std::function<bool()> stop_sound_cb_;
   int preview_list_{-1};
   uint32_t preview_started_{0};
   bool slot_preview_{false};  // the stored sound playing is a preview (stop_media() stops it, a download may start)
@@ -379,6 +424,7 @@ class AthanComponent : public Component {
   bool media_started_{false};   // a stream (radio or preview) was started on the media pipeline since the last STOP
   bool media_stop_pending_{false};  // a STOP was sent to a playing media pipeline: stored sounds wait for it
   uint32_t media_stop_sent_at_{0};
+  bool media_stuck_stopped_{false};  // its resampler was stopped because a STOP did not end it (once per STOP)
   // Stops of each pipeline, counted in loop() (a resampler that went from running to stopped)
   uint32_t media_stops_{0};
   uint32_t announce_stops_{0};
@@ -416,6 +462,8 @@ class AthanComponent : public Component {
   uint32_t radio_started_{0};
   uint8_t radio_retries_{0};
   bool radio_waiting_net_{false};  // the radio is on but paused until the network is back (net_watch_())
+  bool radio_paused_write_{false};  // the radio is on but paused while a sound is saved (resume_media_after_write_())
+  uint32_t radio_sound_ms_{0};      // the radio was last heard (or started): radio_tick_()'s 20 s without sound
   uint32_t radio_wait_since_{0};
   bool online_{false};             // network state net_watch_() saw last
   uint64_t online_since_{0};       // when the network came up (net_watch_())

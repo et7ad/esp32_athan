@@ -33,36 +33,14 @@ const int ROW_H = 48, VISIBLE = 5, MIDDLE = 2;
 const int PX = LW + 8, PW = W - PX - 2, PC = PX + PW / 2;
 const int TOP = 30, BOTTOM = 236;
 const int MID = TOP + (BOTTOM - TOP) * 42 / 100;  // the item's centre line
+// The item's room: the pane but its chevrons, whose ink is x 7-13 of their 22-px icons at its edges; 2 px clear.
+const int ITEM_W = PW - 2 * 18;
+// Text cut short ends in an ellipsis (U+2026, in every Roboto font here).
+const char *const ELLIPSIS = "\u2026";
 
 struct Theme {
   Color acc, fg, sub, dim, line, ink, bg;
 };
-
-int width(Display &d, display::BaseFont *f, const std::string &s) { return tft::text_width(d, f, s.c_str()); }
-
-// Words of s on lines at most w pixels wide (a word wider than w gets a line of its own).
-std::vector<std::string> wrap_words(Display &d, display::BaseFont *f, const std::string &s, int w) {
-  std::vector<std::string> out;
-  std::string line;
-  size_t i = 0;
-  while (i <= s.size()) {
-    size_t j = s.find(' ', i);
-    if (j == std::string::npos)
-      j = s.size();
-    const std::string word = s.substr(i, j - i);
-    const std::string t = line.empty() ? word : line + " " + word;
-    if (line.empty() || width(d, f, t) <= w) {
-      line = t;
-    } else {
-      out.push_back(line);
-      line = word;
-    }
-    i = j + 1;
-  }
-  if (!line.empty())
-    out.push_back(line);
-  return out;
-}
 
 // Centres of n round items around line y: one line when 34 px each fits across the pane, else two (3 + 2).
 std::vector<std::pair<int, int>> round_spots(int n, int y) {
@@ -84,16 +62,10 @@ std::vector<std::pair<int, int>> round_spots(int n, int y) {
 
 // The caption: up to two lines, the last on baseline 228.
 void caption(Display &d, const MenuFonts &f, const Theme &th, const std::string &cap) {
-  auto lines = wrap_words(d, f.small, cap, PW - 8);
-  if (lines.size() > 2)
-    lines.resize(2);
+  const auto lines = wrap_words(d, f.small, cap, PW - 8, 2, ELLIPSIS);
   const int y0 = BOTTOM - 8 - (lines.size() > 1 ? 17 : 0);
   for (size_t i = 0; i < lines.size(); i++)
     d.print(PC, y0 + static_cast<int>(i) * 17, f.small, th.sub, TextAlign::BASELINE_CENTER, lines[i].c_str());
-}
-
-bool only_digits_and_dots(const std::string &s) {
-  return !s.empty() && s.find_first_not_of("0123456789.") == std::string::npos;
 }
 
 void draw_rows(Display &d, Menu &menu, const MenuFonts &f, const Theme &th) {
@@ -112,7 +84,7 @@ void draw_rows(Display &d, Menu &menu, const MenuFonts &f, const Theme &th) {
     }
     if (row.symbol != nullptr)
       tft::icon(d, 12, y + 13, f.icons, 22, row.symbol, sel ? th.ink : near ? th.acc : th.dim, bg);
-    const bool fits = width(d, f.row, row.title) <= LW - 44;
+    const bool fits = width_of(d, f.row, row.title) <= LW - 44;
     const char *name = fits || row.short_title == nullptr ? row.title : row.short_title;
     d.print(40, y + 30, f.row, sel ? th.ink : near ? th.fg : th.dim, TextAlign::BASELINE_LEFT, name, bg);
     if (r == 0 && k > 0 && k - 1 != MIDDLE && !sel)
@@ -128,7 +100,7 @@ bool draw_chips(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th
   std::vector<int> ws;
   int total = gap * (static_cast<int>(fr.all.size()) - 1);
   for (size_t i = 0; i < fr.all.size(); i++) {
-    ws.push_back(width(d, f.row, fr.all[i]) + 2 * pad + (static_cast<int>(i) == fr.active ? 18 : 0));
+    ws.push_back(width_of(d, f.row, fr.all[i]) + 2 * pad + (static_cast<int>(i) == fr.active ? 18 : 0));
     total += ws.back();
   }
   if (total > PW - 4)
@@ -144,7 +116,7 @@ bool draw_chips(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th
       tft::round_rect_frame(d, x, y, ws[i], 32, 16, 2, th.line, th.bg);
     d.print(x + pad, y + 22, f.row, cur ? th.ink : th.fg, TextAlign::BASELINE_LEFT, fr.all[i].c_str(), bg);
     if (static_cast<int>(i) == fr.active)
-      tft::icon(d, x + pad + width(d, f.row, fr.all[i]) + 2, y + 8, f.icons_small, 16, sym::CHECK,
+      tft::icon(d, x + pad + width_of(d, f.row, fr.all[i]) + 2, y + 8, f.icons_small, 16, sym::CHECK,
                 cur ? th.ink : th.acc, bg);
     x += ws[i] + gap;
   }
@@ -156,8 +128,9 @@ void draw_item(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th)
   if (fr.exit) {
     d.print(PC, 104, f.time, th.fg, TextAlign::BASELINE_CENTER, fr.text.c_str());
     if (!fr.cap.empty())
-      d.print(PC, 130, f.item_small, th.acc, TextAlign::BASELINE_CENTER, fr.cap.c_str());
-    const int y = 218, hw = width(d, f.small, "or Select") + 40, x0 = PC - hw / 2;
+      d.print(PC, 130, f.item_small, th.acc, TextAlign::BASELINE_CENTER,
+              fit_text(d, f.item_small, fr.cap, PW - 4, ELLIPSIS).c_str());
+    const int y = 218, hw = width_of(d, f.small, "or Select") + 40, x0 = PC - hw / 2;
     tft::round_rect_frame(d, PX + 6, y - 14, PW - 12, 30, 15, 2, th.line, th.bg);
     tft::icon(d, x0, y - 11, f.icons, 22, sym::CHEVRON_LEFT, th.sub);
     tft::icon(d, x0 + 16, y - 11, f.icons, 22, sym::CHEVRON_RIGHT, th.sub);
@@ -165,8 +138,8 @@ void draw_item(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th)
     return;
   }
   if (fr.item < 0) {  // nothing to show yet: say why ("Loading list...")
-    const auto lines = wrap_words(d, f.row, fr.cap.empty() ? std::string("Empty") : fr.cap, PW - 8);
-    for (size_t i = 0; i < lines.size() && i < 4; i++)
+    const auto lines = wrap_words(d, f.row, fr.cap.empty() ? std::string("Empty") : fr.cap, PW - 8, 4, ELLIPSIS);
+    for (size_t i = 0; i < lines.size(); i++)
       d.print(PC, MID + static_cast<int>(i) * 22, f.row, th.sub, TextAlign::BASELINE_CENTER, lines[i].c_str());
     return;
   }
@@ -194,10 +167,9 @@ void draw_item(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th)
     const std::string name = (colon == std::string::npos ? fr.text : fr.text.substr(0, colon)) + "  ";
     const bool on = fr.ons[fr.item];
     const char *state = on ? "On" : "Off";
-    const int x0 = PC - (width(d, f.item_small, name) + width(d, f.item_small, state)) / 2;
+    const int nw = width_of(d, f.item_small, name), x0 = PC - (nw + width_of(d, f.item_small, state)) / 2;
     d.print(x0, MID - 12, f.item_small, th.fg, TextAlign::BASELINE_LEFT, name.c_str());
-    d.print(x0 + width(d, f.item_small, name), MID - 12, f.item_small, on ? th.acc : th.sub, TextAlign::BASELINE_LEFT,
-            state);
+    d.print(x0 + nw, MID - 12, f.item_small, on ? th.acc : th.sub, TextAlign::BASELINE_LEFT, state);
     const auto pts = round_spots(static_cast<int>(fr.shorts.size()), MID + 22);
     for (size_t i = 0; i < pts.size(); i++) {
       const int px = pts[i].first, py = pts[i].second;
@@ -227,46 +199,36 @@ void draw_item(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th)
     if (tabbed) {
       const bool ip = only_digits_and_dots(fr.text);
       tft::icon(d, PC - 11, TOP + 6, f.icons, 22, ip ? sym::WIFI : sym::WIFI_OFF, ip ? th.acc : Color(tft::BAD));
-      display::BaseFont *tf = width(d, f.item_small, fr.text) <= PW - 4 ? f.item_small : f.small;
-      d.print(PC, 133, tf, th.fg, TextAlign::BASELINE_CENTER, fr.text.c_str());
+      display::BaseFont *tf = width_of(d, f.item_small, fr.text) <= PW - 4 ? f.item_small : f.small;
+      d.print(PC, 133, tf, th.fg, TextAlign::BASELINE_CENTER, fit_text(d, tf, fr.text, PW - 4, ELLIPSIS).c_str());
       const size_t tab = fr.cap.find('\t');
-      d.print(PC, 157, f.small, th.sub, TextAlign::BASELINE_CENTER, fr.cap.substr(0, tab).c_str());
-      d.print(PC, 177, f.small, th.sub, TextAlign::BASELINE_CENTER, fr.cap.substr(tab + 1).c_str());
+      for (int part = 0; part < 2; part++) {
+        const std::string s = part == 0 ? fr.cap.substr(0, tab) : fr.cap.substr(tab + 1);
+        d.print(PC, part == 0 ? 157 : 177, f.small, th.sub, TextAlign::BASELINE_CENTER,
+                fit_text(d, f.small, s, PW - 4, ELLIPSIS).c_str());
+      }
       return;
     }
-    const int bw = std::min(PW - 8, width(d, f.row, fr.text) + 32);
+    // "Install 3.0.1": the text may use the pill but 6 px at its round ends, cut short only past that
+    const std::string label = fit_text(d, f.row, fr.text, PW - 8 - 12, ELLIPSIS);
+    const int bw = std::min(PW - 8, width_of(d, f.row, label) + 32);
     tft::fill_round_rect(d, PC - bw / 2, MID - 18, bw, 36, 18, th.acc, th.bg);
-    d.print(PC, MID + 6, f.row, th.ink, TextAlign::BASELINE_CENTER, fr.text.c_str(), th.acc);
+    d.print(PC, MID + 6, f.row, th.ink, TextAlign::BASELINE_CENTER, label.c_str(), th.acc);
     if (!fr.cap.empty())
       caption(d, f, th, fr.cap);
     return;
   }
 
-  // A list or a level: the item as large as it fits (18 px on two lines when one is too narrow: "8" / "Al-Dosari"),
-  // arrows where Left and Right lead, the marks under it, then dots, the level bar or the caption.
-  const int max_w = PW - 2 * 24 - 4;
-  std::string lines[2] = {fr.text, ""};
-  int nl = 1, size = 22;
-  display::BaseFont *font = f.item;
-  if (width(d, f.item, fr.text) > max_w) {
-    font = f.item_small;
-    size = 18;
-    if (width(d, f.item_small, fr.text) > max_w) {
-      const size_t sp = fr.text.find(' ');
-      if (sp != std::string::npos && width(d, f.item_small, fr.text.substr(0, sp)) <= max_w &&
-          width(d, f.item_small, fr.text.substr(sp + 1)) <= max_w) {
-        lines[0] = fr.text.substr(0, sp);
-        lines[1] = fr.text.substr(sp + 1);
-        nl = 2;
-      } else {
-        font = f.small;
-        size = 13;
-      }
-    }
-  }
+  // A list or a level: the item as large as it fits between the chevrons (item_lines(): 22 px; 18 px on one line or
+  // two, "12. Abdul" / "Basit", "8" / "Al-Dosari"; 13 px on one line or two, cut short only past that), arrows where
+  // Left and Right lead, the marks under it, then dots, the level bar or the caption.
+  display::BaseFont *const fonts[3] = {f.item, f.item_small, f.small};
+  static const int SIZES[3] = {22, 18, 13};
+  const ItemLines item = item_lines(d, fonts, fr.text, ITEM_W, ELLIPSIS);
+  const int size = SIZES[item.font], nl = item.count;
   const int lh = size + 4, ty = MID + size * 36 / 100 - (nl - 1) * lh / 2;
   for (int i = 0; i < nl; i++)
-    d.print(PC, ty + i * lh, font, th.fg, TextAlign::BASELINE_CENTER, lines[i].c_str());
+    d.print(PC, ty + i * lh, fonts[item.font], th.fg, TextAlign::BASELINE_CENTER, item.line[i].c_str());
   if (fr.has_left)
     tft::icon(d, PX, MID - 11, f.icons, 22, sym::CHEVRON_LEFT, th.sub);
   if (fr.has_right)

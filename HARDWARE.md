@@ -15,7 +15,8 @@ and run the checklist in section 9 before ordering boards.
 USB-C 6-pin (5 V only) ──┬── 5 V rail ──┬── MAX98357A (VDD) ── speaker terminal (OUTP/OUTN, 4 Ω 3 W)
    CC1/CC2 5.1 kΩ        │   bulk cap   │        ▲ I2S BCLK/LRCLK/DIN, SD_MODE (4.7 kΩ)
                          │              │        │
-                         └── LDO 3.3 V ─┴── ESP32-S3-WROOM-1-N16R8 ── I2C ── OLED header (SSD1306)
+                         └── LDO 3.3 V ─┴── ESP32-S3-WROOM-1-N16R8 ── I2C ── J4 OLED header (SSD1306)
+                                                 │                └─ SPI ── J7 TFT header (ST7789)
                                                  ├── 5-way switch: Up/Down/Left/Right/Select (to GND)
                                                  ├── status LED
                                                  ├── relay output terminal (logic signal + GND)
@@ -412,10 +413,10 @@ breakout can take its 5 V from there. DEVELOPER.md section 11 lists the firmware
     an orange "Press Select" on black (else set `tft_color_order`, `tft_invert`, `tft_offset_height` in
     `displays/tft.yaml`); the ring, the strip, the menu's icons and the pop-ups match the design page
     ([design page](https://claude.ai/artifact/XttPFXwoSqycdCdLjbHLoi): clock C, menu M1, Teal); every Material Symbols icon shows
-    (a missing glyph draws nothing); Screen Colour changes the accent at once; a TFT clock offers only TFT releases
+    (a missing one shows as an empty box); Screen Colour changes the accent at once; a TFT clock offers only TFT releases
     (`manifest-tft.json`) and an OLED clock only OLED ones.
 14. Screen settings, both displays: Brightness 10 % is still readable in a dark room and 100 % in daylight (TFT:
-    gamma 2 on the backlight; OLED: contrast); 0 % turns the screen dark at once; Screen at Night Dim and Dark switch
+    gamma 2 on the backlight; OLED: contrast); 0 % turns the screen dark at once; Screen at Night Dim and Turned off switch
     at Night From and back at Night Until; while dark, the first key press only lights the screen (dim) for 2 min
     with the seconds counting down in a corner, and the athan and the Pre-Fajr Tawashih light it while they play.
     `screen_dim_pct` (10 %) and `screen_wake_s` (120 s) may need tuning on the real backlight.

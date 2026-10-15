@@ -90,14 +90,14 @@ script:
     then:
       - delay: 0ms
       - lambda: |-
-          // Never touch the OLED before its setup() allocated the buffer, or when it failed (see CLAUDE.md).
+          // Never touch the OLED before its setup() allocated the buffer, or when it failed (firmware_rules.md 3.2).
           if (!id(oled).is_ready()) return;
           auto &d = *id(oled);
           d.clear();
           auto now = id(sntp_time).now();
           const bool wifi_ok = wifi::global_wifi_component->is_connected();
 
-          // A screen lit only for a while (Brightness 0 % or Screen at Night: Dark, woken by a key): the seconds until
+          // A screen lit only for a while (Brightness 0 % or Screen at Night: Turned off, woken by a key): the seconds until
           // it goes dark (screen_refresh), in a white tab with a moon, over whatever sits in that corner: top right on
           // the clock and the Wi-Fi setup screen, bottom left in the menu.
           auto draw_countdown = [&](bool menu_open) {
@@ -306,9 +306,11 @@ script:
             const char *nm = names[std::max(0, std::min(6, id(current_athan_prayer_index)))];
             const int sw = std::max(text_w(id(font4), "ATHAN"), text_w(id(font4), "TIME"));
             const int gw = text_w(id(font1), nm) + 5 + sw, x = 64 - gw / 2;
-            d.print(x, 62, id(font1), display::COLOR_OFF, TextAlign::BASELINE_LEFT, nm);
-            d.print(x + gw - sw, 53, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "ATHAN");
-            d.print(x + gw - sw, 61, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "TIME");
+            // Baseline 60: the name's tallest letters (h, b) start at row 45 and the tails of g and j end at row 63,
+            // the box's last.
+            d.print(x, 60, id(font1), display::COLOR_OFF, TextAlign::BASELINE_LEFT, nm);
+            d.print(x + gw - sw, 51, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "ATHAN");
+            d.print(x + gw - sw, 59, id(font4), display::COLOR_OFF, TextAlign::BASELINE_LEFT, "TIME");
             finish();
             return;
           }

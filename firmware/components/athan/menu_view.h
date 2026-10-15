@@ -10,9 +10,10 @@
 //    Pre-Fajr    |         v              round), the row on screen always in the middle, highlighted; a dotted line
 //  (clock) Tick  |   . # . . . . . .      where the list starts again
 //                                         the right pane: the row's full title small at the top, then its item as large
-//                                         as it fits (two lines of the medium font when one is too narrow), arrows where
-//                                         Left/Right lead, the check mark (in use) and play mark (playing) under it, then
-//                                         dots, a level bar or the caption (small font, up to two lines)
+//                                         as it fits (two lines of the medium font when one is too narrow, then the
+//                                         small font, cut short only past that: item_lines()), arrows where Left/Right
+//                                         lead, the check mark (in use) and play mark (playing) under it, then dots, a
+//                                         level bar or the caption (small font, up to two lines)
 //
 // Other row styles (menu.h RowStyle) in the right pane: CHOICES side by side when they fit (Off  On), TOGGLES as the
 // prayer and its state with every prayer's initial and a box (filled = on) under them, LEVEL with a bar. A single item
@@ -22,8 +23,10 @@
 //
 // Small = a pixel font at its native size (Tiny5, 8 px), crisp on the one-colour OLED.
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "esphome/components/display/display.h"
 #include "esphome/core/defines.h"
@@ -65,6 +68,31 @@ void draw_menu(display::Display &d, Menu &menu, const MenuFonts &fonts);
 /// loaded). Reads the same hooks, no display access: the 1 s refresh redraws (about 23 ms of I2C or 25 ms of SPI)
 /// only then.
 bool menu_changed(Menu &menu);
+
+// ---- text helpers both drawings use (menu_view.cpp). Names, captions and statuses can be any length (lists and
+// uploads are user data): nothing drawn with them reaches past the width it is given.
+
+/// The width of `s` in font `f`, in pixels.
+int width_of(display::Display &d, display::BaseFont *f, const std::string &s);
+/// `s` as it fits in `w` pixels: whole, or cut short with `ellipsis` at its end ("\u2026" on the TFT; "..." on the
+/// OLED, whose pixel font has no such glyph).
+std::string fit_text(display::Display &d, display::BaseFont *f, const std::string &s, int w, const char *ellipsis);
+/// The words of `s` on at most `max_lines` lines of at most `w` pixels. A word wider than a line is cut short with
+/// `ellipsis`, and so is the last line when the text needed more lines.
+std::vector<std::string> wrap_words(display::Display &d, display::BaseFont *f, const std::string &s, int w,
+                                    size_t max_lines, const char *ellipsis);
+/// Whether `s` is all digits and dots (an IP address).
+bool only_digits_and_dots(const std::string &s);
+
+/// A list item's text, as large as it fits `w` pixels: fonts[0] on one line; fonts[1] on one line, or two
+/// (item_break(): "12. Abdul" / "Basit"); fonts[2] on one line, or two; else fonts[2] on two lines cut short.
+struct ItemLines {
+  int font{0};   // the index into fonts
+  int count{1};  // 1 or 2
+  std::string line[2];
+};
+ItemLines item_lines(display::Display &d, display::BaseFont *const fonts[3], const std::string &s, int w,
+                     const char *ellipsis);
 
 }  // namespace athan
 }  // namespace esphome

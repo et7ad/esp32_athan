@@ -58,3 +58,6 @@ secrets.yaml
 
 
 *.lck
+
+.playwrite.lock
+.playwright-mcp

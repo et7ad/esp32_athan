@@ -174,8 +174,14 @@ bool PrayerStore::load(int slot, PsramVector<uint16_t> *table, std::string *tz) 
     h = this->header_[slot];
   }
   table->resize(h.days * NUM_FIELDS);
-  if (esp_partition_read(this->part_, slot * SLOT_SIZE + TABLE_OFFSET, table->data(), table->size() * 2) != ESP_OK)
+  // Checked like at boot: a year written since then was never read back. On failure the table is emptied: a table
+  // of zeros would mean a day of 00:00 times and no athan, without the stand-in or a new download taking over.
+  if (esp_partition_read(this->part_, slot * SLOT_SIZE + TABLE_OFFSET, table->data(), table->size() * 2) != ESP_OK ||
+      esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(table->data()), table->size() * 2) != h.table_crc) {
+    ESP_LOGE(TAG, "Slot %d: the stored times do not read back, ignoring them", slot);
+    table->clear();
     return false;
+  }
   *tz = h.tz;
   return true;
 }

@@ -1,5 +1,6 @@
 #include "mp3_check.h"
 
+#include <cstdint>
 #include <cstring>
 
 namespace esphome {
@@ -58,6 +59,36 @@ size_t skip_id3v2(const uint8_t *data, size_t len, size_t pos) {
   return pos;
 }
 
+// From `from` on, the next place where three frames chain at `rate`: the audio goes on there after a tag in the
+// middle (files joined together) or a damaged frame, as a decoder resyncs. SIZE_MAX when there is none: the audio
+// has ended (a trailing ID3v1 or APE tag, or junk).
+size_t next_chain(const uint8_t *data, size_t len, size_t from, uint32_t rate) {
+  for (size_t p = from; p + 4 <= len; p++) {
+    if (p + 3 <= len && std::memcmp(data + p, "TAG", 3) == 0 && len - p == 128)
+      return SIZE_MAX;  // ID3v1, the last 128 bytes
+    if (p + 8 <= len && std::memcmp(data + p, "APETAGEX", 8) == 0)
+      return SIZE_MAX;  // APE tag (it comes at the end)
+    if (p + 10 <= len && std::memcmp(data + p, "ID3", 3) == 0) {
+      const size_t q = skip_id3v2(data, len, p);
+      if (q > p) {
+        p = q - 1;  // the whole tag
+        continue;
+      }
+    }
+    Frame a, b, c;
+    if (!parse_frame(data + p, &a) || a.sample_rate != rate)
+      continue;
+    const size_t p2 = p + a.length;
+    if (p2 + 4 > len || !parse_frame(data + p2, &b) || b.sample_rate != rate)
+      continue;
+    const size_t p3 = p2 + b.length;
+    if (p3 + 4 > len || !parse_frame(data + p3, &c) || c.sample_rate != rate)
+      continue;
+    return p;
+  }
+  return SIZE_MAX;
+}
+
 }  // namespace
 
 Mp3Info mp3_scan(const uint8_t *data, size_t len) {
@@ -100,12 +131,17 @@ Mp3Info mp3_scan(const uint8_t *data, size_t len) {
   Frame f;
   bool first = true;
   while (pos + 4 <= len) {
-    if (!parse_frame(data + pos, &f)) {
-      // Trailing tags (ID3v1 "TAG", APE "APETAGEX") or garbage: stop counting there.
-      break;
-    }
-    if (pos + f.length > len) {
-      break;  // truncated last frame: ignore it
+    if (!parse_frame(data + pos, &f) || pos + f.length > len) {
+      // Not a whole frame here. A tag in the middle or a damaged frame: counting goes on at the next frames that
+      // chain (stopping here measured a joined file far too short, and the player's bound then cut its audio). A
+      // trailing tag, junk or a truncated last frame: the end.
+      if (first)
+        break;
+      const size_t next = next_chain(data, len, pos + 1, info.sample_rate);
+      if (next == SIZE_MAX)
+        break;
+      pos = next;
+      continue;
     }
     if (first) {
       info.sample_rate = f.sample_rate;
