@@ -8235,7 +8235,7 @@
 		(at 74.93 184.15 0)
 		(unit 1)
 		(body_style 1)
-		(exclude_from_sim no)
+		(exclude_from_sim yes)
 		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
@@ -8285,18 +8285,7 @@
 				)
 			)
 		)
-		(property "Description" "Open Hardware logo, small"
-			(at 74.93 184.15 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Sim.Enable" "0"
+		(property "Description" "QR code to the project page (github.com/et7ad/esp32_athan), back silkscreen"
 			(at 74.93 184.15 0)
 			(hide yes)
 			(show_name no)
@@ -8371,7 +8360,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Amplifier supply capacitor on +5V, at U4: 22 µF ceramic, 10 V or more"
+			(at 86.36 109.22 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C12891"
 			(at 86.36 109.22 0)
 			(hide yes)
 			(show_name no)
@@ -8685,7 +8685,7 @@
 				)
 			)
 		)
-		(property "Description" "1.3 inch SH1106 128x64 OLED module"
+		(property "Description" "Display header for a 1.3-inch SH1106 (or 0.96-inch SSD1306) 128x64 I2C OLED module: GND, VCC, SCL, SDA"
 			(at 241.3 133.35 0)
 			(hide yes)
 			(show_name no)
@@ -8893,7 +8893,18 @@
 				)
 			)
 		)
-		(property "Description" "Polarized capacitor"
+		(property "Description" "Bulk capacitor on +5V for the amplifier’s peaks: 470 µF 10 V low-ESR electrolytic, 8 mm"
+			(at 71.12 52.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C178530"
 			(at 71.12 52.07 0)
 			(hide yes)
 			(show_name no)
@@ -9051,7 +9062,18 @@
 				)
 			)
 		)
-		(property "Description" "1A Low Dropout regulator, positive, 3.3V fixed output, SOT-223"
+		(property "Description" "1A Low Dropout regulator, positive, 3.3V fixed output, SOT-223: makes +3V3 from +5V"
+			(at 93.98 48.26 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C6186"
 			(at 93.98 48.26 0)
 			(hide yes)
 			(show_name no)
@@ -9136,7 +9158,7 @@
 				)
 			)
 		)
-		(property "Description" "Generic connector, single row, 01x06, script generated (kicad-library-utils/schlib/autogen/connector/)"
+		(property "Description" "Programming header: GND, IO0, EN, TX, RX, 3V3 (a jumper on pins 1 and 2 at power-up starts download mode)"
 			(at 274.32 54.61 0)
 			(hide yes)
 			(show_name no)
@@ -9231,7 +9253,7 @@
 				)
 			)
 		)
-		(property "Description" "1.54 inch ST7789 240x240 LCD module [https://oshwlab.com/scrators/st7789] [https://www.amazon.com/dp/B0DN9NMBFW?ref=ppx_yo2ov_dt_b_fed_asin_title]"
+		(property "Description" "Display header for a 1.54-inch ST7789 240x240 SPI TFT module: GND, VCC, SCL, SDA, RES, DC, CS, BL [https://oshwlab.com/scrators/st7789] [https://www.amazon.com/dp/B0DN9NMBFW?ref=ppx_yo2ov_dt_b_fed_asin_title]"
 			(at 274.32 147.32 0)
 			(hide yes)
 			(show_name no)
@@ -9330,7 +9352,18 @@
 				)
 			)
 		)
-		(property "Description" "Resistor"
+		(property "Description" "DISP_SDA pull-up to +3V3, for the OLED's I2C data (with a TFT the line carries SPI data)"
+			(at 199.39 146.05 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 199.39 146.05 0)
 			(hide yes)
 			(show_name no)
@@ -9410,7 +9443,18 @@
 				)
 			)
 		)
-		(property "Description" "Relay"
+		(property "Description" "Relay output: pin 2 is a 3.3 V logic signal for a relay module (GPIO12 through JP1), pin 1 GND"
+			(at 275.59 101.6 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C5188434"
 			(at 275.59 101.6 0)
 			(hide yes)
 			(show_name no)
@@ -9568,7 +9612,18 @@
 				)
 			)
 		)
-		(property "Description" "USB Power-Only 6P Type-C Receptacle connector"
+		(property "Description" "USB-C power input, 5 V (power only, no data)"
+			(at 46.99 55.88 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C3151650"
 			(at 46.99 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -9820,7 +9875,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection)"
 			(at 262.89 27.94 0)
 			(hide yes)
 			(show_name no)
@@ -10049,7 +10104,18 @@
 				)
 			)
 		)
-		(property "Description" "DC Barrel Jack with an internal switch"
+		(property "Description" "5 V DC barrel jack, centre positive (CUI PJ-102AH); regulated 5 V only"
+			(at 71.12 29.21 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C3096093"
 			(at 71.12 29.21 0)
 			(hide yes)
 			(show_name no)
@@ -10083,7 +10149,7 @@
 		(at 74.93 168.91 0)
 		(unit 1)
 		(body_style 1)
-		(exclude_from_sim no)
+		(exclude_from_sim yes)
 		(in_bom no)
 		(on_board yes)
 		(in_pos_files yes)
@@ -10132,18 +10198,7 @@
 				)
 			)
 		)
-		(property "Description" "Open Hardware logo, small"
-			(at 74.93 168.91 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Sim.Enable" "0"
+		(property "Description" "QR code to the project page (github.com/et7ad/esp32_athan), front silkscreen"
 			(at 74.93 168.91 0)
 			(hide yes)
 			(show_name no)
@@ -10295,7 +10350,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Regulator output capacitor on +3V3 (U3), near the module’s 3V3 pin: 22 µF ceramic"
+			(at 109.22 52.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C12891"
 			(at 109.22 52.07 0)
 			(hide yes)
 			(show_name no)
@@ -10375,7 +10441,7 @@
 				)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "Relay output link, bridged as made: cut it and fit R11 for a series resistor"
 			(at 260.35 106.68 0)
 			(hide yes)
 			(show_name no)
@@ -10457,7 +10523,18 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.08–6.12k"
+		(property "Description" "USB-C CC2 pull-down to GND: USB-C asks for 5.1 kΩ ±20 %, so 4.08 to 6.12 kΩ"
+			(at 64.77 69.85 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 64.77 69.85 0)
 			(hide yes)
 			(show_name no)
@@ -10539,7 +10616,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection), beside the antenna: use a nylon screw"
 			(at 262.89 38.1 0)
 			(hide yes)
 			(show_name no)
@@ -10616,6 +10693,17 @@
 			)
 		)
 		(property "Description" "RF Module, ESP32-S3 SoC, Wi-Fi 802.11b/g/n, Bluetooth, BLE, 32-bit, 3.3V, onboard antenna, SMD"
+			(at 190.5 68.58 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C2913202"
 			(at 190.5 68.58 0)
 			(hide yes)
 			(show_name no)
@@ -10814,7 +10902,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection)"
 			(at 262.89 22.86 0)
 			(hide yes)
 			(show_name no)
@@ -10887,7 +10975,18 @@
 				)
 			)
 		)
-		(property "Description" "Resistor with allowed range of 4.7–10k [Left]"
+		(property "Description" "Amplifier SD_MODE from GPIO15 (4.7 to 10 kΩ): high plays the left channel"
+			(at 39.37 130.81 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 39.37 130.81 0)
 			(hide yes)
 			(show_name no)
@@ -10968,7 +11067,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "+3V3 decoupling at the module’s 3V3 pin: 100 nF ceramic"
+			(at 119.38 52.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C24497"
 			(at 119.38 52.07 0)
 			(hide yes)
 			(show_name no)
@@ -11003,7 +11113,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "5d4bc05c-0462-40b8-82b6-31652cd05d80")
 		(property "Reference" "R7"
 			(at 18.542 162.56 0)
@@ -11049,7 +11159,18 @@
 				)
 			)
 		)
-		(property "Description" "Optional for selecting 15dB (cut Solder Jumper)"
+		(property "Description" "Optional, for 15 dB gain: fit it and cut JP2, with JP3’s centre bridged to the JP2 side"
+			(at 22.86 163.83 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17900"
 			(at 22.86 163.83 0)
 			(hide yes)
 			(show_name no)
@@ -11096,7 +11217,7 @@
 				)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "100"
 			(at 259.08 86.36 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11128,7 +11249,18 @@
 				)
 			)
 		)
-		(property "Description" "Resistor with allowed range of 470–680k only"
+		(property "Description" "Status LED resistor, 100 to 330 Ω: 100 Ω for blue, green and white LEDs (about 2.7 to 3 V), 300 to 330 Ω for red, orange and yellow (about 2 V)"
+			(at 259.08 86.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17901"
 			(at 259.08 86.36 0)
 			(hide yes)
 			(show_name no)
@@ -11287,7 +11419,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection), beside the antenna: use a nylon screw"
 			(at 262.89 33.02 0)
 			(hide yes)
 			(show_name no)
@@ -11364,7 +11496,7 @@
 				)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "Gain: links JP3’s side to GND, bridged as made (12 dB); cut it and fit R7 for 15 dB"
 			(at 43.18 162.56 0)
 			(hide yes)
 			(show_name no)
@@ -11444,7 +11576,18 @@
 				)
 			)
 		)
-		(property "Description" "Light emitting diode"
+		(property "Description" "Status LED, blue, 1206 (GPIO13 through R10)"
+			(at 270.51 86.36 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C130717"
 			(at 270.51 86.36 0)
 			(hide yes)
 			(show_name no)
@@ -11536,7 +11679,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Regulator input capacitor on +5V (U3): 22 µF ceramic, 10 V or more"
+			(at 81.28 52.07 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C12891"
 			(at 81.28 52.07 0)
 			(hide yes)
 			(show_name no)
@@ -11696,7 +11850,7 @@
 				)
 			)
 		)
-		(property "Description" "9 open · 6 JP3↑ · 15 JP3↓ · 12 JP3↓+JP2"
+		(property "Description" "Amplifier gain: open = 9 dB; centre to the +5V side = 6 dB; centre to the JP2 side = 12 dB (JP2 bridged) or 15 dB (JP2 cut, R7 fitted)"
 			(at 34.036 152.654 90)
 			(show_name no)
 			(do_not_autoplace no)
@@ -11801,7 +11955,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "EN power-on delay with R3 (holds the module in reset while +3V3 rises): 1 µF ceramic"
+			(at 161.29 44.45 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C1848"
 			(at 161.29 44.45 0)
 			(hide yes)
 			(show_name no)
@@ -11883,7 +12048,18 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.7-10k"
+		(property "Description" "EN pull-up to +3V3 (4.7 to 10 kΩ); with C5 the power-on delay"
+			(at 168.91 41.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 168.91 41.91 0)
 			(hide yes)
 			(show_name no)
@@ -11964,7 +12140,18 @@
 				)
 			)
 		)
-		(property "Description" "Mono DAC with amplifier, I2S, PCM, TDM, 32-bit, 96khz, 3.2W, TQFP-16"
+		(property "Description" "Mono I2S DAC and class-D amplifier, 3.2 W into 4 Ω, TQFN-16 (3 × 3 mm)"
+			(at 58.42 128.27 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C910544"
 			(at 58.42 128.27 0)
 			(hide yes)
 			(show_name no)
@@ -12044,7 +12231,7 @@
 		(in_bom yes)
 		(on_board yes)
 		(in_pos_files yes)
-		(dnp no)
+		(dnp yes)
 		(uuid "88bb0fd9-e55d-426d-965d-81ddb5329c29")
 		(property "Reference" "R11"
 			(at 260.096 93.218 90)
@@ -12088,7 +12275,18 @@
 				)
 			)
 		)
-		(property "Description" "Optional with the SolderJumper"
+		(property "Description" "Optional series resistor on the relay output (about 100 Ω): fit it and cut JP1"
+			(at 260.35 95.25 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17901"
 			(at 260.35 95.25 0)
 			(hide yes)
 			(show_name no)
@@ -12791,7 +12989,18 @@
 				)
 			)
 		)
-		(property "Description" "speaker 4Ω 3W"
+		(property "Description" "Speaker terminal: a 4 Ω, 3 W speaker (pin 1 SPK+, pin 2 SPK−)"
+			(at 86.36 120.65 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C5188434"
 			(at 86.36 120.65 0)
 			(hide yes)
 			(show_name no)
@@ -12950,7 +13159,18 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.08–6.12k"
+		(property "Description" "USB-C CC1 pull-down to GND: USB-C asks for 5.1 kΩ ±20 %, so 4.08 to 6.12 kΩ"
+			(at 73.66 69.85 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 73.66 69.85 0)
 			(hide yes)
 			(show_name no)
@@ -13031,7 +13251,18 @@
 				)
 			)
 		)
-		(property "Description" "Resistor"
+		(property "Description" "DISP_SCL pull-up to +3V3, for the OLED's I2C clock (with a TFT the line carries the SPI clock)"
+			(at 214.63 146.05 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 214.63 146.05 0)
 			(hide yes)
 			(show_name no)
@@ -13112,7 +13343,18 @@
 				)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Amplifier VDD decoupling, right at U4’s VDD pins: 100 nF ceramic"
+			(at 99.06 109.22 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C24497"
 			(at 99.06 109.22 0)
 			(hide yes)
 			(show_name no)
@@ -13195,7 +13437,7 @@
 				)
 			)
 		)
-		(property "Description" "PCB Stick switch 4 directional"
+		(property "Description" "5-way switch (4 directions and a centre push), Alps SKQUAAA010, through-hole"
 			(at 146.05 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -13774,7 +14016,18 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.7-10k"
+		(property "Description" "GPIO0 pull-up to +3V3 (4.7 to 10 kΩ): high at reset is a normal boot"
+			(at 146.05 41.91 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
 			(at 146.05 41.91 0)
 			(hide yes)
 			(show_name no)
@@ -13855,7 +14108,7 @@
 				)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "TFT backlight from GPIO (DS2 pin 8), bridged as made: cut it for a backlight always at full brightness"
 			(at 262.89 162.56 0)
 			(hide yes)
 			(show_name no)

@@ -2,9 +2,9 @@
 """Write manifest.json (or manifest-tft.json) for a firmware GitHub Release.
 
 Devices check https://github.com/et7ad/esp32_athan/releases/latest/download/manifest.json (the `update:` entity in
-firmware/athan.yaml, every 6 hours and on "Check For Update"); clocks built for the TFT display check
-manifest-tft.json in the same release. The manifest names the OTA image, its MD5 and the version; a relative path is
-resolved against the manifest's own URL, so both files must be assets of the SAME release.
+firmware/athan.yaml, after each start, daily at 03:00 and on "Check For Update"); clocks built for the TFT display
+check manifest-tft.json in the same release. The manifest names the OTA image, its MD5 and the version; a relative
+path is resolved against the manifest's own URL, so both files must be assets of the SAME release.
 
 Usage:
     python3 scripts/make_release_manifest.py path/to/firmware.ota.bin --version 3.0.1 [--summary "What changed"]

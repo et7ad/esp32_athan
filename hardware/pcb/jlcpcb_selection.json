@@ -1,0 +1,10 @@
+{
+  "excluded": [
+    "C4",
+    "R8",
+    "R9",
+    "U1"
+  ],
+  "pcb_color": "Green",
+  "note": "Parts left out of the JLCPCB order (written by jlcpcb_select.py)."
+}

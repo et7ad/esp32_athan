@@ -1,7 +1,7 @@
 # =====================================================================================================================
 # Display: the 240x240 colour TFT on SPI (ST7789 1.54" IPS), chosen with display_type: tft in athan.yaml or
-# ./build_firmware.sh --display tft. Wiring: HARDWARE.md 3.2 (header J7, beside the OLED's J4; SPI clock and data on
-# the OLED's I2C pins).
+# ./build_firmware.sh --display tft. Wiring: HARDWARE.md section 3 (header DS2, beside the OLED's DS1; SPI clock and
+# data on the OLED's I2C pins).
 #
 # The screens (design page: https://claude.ai/artifact/XttPFXwoSqycdCdLjbHLoi, clock C, menu M1):
 #   clock   the time and date on top; a ring that fills from the last prayer time to the next one, with the next
@@ -19,12 +19,12 @@
 substitutions:
   # Build and update files carry -tft: athan-v3-tft.ota.bin and manifest-tft.json (an OLED build has no suffix).
   variant_suffix: "-tft"
-  # Pins 5-8 of the TFT header J7 (HARDWARE.md 3.2). Clock and data are pin_scl / pin_sda.
+  # Pins 5-8 of the TFT header DS2 (HARDWARE.md section 3). Clock and data are pin_scl / pin_sda.
   pin_tft_res: GPIO16
   pin_tft_dc: GPIO17
   pin_tft_cs: GPIO18
   pin_tft_bl: GPIO4
-  # Panel settings, which differ between ST7789 modules (README 2.2). A new clock opens on the Wi-Fi setup screen:
+  # Panel settings, which differ between ST7789 modules (guides/building.md section 3). A new clock opens on the Wi-Fi setup screen:
   # its Wi-Fi icon is teal and "Press Select" orange.
   #   teal shows yellow-green, orange shows blue   -> tft_color_order: rgb
   #   the background is white, colours inverted    -> tft_invert: "false"
@@ -203,6 +203,9 @@ display:
       auto now = id(sntp_time).now();
       const bool time_ok = now.is_valid();
       const bool wifi_ok = wifi::global_wifi_component->is_connected();
+      // A firmware update to install. Only while online (it cannot install without), which also keeps the status
+      // marks clear of the seconds: with no Wi-Fi the mark for that shows instead.
+      const bool update_ready = wifi_ok && id(fw_update).state == update::UPDATE_STATE_AVAILABLE;
 
       // ---- the seconds alone, most seconds. The clock face is drawn whole at least every ${tft_ring_update_s} s (the
       // ring's progress and its knob move then), when the minute changes, every second in the last minute before a
@@ -220,7 +223,7 @@ display:
         for (int v : std::initializer_list<int>{
                  wifi_ok, id(clock_12h), id(times_loaded), id(athan_playing), id(next_prayer_index),
                  id(current_athan_prayer_index), id(next_prayer_hour), id(next_prayer_minute),
-                 id(athan_core).times_standin(), id(buttons_locked), id(athan_core).radio_active(), id(screen_colour),
+                 id(athan_core).times_standin(), id(buttons_locked), update_ready, id(athan_core).radio_active(), id(screen_colour),
                  id(screen_dark_in), id(toast_kind), id(volume_level), id(fajr_volume_level), id(external_relay).state,
                  id(ring_flash_on), now.day_of_month})
           mix(v);
@@ -268,7 +271,7 @@ display:
         return;
       }
 
-      // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: how to connect (README 1.1). Bluetooth: the state,
+      // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: how to connect (guides/using.md section 1). Bluetooth: the state,
       // and the page to open on a phone or computer (Web Bluetooth: Chrome or Edge, not Safari). Hotspot: its name and
       // password once it is on.
       if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
@@ -326,12 +329,14 @@ display:
       else snprintf(line, sizeof(line), "--- -- ---");
       d.print(230, 20, id(t_text), sub, TextAlign::BASELINE_RIGHT, line);
       {
-        // right to left: times borrowed from last year, no Wi-Fi, buttons locked, the radio and its slot
+        // right to left: times borrowed from last year, no Wi-Fi, buttons locked, a firmware update to install, the
+        // radio and its slot
         int x = 230;
         const int top = 26;
         if (times_ok && id(athan_core).times_standin()) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::HISTORY, Color(tft::WARN)); x -= 5; }
         if (!wifi_ok) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::WIFI_OFF, Color(tft::BAD)); x -= 5; }
         if (id(buttons_locked)) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::LOCK, sub); x -= 5; }
+        if (update_ready) { x -= 16; tft::icon(d, x, top, id(i_16), 16, sym::UPGRADE, acc); x -= 5; }
         const int r = id(athan_core).radio_active();
         if (r >= 0) {
           char num[4];
@@ -490,6 +495,7 @@ font:
       "\ue899",  # lock
       "\ue648",  # wifi_off
       "\ue8b3",  # history
+      "\uf0fb",  # upgrade
       "\ue04f",  # volume_off
       "\ue668",  # check
       "\ue51c",  # dark_mode

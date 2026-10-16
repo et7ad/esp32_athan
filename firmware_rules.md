@@ -128,6 +128,10 @@ hooks `show` (item on screen: previews), `apply`, `leave` (stop the preview).
 - `Component::defer` is safe from other tasks. Entity `publish_state` is not, so call it from the main loop only.
 - Multipart uploads reach custom web handlers only when `ota: - platform: web_server` is present. It stays even
   though owners rarely use the firmware upload form.
+- **The clock never installs firmware by itself.** It checks after each start and once a day; an update found only
+  shows the update mark and the menu's Install offer. The owner picks the moment: an install runs on the main loop
+  for the whole download (ESPHome's `OtaHttpRequestComponent::flash()`), so nothing else runs, and the clock then
+  restarts. A prayer whose minute passes during it is not called. So no `on_update_available` that installs.
 
 ### 3.3 C++ in lambdas and the component
 

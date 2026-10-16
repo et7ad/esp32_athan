@@ -163,7 +163,7 @@
 				)
 			)
 		)
-		(property "Description" "PCB Stick switch 4 directional"
+		(property "Description" "5-way switch (4 directions and a centre push), Alps SKQUAAA010, through-hole"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -433,7 +433,7 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.08–6.12k"
+		(property "Description" "USB-C CC2 pull-down to GND: USB-C asks for 5.1 kΩ ±20 %, so 4.08 to 6.12 kΩ"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -441,6 +441,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 0)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "ef3a0b6e-2ed0-4e60-bf78-6c1edfadc89f")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -593,7 +605,7 @@
 				)
 			)
 		)
-		(property "Description" "1.54 inch ST7789 240x240 LCD module [https://oshwlab.com/scrators/st7789] [https://www.amazon.com/dp/B0DN9NMBFW?ref=ppx_yo2ov_dt_b_fed_asin_title]"
+		(property "Description" "Display header for a 1.54-inch ST7789 240x240 SPI TFT module: GND, VCC, SCL, SDA, RES, DC, CS, BL [https://oshwlab.com/scrators/st7789] [https://www.amazon.com/dp/B0DN9NMBFW?ref=ppx_yo2ov_dt_b_fed_asin_title]"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -605,9 +617,16 @@
 				)
 			)
 		)
+		(property ki_fp_filters "Connector*:*_1x??_*")
 		(path "/26969979-d684-4610-a25c-40cb9ea18cc4")
 		(sheetname "/")
 		(sheetfile "esp32_athan.kicad_sch")
+		(units
+			(unit
+				(name "A")
+				(pins "1" "2" "3" "4" "5" "6" "7" "8")
+			)
+		)
 		(attr through_hole)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
@@ -787,6 +806,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
+			(pinfunction "Pin_1_1")
+			(pintype "passive")
 			(zone_connect 2)
 			(uuid "8ccc99a9-8f13-4e5c-956e-90180a240c94")
 		)
@@ -797,6 +818,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "+3V3")
+			(pinfunction "Pin_2_2")
+			(pintype "passive")
 			(uuid "a77ce595-290c-45b6-a588-f86f02ad4298")
 		)
 		(pad "3" thru_hole circle
@@ -806,6 +829,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_SCL")
+			(pinfunction "Pin_3_3")
+			(pintype "passive")
 			(uuid "2e7d5256-807d-4fed-a253-f0ca6d2f0c7f")
 		)
 		(pad "4" thru_hole circle
@@ -815,6 +840,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_SDA")
+			(pinfunction "Pin_4_4")
+			(pintype "passive")
 			(uuid "245782a2-5af9-4840-abca-46ec58362214")
 		)
 		(pad "5" thru_hole circle
@@ -824,6 +851,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_RES")
+			(pinfunction "Pin_5_5")
+			(pintype "passive")
 			(uuid "0b45068f-e8b8-4f71-9b77-0507e6db0f0b")
 		)
 		(pad "6" thru_hole circle
@@ -833,6 +862,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_DC")
+			(pinfunction "Pin_6_6")
+			(pintype "passive")
 			(uuid "e200b7c0-87d6-4303-87e0-31bc1c7e989d")
 		)
 		(pad "7" thru_hole circle
@@ -842,6 +873,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_CS")
+			(pinfunction "Pin_7_7")
+			(pintype "passive")
 			(uuid "70685b0f-6fed-42dc-be5c-0a5a518dcaae")
 		)
 		(pad "8" thru_hole circle
@@ -851,6 +884,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "Net-(DS2-Pin_8)")
+			(pinfunction "Pin_8_8")
+			(pintype "passive")
 			(uuid "e3c6eddd-79e7-40e0-ba23-aae3fec7529f")
 		)
 		(embedded_fonts no)
@@ -894,7 +929,7 @@
 				)
 			)
 		)
-		(property "Description" "Generic connector, single row, 01x06, script generated (kicad-library-utils/schlib/autogen/connector/)"
+		(property "Description" "Programming header: GND, IO0, EN, TX, RX, 3V3 (a jumper on pins 1 and 2 at power-up starts download mode)"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -1179,7 +1214,7 @@
 				)
 			)
 		)
-		(property "Description" "1.3 inch SH1106 128x64 OLED module"
+		(property "Description" "Display header for a 1.3-inch SH1106 (or 0.96-inch SSD1306) 128x64 I2C OLED module: GND, VCC, SCL, SDA"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -1323,6 +1358,12 @@
 		(path "/21133d30-4c64-40f8-9493-3af5e921ffe7")
 		(sheetname "/")
 		(sheetfile "esp32_athan.kicad_sch")
+		(units
+			(unit
+				(name "A")
+				(pins "3" "4" "1" "2")
+			)
+		)
 		(attr through_hole)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
@@ -1502,6 +1543,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "GND")
+			(pinfunction "GND_1")
+			(pintype "power_in")
 			(solder_mask_margin 0.102)
 			(uuid "1aa92a1a-f22f-4dcf-a000-3b05c251a568")
 		)
@@ -1512,6 +1555,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "+3V3")
+			(pinfunction "VDD_2")
+			(pintype "power_in")
 			(solder_mask_margin 0.102)
 			(uuid "03f71467-2970-457c-bbf3-3c1e53f07f17")
 		)
@@ -1522,6 +1567,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_SCL")
+			(pinfunction "SCK_3")
+			(pintype "input")
 			(solder_mask_margin 0.102)
 			(uuid "9b84882c-8b41-4b18-bf71-5f0615d0393a")
 		)
@@ -1532,6 +1579,8 @@
 			(layers "*.Cu" "*.Mask")
 			(remove_unused_layers no)
 			(net "DISP_SDA")
+			(pinfunction "SDA_4")
+			(pintype "bidirectional")
 			(solder_mask_margin 0.102)
 			(uuid "98ed93e6-980d-48d2-aa3e-2b7b098919c6")
 		)
@@ -1576,7 +1625,7 @@
 				)
 			)
 		)
-		(property "Description" "Polarized capacitor"
+		(property "Description" "Bulk capacitor on +5V for the amplifier’s peaks: 470 µF 10 V low-ESR electrolytic, 8 mm"
 			(at 0 0 270)
 			(layer "F.Fab")
 			(hide yes)
@@ -1584,6 +1633,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C178530"
+			(at 0 0 270)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "89a8eaff-7322-4b89-8ddf-cab6b7da7738")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -2025,12 +2086,25 @@
 				)
 			)
 		)
-		(property "Description" "DC Barrel Jack with an internal switch"
+		(property "Description" "5 V DC barrel jack, centre positive (CUI PJ-102AH); regulated 5 V only"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "d32e076d-3901-47e3-960f-1e46956b200c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "LCSC" "C3096093"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "9641b424-b6d2-44ef-be04-bf9b1371dead")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -2404,7 +2478,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection), beside the antenna: use a nylon screw"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -2520,7 +2594,7 @@
 				)
 			)
 		)
-		(property "Description" "Relay"
+		(property "Description" "Relay output: pin 2 is a 3.3 V logic signal for a relay module (GPIO12 through JP1), pin 1 GND"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -2528,6 +2602,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C5188434"
+			(at 0 0 90)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "0e5699bf-da42-40e1-b00a-42863813b172")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -2947,7 +3033,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection)"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -3064,7 +3150,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection), beside the antenna: use a nylon screw"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -3184,12 +3270,25 @@
 				)
 			)
 		)
-		(property "Description" "USB Power-Only 6P Type-C Receptacle connector"
+		(property "Description" "USB-C power input, 5 V (power only, no data)"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "F.Fab")
 			(hide yes)
 			(uuid "bc0f13e9-75d7-4aa1-97c5-79329b4d668c")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+			)
+		)
+		(property "LCSC" "C3151650"
+			(at 0 0 270)
+			(unlocked yes)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "771a2b12-3964-413e-9c9d-d5527d278cda")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -3446,7 +3545,7 @@
 				)
 			)
 		)
-		(property "Description" "Mounting Hole without connection"
+		(property "Description" "M3 mounting hole (no connection)"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -3562,7 +3661,7 @@
 				)
 			)
 		)
-		(property "Description" "speaker 4Ω 3W"
+		(property "Description" "Speaker terminal: a 4 Ω, 3 W speaker (pin 1 SPK+, pin 2 SPK−)"
 			(at 0 0 90)
 			(layer "F.Fab")
 			(hide yes)
@@ -3570,6 +3669,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C5188434"
+			(at 0 0 90)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "8112767c-77c4-412f-a426-838f2e8a2414")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -3988,7 +4099,7 @@
 				)
 			)
 		)
-		(property "Description" "Light emitting diode"
+		(property "Description" "Status LED, blue, 1206 (GPIO13 through R10)"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -3996,6 +4107,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C130717"
+			(at 0 0 0)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "3353b6a0-486d-4718-96dc-a48f0fbe3334")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -4210,7 +4333,7 @@
 				)
 			)
 		)
-		(property "Description" "Range 4.08–6.12k"
+		(property "Description" "USB-C CC1 pull-down to GND: USB-C asks for 5.1 kΩ ±20 %, so 4.08 to 6.12 kΩ"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -4218,6 +4341,18 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 0)
+			(layer "F.Fab")
+			(hide yes)
+			(uuid "d6779e92-94f7-429d-ab90-1ace223afa83")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 			)
 		)
@@ -4367,7 +4502,7 @@
 				)
 			)
 		)
-		(property "Description" "Open Hardware logo, small"
+		(property "Description" "QR code to the project page (github.com/et7ad/esp32_athan), front silkscreen"
 			(at 0 0 0)
 			(layer "F.Fab")
 			(hide yes)
@@ -9206,7 +9341,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor"
+		(property "Description" "DISP_SDA pull-up to +3V3, for the OLED's I2C data (with a TFT the line carries SPI data)"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -9214,6 +9349,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "ef555677-42b1-4f71-ab8e-99a5fa5a973b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -9370,7 +9518,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor"
+		(property "Description" "DISP_SCL pull-up to +3V3, for the OLED's I2C clock (with a TFT the line carries the SPI clock)"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -9378,6 +9526,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "ac70e688-2db6-40fb-bc15-376cfb9718fc")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -9534,7 +9695,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "+3V3 decoupling at the module’s 3V3 pin: 100 nF ceramic"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -9542,6 +9703,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C24497"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "07baeba9-20dc-461a-9e17-a2ea6963e4f2")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -9700,12 +9874,26 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "1A Low Dropout regulator, positive, 3.3V fixed output, SOT-223"
+		(property "Description" "1A Low Dropout regulator, positive, 3.3V fixed output, SOT-223: makes +3V3 from +5V"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "B.Fab")
 			(hide yes)
 			(uuid "bbc535a0-1ee0-4cc6-8761-a337761950ad")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C6186"
+			(at 0 0 180)
+			(unlocked yes)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "a5f58ac5-9fe5-4b70-890f-0308a2002262")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9977,7 +10165,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "TFT backlight from GPIO (DS2 pin 8), bridged as made: cut it for a backlight always at full brightness"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -10268,7 +10456,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Range 4.7-10k"
+		(property "Description" "EN pull-up to +3V3 (4.7 to 10 kΩ); with C5 the power-on delay"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -10276,6 +10464,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "fa9f7930-fb35-48be-8777-9e50698a1340")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -10434,7 +10635,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "Gain: links JP3’s side to GND, bridged as made (12 dB); cut it and fit R7 for 15 dB"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -10725,7 +10926,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor with allowed range of 4.7–10k [Left]"
+		(property "Description" "Amplifier SD_MODE from GPIO15 (4.7 to 10 kΩ): high plays the left channel"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -10733,6 +10934,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "20bdaa9e-cae0-47c1-a602-9d29aa54d465")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -10899,6 +11113,20 @@
 			(layer "B.Fab")
 			(hide yes)
 			(uuid "33703265-a794-4ab2-b992-f9f105ba8150")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C2913202"
+			(at 0 0 180)
+			(unlocked yes)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "94d7cd0c-aeb0-423c-9c03-821eb5c4f3b0")
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -11821,7 +12049,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Value" "330"
+		(property "Value" "100"
 			(at 0 2.00625 90)
 			(layer "B.SilkS")
 			(uuid "28cf96e9-3ca1-49f0-ac0b-02494471e0a6")
@@ -11845,7 +12073,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Resistor with allowed range of 470–680k only"
+		(property "Description" "Status LED resistor, 100 to 330 Ω: 100 Ω for blue, green and white LEDs (about 2.7 to 3 V), 300 to 330 Ω for red, orange and yellow (about 2 V)"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -11853,6 +12081,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17901"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "45512e50-80a1-4f5f-9f2c-f918558e8683")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -12009,7 +12250,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Optional with the SolderJumper"
+		(property "Description" "Optional series resistor on the relay output (about 100 Ω): fit it and cut JP1"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -12017,6 +12258,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17901"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "4fdde42f-e73c-4393-a1f5-b26c88b382c9")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -12044,7 +12298,7 @@
 				(pins "1" "2")
 			)
 		)
-		(attr smd)
+		(attr smd dnp)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
 			(start -0.727064 -0.91)
@@ -12173,7 +12427,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Optional for selecting 15dB (cut Solder Jumper)"
+		(property "Description" "Optional, for 15 dB gain: fit it and cut JP2, with JP3’s centre bridged to the JP2 side"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -12181,6 +12435,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17900"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "612c29f5-f8f8-4aab-9b5c-51f476a08c9a")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -12208,7 +12475,7 @@
 				(pins "1" "2")
 			)
 		)
-		(attr smd)
+		(attr smd dnp)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_line
 			(start -0.727064 -0.91)
@@ -12336,7 +12603,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Open Hardware logo, small"
+		(property "Description" "QR code to the project page (github.com/et7ad/esp32_athan), back silkscreen"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -12351,6 +12618,12 @@
 		(path "/0796ed16-72ef-4273-aaaa-32bd66f4e575")
 		(sheetname "/")
 		(sheetfile "esp32_athan.kicad_sch")
+		(units
+			(unit
+				(name "A")
+				(pins)
+			)
+		)
 		(attr exclude_from_bom)
 		(duplicate_pad_numbers_are_jumpers no)
 		(fp_rect
@@ -17157,7 +17430,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Regulator output capacitor on +3V3 (U3), near the module’s 3V3 pin: 22 µF ceramic"
 			(at 0 0 0)
 			(layer "B.Fab")
 			(hide yes)
@@ -17165,6 +17438,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C12891"
+			(at 0 0 0)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "f9fe40a3-9434-4992-b430-1967e1cc4b99")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -17321,7 +17607,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Regulator input capacitor on +5V (U3): 22 µF ceramic, 10 V or more"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -17329,6 +17615,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C12891"
+			(at 0 0 90)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "c34a82dd-eaed-4844-ac04-89a8f6e89dae")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -17487,7 +17786,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Solder Jumper, 2-pole, closed/bridged"
+		(property "Description" "Relay output link, bridged as made: cut it and fit R11 for a series resistor"
 			(at 0 0 270)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -17778,7 +18077,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Range 4.7-10k"
+		(property "Description" "GPIO0 pull-up to +3V3 (4.7 to 10 kΩ): high at reset is a normal boot"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -17786,6 +18085,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C17936"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "f52df409-e934-470f-8895-34e41152e150")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -17944,7 +18256,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "9 open · 6 JP3↑ · 15 JP3↓ · 12 JP3↓+JP2"
+		(property "Description" "Amplifier gain: open = 9 dB; centre to the +5V side = 6 dB; centre to the JP2 side = 12 dB (JP2 bridged) or 15 dB (JP2 cut, R7 fitted)"
 			(at 0 0 180)
 			(unlocked yes)
 			(layer "B.Fab")
@@ -18261,7 +18573,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Amplifier supply capacitor on +5V, at U4: 22 µF ceramic, 10 V or more"
 			(at 0 0 180)
 			(layer "B.Fab")
 			(hide yes)
@@ -18269,6 +18581,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C12891"
+			(at 0 0 180)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "911d6007-0fbe-4584-a229-47c9b2300911")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -18425,7 +18750,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "Amplifier VDD decoupling, right at U4’s VDD pins: 100 nF ceramic"
 			(at 0 0 90)
 			(layer "B.Fab")
 			(hide yes)
@@ -18433,6 +18758,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C24497"
+			(at 0 0 90)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "2c8182fa-cc54-4fb5-8117-849502ca3152")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -18589,7 +18927,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Mono DAC with amplifier, I2S, PCM, TDM, 32-bit, 96khz, 3.2W, TQFP-16"
+		(property "Description" "Mono I2S DAC and class-D amplifier, 3.2 W into 4 Ω, TQFN-16 (3 × 3 mm)"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -18597,6 +18935,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C910544"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "3c99ac88-d88f-4ca6-8ed2-05e9cfe00b0b")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -19198,7 +19549,7 @@
 				(justify mirror)
 			)
 		)
-		(property "Description" "Unpolarized capacitor"
+		(property "Description" "EN power-on delay with R3 (holds the module in reset while +3V3 rises): 1 µF ceramic"
 			(at 0 0 270)
 			(layer "B.Fab")
 			(hide yes)
@@ -19206,6 +19557,19 @@
 			(effects
 				(font
 					(size 1.27 1.27)
+				)
+				(justify mirror)
+			)
+		)
+		(property "LCSC" "C1848"
+			(at 0 0 270)
+			(layer "B.Fab")
+			(hide yes)
+			(uuid "b362c500-e244-4954-8164-2a6ca0bba703")
+			(effects
+				(font
+					(size 1.27 1.27)
+					(thickness 0.15)
 				)
 				(justify mirror)
 			)
@@ -24142,123 +24506,122 @@
 		(filled_polygon
 			(layer "F.Cu")
 			(pts
-				(xy 110.059099 113.220185) (xy 110.079741 113.236819) (xy 110.703211 113.860289) (xy 110.763503 113.920581)
-				(xy 110.814712 113.97179) (xy 110.945814 114.05939) (xy 110.945827 114.059397) (xy 111.043853 114.1)
-				(xy 111.091503 114.119737) (xy 111.202002 114.141716) (xy 111.23836 114.148949) (xy 111.300271 114.181334)
-				(xy 111.334845 114.242049) (xy 111.331258 114.308974) (xy 111.331767 114.309129) (xy 111.331139 114.311198)
-				(xy 111.331106 114.311819) (xy 111.330361 114.313761) (xy 111.329997 114.314961) (xy 111.305 114.440628)
-				(xy 111.305 114.440631) (xy 111.305 114.568769) (xy 111.305 114.568771) (xy 111.304999 114.568771)
-				(xy 111.329997 114.694438) (xy 111.329999 114.694444) (xy 111.379033 114.812824) (xy 111.379038 114.812833)
-				(xy 111.450223 114.919368) (xy 111.450226 114.919372) (xy 111.540827 115.009973) (xy 111.540831 115.009976)
-				(xy 111.647366 115.081161) (xy 111.647372 115.081164) (xy 111.647373 115.081165) (xy 111.765756 115.130201)
-				(xy 111.76576 115.130201) (xy 111.765761 115.130202) (xy 111.891428 115.1552) (xy 111.891431 115.1552)
-				(xy 112.019571 115.1552) (xy 112.104115 115.138382) (xy 112.145244 115.130201) (xy 112.263627 115.081165)
-				(xy 112.370169 115.009976) (xy 112.370172 115.009973) (xy 112.388627 114.991519) (xy 112.44995 114.958034)
-				(xy 112.476308 114.9552) (xy 113.427235 114.9552) (xy 113.494274 114.974885) (xy 113.514916 114.991519)
-				(xy 114.261548 115.738151) (xy 114.295033 115.799474) (xy 114.290049 115.869166) (xy 114.248177 115.925099)
-				(xy 114.182713 115.949516) (xy 114.165771 115.949567) (xy 114.164747 115.9495) (xy 114.164734 115.9495)
-				(xy 113.935266 115.9495) (xy 113.935258 115.9495) (xy 113.718715 115.978009) (xy 113.707762 115.979452)
-				(xy 113.657457 115.992931) (xy 113.486112 116.038842) (xy 113.274123 116.12665) (xy 113.274109 116.126657)
-				(xy 113.075382 116.241392) (xy 112.893338 116.381081) (xy 112.731081 116.543338) (xy 112.591392 116.725382)
-				(xy 112.476657 116.924109) (xy 112.47665 116.924123) (xy 112.388842 117.136112) (xy 112.385269 117.149446)
-				(xy 112.342897 117.307586) (xy 112.329453 117.357759) (xy 112.329451 117.35777) (xy 112.2995 117.585258)
-				(xy 112.2995 117.814741) (xy 112.323553 117.997435) (xy 112.329452 118.042238) (xy 112.359398 118.153998)
-				(xy 112.388842 118.263887) (xy 112.47665 118.475876) (xy 112.476656 118.475888) (xy 112.563677 118.626614)
-				(xy 112.591392 118.674617) (xy 112.731081 118.856661) (xy 112.731089 118.85667) (xy 112.89333 119.018911)
-				(xy 112.893338 119.018918) (xy 112.893339 119.018919) (xy 112.943962 119.057764) (xy 113.075382 119.158607)
-				(xy 113.075385 119.158608) (xy 113.075388 119.158611) (xy 113.274112 119.273344) (xy 113.274117 119.273346)
-				(xy 113.274123 119.273349) (xy 113.342243 119.301565) (xy 113.486113 119.361158) (xy 113.707762 119.420548)
-				(xy 113.935266 119.4505) (xy 113.935273 119.4505) (xy 114.164727 119.4505) (xy 114.164734 119.4505)
-				(xy 114.392238 119.420548) (xy 114.613887 119.361158) (xy 114.825888 119.273344) (xy 115.024612 119.158611)
-				(xy 115.206661 119.018919) (xy 115.206665 119.018914) (xy 115.20667 119.018911) (xy 115.368911 118.85667)
-				(xy 115.368914 118.856665) (xy 115.368919 118.856661) (xy 115.508611 118.674612) (xy 115.623344 118.475888)
-				(xy 115.711158 118.263887) (xy 115.770548 118.042238) (xy 115.8005 117.814734) (xy 115.8005 117.585266)
-				(xy 115.800499 117.585258) (xy 115.800433 117.584251) (xy 115.8005 117.583951) (xy 115.8005 117.581207)
-				(xy 115.801114 117.581207) (xy 115.815686 117.516066) (xy 115.865381 117.466952) (xy 115.93374 117.452502)
-				(xy 115.99906 117.477303) (xy 116.011848 117.488451) (xy 118.541081 120.017684) (xy 118.574566 120.079007)
-				(xy 118.5774 120.105365) (xy 118.5774 120.131469) (xy 118.5774 120.131471) (xy 118.577399 120.131471)
-				(xy 118.602397 120.257138) (xy 118.602399 120.257144) (xy 118.651433 120.375524) (xy 118.651438 120.375533)
-				(xy 118.722623 120.482068) (xy 118.722626 120.482072) (xy 118.813227 120.572673) (xy 118.813231 120.572676)
-				(xy 118.919766 120.643861) (xy 118.919772 120.643864) (xy 118.919773 120.643865) (xy 119.038156 120.692901)
-				(xy 119.03816 120.692901) (xy 119.038161 120.692902) (xy 119.163828 120.7179) (xy 119.163831 120.7179)
-				(xy 119.291969 120.7179) (xy 119.330908 120.710154) (xy 119.400498 120.71638) (xy 119.455676 120.759242)
-				(xy 119.478922 120.825131) (xy 119.4791 120.831771) (xy 119.4791 122.774135) (xy 119.459415 122.841174)
-				(xy 119.442781 122.861816) (xy 118.310313 123.994283) (xy 118.310309 123.994289) (xy 118.251001 124.097012)
-				(xy 118.251 124.097017) (xy 118.2203 124.211591) (xy 118.2203 128.510134) (xy 118.200615 128.577173)
-				(xy 118.183981 128.597815) (xy 114.801713 131.980083) (xy 114.801711 131.980086) (xy 114.7424 132.082813)
-				(xy 114.742399 132.082816) (xy 114.735912 132.107024) (xy 114.735913 132.107025) (xy 114.713437 132.190908)
-				(xy 114.7117 132.197391) (xy 114.7117 136.092809) (xy 114.717159 136.113181) (xy 114.726891 136.149501)
-				(xy 114.726891 136.149503) (xy 114.742399 136.207384) (xy 114.742401 136.207387) (xy 114.801711 136.310114)
-				(xy 114.801713 136.310116) (xy 117.893581 139.401984) (xy 117.927066 139.463307) (xy 117.9299 139.489665)
-				(xy 117.9299 139.515769) (xy 117.9299 139.515771) (xy 117.929899 139.515771) (xy 117.954897 139.641438)
-				(xy 117.954899 139.641444) (xy 118.003933 139.759824) (xy 118.003938 139.759833) (xy 118.051898 139.831609)
-				(xy 118.072776 139.898286) (xy 118.054292 139.965666) (xy 118.002313 140.012357) (xy 117.948796 140.0245)
-				(xy 109.368421 140.0245) (xy 109.301382 140.004815) (xy 109.28074 139.988181) (xy 105.532072 136.239513)
-				(xy 105.53207 136.239511) (xy 105.476425 136.207384) (xy 105.429344 136.180201) (xy 105.417236 136.176957)
-				(xy 105.405129 136.173713) (xy 105.405126 136.173712) (xy 105.35219 136.159528) (xy 105.314765 136.1495)
-				(xy 105.314764 136.1495) (xy 103.737965 136.1495) (xy 103.670926 136.129815) (xy 103.650284 136.113181)
-				(xy 103.161819 135.624716) (xy 103.128334 135.563393) (xy 103.1255 135.537035) (xy 103.1255 130.937965)
-				(xy 103.145185 130.870926) (xy 103.161819 130.850284) (xy 103.287819 130.724284) (xy 103.349142 130.690799)
-				(xy 103.418834 130.695783) (xy 103.474767 130.737655) (xy 103.499184 130.803119) (xy 103.4995 130.811965)
-				(xy 103.4995 134.793102) (xy 103.505126 134.839954) (xy 103.510122 134.881561) (xy 103.565639 135.022343)
-				(xy 103.657077 135.142922) (xy 103.777656 135.23436) (xy 103.777657 135.23436) (xy 103.777658 135.234361)
-				(xy 103.918436 135.289877) (xy 104.006898 135.3005) (xy 104.006903 135.3005) (xy 106.093097 135.3005)
-				(xy 106.093102 135.3005) (xy 106.181564 135.289877) (xy 106.322342 135.234361) (xy 106.442922 135.142922)
-				(xy 106.534361 135.022342) (xy 106.589877 134.881564) (xy 106.6005 134.793102) (xy 106.6005 133.624837)
-				(xy 106.620185 133.557798) (xy 106.672989 133.512043) (xy 106.676986 133.510302) (xy 106.679179 133.509394)
-				(xy 106.810289 133.421789) (xy 108.521789 131.710289) (xy 108.609394 131.579179) (xy 108.669738 131.433497)
-				(xy 108.7005 131.278842) (xy 108.7005 131.121157) (xy 108.7005 126.041158) (xy 108.7005 126.041155)
-				(xy 108.700499 126.041153) (xy 108.669737 125.886503) (xy 108.644123 125.824665) (xy 108.609397 125.740827)
-				(xy 108.606521 125.735446) (xy 108.608322 125.734483) (xy 108.590234 125.67671) (xy 108.608721 125.60933)
-				(xy 108.660701 125.562641) (xy 108.714214 125.5505) (xy 108.757716 125.5505) (xy 108.815588 125.564833)
-				(xy 113.41761 127.993341) (xy 113.42172 127.995611) (xy 113.463612 128.019798) (xy 113.47112 128.022908)
-				(xy 113.470955 128.023306) (xy 113.471931 128.023689) (xy 113.472081 128.023285) (xy 113.479696 128.026104)
-				(xy 113.479701 128.026107) (xy 113.501948 128.031169) (xy 113.526879 128.036844) (xy 113.531434 128.037971)
-				(xy 113.578191 128.0505) (xy 113.578201 128.0505) (xy 113.586251 128.051561) (xy 113.586194 128.051987)
-				(xy 113.587226 128.052103) (xy 113.587266 128.051675) (xy 113.595355 128.052427) (xy 113.595363 128.052429)
-				(xy 113.642141 128.050648) (xy 113.643686 128.05059) (xy 113.648401 128.0505) (xy 113.7505 128.0505)
-				(xy 113.817539 128.070185) (xy 113.863294 128.122989) (xy 113.8745 128.1745) (xy 113.8745 128.268102)
-				(xy 113.875218 128.274077) (xy 113.885122 128.356561) (xy 113.885122 128.356563) (xy 113.885123 128.356564)
-				(xy 113.89864 128.390841) (xy 113.940639 128.497343) (xy 114.032077 128.617922) (xy 114.152656 128.70936)
-				(xy 114.152657 128.70936) (xy 114.152658 128.709361) (xy 114.293436 128.764877) (xy 114.381898 128.7755)
-				(xy 114.381903 128.7755) (xy 115.093097 128.7755) (xy 115.093102 128.7755) (xy 115.181564 128.764877)
-				(xy 115.322342 128.709361) (xy 115.442922 128.617922) (xy 115.534361 128.497342) (xy 115.589877 128.356564)
-				(xy 115.6005 128.268102) (xy 115.6005 127.959235) (xy 115.620185 127.892196) (xy 115.672989 127.846441)
-				(xy 115.742147 127.836497) (xy 115.748692 127.837618) (xy 115.846128 127.857) (xy 115.846131 127.857)
-				(xy 115.974271 127.857) (xy 116.071706 127.837618) (xy 116.099944 127.832001) (xy 116.218327 127.782965)
-				(xy 116.324869 127.711776) (xy 116.415476 127.621169) (xy 116.486665 127.514627) (xy 116.535701 127.396244)
-				(xy 116.543882 127.355115) (xy 116.5607 127.270571) (xy 116.5607 127.142428) (xy 116.535702 127.016761)
-				(xy 116.535701 127.01676) (xy 116.535701 127.016756) (xy 116.486665 126.898373) (xy 116.486664 126.898372)
-				(xy 116.486661 126.898366) (xy 116.415476 126.791831) (xy 116.415473 126.791827) (xy 116.397019 126.773373)
-				(xy 116.363534 126.71205) (xy 116.3607 126.685692) (xy 116.3607 122.416108) (xy 116.380385 122.349069)
-				(xy 116.397019 122.328427) (xy 116.465673 122.259772) (xy 116.465676 122.259769) (xy 116.536865 122.153227)
-				(xy 116.585901 122.034844) (xy 116.599483 121.966564) (xy 116.6109 121.909171) (xy 116.6109 121.781028)
-				(xy 116.585902 121.655361) (xy 116.585901 121.65536) (xy 116.585901 121.655356) (xy 116.536865 121.536973)
-				(xy 116.536864 121.536972) (xy 116.536861 121.536966) (xy 116.465676 121.430431) (xy 116.465673 121.430427)
-				(xy 116.375072 121.339826) (xy 116.375068 121.339823) (xy 116.268533 121.268638) (xy 116.268524 121.268633)
-				(xy 116.150144 121.219599) (xy 116.150138 121.219597) (xy 116.024471 121.1946) (xy 116.024469 121.1946)
-				(xy 115.896331 121.1946) (xy 115.896329 121.1946) (xy 115.770661 121.219597) (xy 115.764829 121.221367)
-				(xy 115.764378 121.21988) (xy 115.70246 121.226526) (xy 115.639987 121.195239) (xy 115.604346 121.135143)
-				(xy 115.6005 121.1045) (xy 115.6005 120.931903) (xy 115.6005 120.931898) (xy 115.589877 120.843436)
-				(xy 115.534361 120.702658) (xy 115.53436 120.702657) (xy 115.53436 120.702656) (xy 115.442922 120.582077)
-				(xy 115.322343 120.490639) (xy 115.181561 120.435122) (xy 115.135926 120.429642) (xy 115.093102 120.4245)
-				(xy 114.381898 120.4245) (xy 114.342853 120.429188) (xy 114.293438 120.435122) (xy 114.152656 120.490639)
-				(xy 114.032077 120.582077) (xy 113.940639 120.702656) (xy 113.885122 120.843438) (xy 113.879188 120.892853)
-				(xy 113.8745 120.931898) (xy 113.8745 120.931903) (xy 113.8745 121.0255) (xy 113.854815 121.092539)
-				(xy 113.802011 121.138294) (xy 113.7505 121.1495) (xy 113.648401 121.1495) (xy 113.643686 121.14941)
-				(xy 113.595363 121.147571) (xy 113.587266 121.148325) (xy 113.587226 121.147896) (xy 113.586188 121.148012)
-				(xy 113.586245 121.14844) (xy 113.578185 121.1495) (xy 113.531454 121.162022) (xy 113.526881 121.163155)
-				(xy 113.479701 121.173893) (xy 113.47208 121.176715) (xy 113.471931 121.176314) (xy 113.47096 121.176694)
-				(xy 113.471124 121.17709) (xy 113.463612 121.180202) (xy 113.421719 121.204388) (xy 113.417594 121.206666)
-				(xy 108.815588 123.635167) (xy 108.757716 123.6495) (xy 108.714214 123.6495) (xy 108.647175 123.629815)
-				(xy 108.60142 123.577011) (xy 108.591476 123.507853) (xy 108.607804 123.465239) (xy 108.606521 123.464554)
-				(xy 108.60939 123.459184) (xy 108.609394 123.459179) (xy 108.669737 123.313497) (xy 108.7005 123.158842)
-				(xy 108.7005 123.001158) (xy 108.7005 114.124499) (xy 108.720185 114.05746) (xy 108.772989 114.011705)
-				(xy 108.8245 114.000499) (xy 109.244856 114.000499) (xy 109.244864 114.000499) (xy 109.244879 114.000497)
-				(xy 109.244882 114.000497) (xy 109.269987 113.997586) (xy 109.269988 113.997585) (xy 109.269991 113.997585)
-				(xy 109.372765 113.952206) (xy 109.452206 113.872765) (xy 109.497585 113.769991) (xy 109.5005 113.744865)
-				(xy 109.5005 113.3245) (xy 109.520185 113.257461) (xy 109.572989 113.211706) (xy 109.6245 113.2005)
-				(xy 109.99206 113.2005)
+				(xy 110.059099 113.220185) (xy 110.079741 113.236819) (xy 110.814707 113.971786) (xy 110.814711 113.971789)
+				(xy 110.945814 114.05939) (xy 110.945827 114.059397) (xy 111.043853 114.1) (xy 111.091503 114.119737)
+				(xy 111.202002 114.141716) (xy 111.23836 114.148949) (xy 111.300271 114.181334) (xy 111.334845 114.242049)
+				(xy 111.331258 114.308974) (xy 111.331767 114.309129) (xy 111.331139 114.311198) (xy 111.331106 114.311819)
+				(xy 111.330361 114.313761) (xy 111.329997 114.314961) (xy 111.305 114.440628) (xy 111.305 114.440631)
+				(xy 111.305 114.568769) (xy 111.305 114.568771) (xy 111.304999 114.568771) (xy 111.329997 114.694438)
+				(xy 111.329999 114.694444) (xy 111.379033 114.812824) (xy 111.379038 114.812833) (xy 111.450223 114.919368)
+				(xy 111.450226 114.919372) (xy 111.540827 115.009973) (xy 111.540831 115.009976) (xy 111.647366 115.081161)
+				(xy 111.647372 115.081164) (xy 111.647373 115.081165) (xy 111.765756 115.130201) (xy 111.76576 115.130201)
+				(xy 111.765761 115.130202) (xy 111.891428 115.1552) (xy 111.891431 115.1552) (xy 112.019571 115.1552)
+				(xy 112.104115 115.138382) (xy 112.145244 115.130201) (xy 112.263627 115.081165) (xy 112.370169 115.009976)
+				(xy 112.370172 115.009973) (xy 112.388627 114.991519) (xy 112.44995 114.958034) (xy 112.476308 114.9552)
+				(xy 113.427235 114.9552) (xy 113.494274 114.974885) (xy 113.514916 114.991519) (xy 114.261548 115.738151)
+				(xy 114.295033 115.799474) (xy 114.290049 115.869166) (xy 114.248177 115.925099) (xy 114.182713 115.949516)
+				(xy 114.165771 115.949567) (xy 114.164747 115.9495) (xy 114.164734 115.9495) (xy 113.935266 115.9495)
+				(xy 113.935258 115.9495) (xy 113.718715 115.978009) (xy 113.707762 115.979452) (xy 113.657457 115.992931)
+				(xy 113.486112 116.038842) (xy 113.274123 116.12665) (xy 113.274109 116.126657) (xy 113.075382 116.241392)
+				(xy 112.893338 116.381081) (xy 112.731081 116.543338) (xy 112.591392 116.725382) (xy 112.476657 116.924109)
+				(xy 112.47665 116.924123) (xy 112.388842 117.136112) (xy 112.385269 117.149446) (xy 112.342897 117.307586)
+				(xy 112.329453 117.357759) (xy 112.329451 117.35777) (xy 112.2995 117.585258) (xy 112.2995 117.814741)
+				(xy 112.323553 117.997435) (xy 112.329452 118.042238) (xy 112.359398 118.153998) (xy 112.388842 118.263887)
+				(xy 112.47665 118.475876) (xy 112.476656 118.475888) (xy 112.563677 118.626614) (xy 112.591392 118.674617)
+				(xy 112.731081 118.856661) (xy 112.731089 118.85667) (xy 112.89333 119.018911) (xy 112.893338 119.018918)
+				(xy 112.893339 119.018919) (xy 112.943962 119.057764) (xy 113.075382 119.158607) (xy 113.075385 119.158608)
+				(xy 113.075388 119.158611) (xy 113.274112 119.273344) (xy 113.274117 119.273346) (xy 113.274123 119.273349)
+				(xy 113.342243 119.301565) (xy 113.486113 119.361158) (xy 113.707762 119.420548) (xy 113.935266 119.4505)
+				(xy 113.935273 119.4505) (xy 114.164727 119.4505) (xy 114.164734 119.4505) (xy 114.392238 119.420548)
+				(xy 114.613887 119.361158) (xy 114.825888 119.273344) (xy 115.024612 119.158611) (xy 115.206661 119.018919)
+				(xy 115.206665 119.018914) (xy 115.20667 119.018911) (xy 115.368911 118.85667) (xy 115.368914 118.856665)
+				(xy 115.368919 118.856661) (xy 115.508611 118.674612) (xy 115.623344 118.475888) (xy 115.711158 118.263887)
+				(xy 115.770548 118.042238) (xy 115.8005 117.814734) (xy 115.8005 117.585266) (xy 115.800499 117.585258)
+				(xy 115.800433 117.584251) (xy 115.8005 117.583951) (xy 115.8005 117.581207) (xy 115.801114 117.581207)
+				(xy 115.815686 117.516066) (xy 115.865381 117.466952) (xy 115.93374 117.452502) (xy 115.99906 117.477303)
+				(xy 116.011848 117.488451) (xy 118.541081 120.017684) (xy 118.574566 120.079007) (xy 118.5774 120.105365)
+				(xy 118.5774 120.131469) (xy 118.5774 120.131471) (xy 118.577399 120.131471) (xy 118.602397 120.257138)
+				(xy 118.602399 120.257144) (xy 118.651433 120.375524) (xy 118.651438 120.375533) (xy 118.722623 120.482068)
+				(xy 118.722626 120.482072) (xy 118.813227 120.572673) (xy 118.813231 120.572676) (xy 118.919766 120.643861)
+				(xy 118.919772 120.643864) (xy 118.919773 120.643865) (xy 119.038156 120.692901) (xy 119.03816 120.692901)
+				(xy 119.038161 120.692902) (xy 119.163828 120.7179) (xy 119.163831 120.7179) (xy 119.291969 120.7179)
+				(xy 119.330908 120.710154) (xy 119.400498 120.71638) (xy 119.455676 120.759242) (xy 119.478922 120.825131)
+				(xy 119.4791 120.831771) (xy 119.4791 122.774135) (xy 119.459415 122.841174) (xy 119.442781 122.861816)
+				(xy 118.310313 123.994283) (xy 118.310309 123.994289) (xy 118.251001 124.097012) (xy 118.251 124.097017)
+				(xy 118.2203 124.211591) (xy 118.2203 128.510134) (xy 118.200615 128.577173) (xy 118.183981 128.597815)
+				(xy 114.801713 131.980083) (xy 114.801711 131.980086) (xy 114.7424 132.082813) (xy 114.742399 132.082816)
+				(xy 114.735912 132.107024) (xy 114.735913 132.107025) (xy 114.713437 132.190908) (xy 114.7117 132.197391)
+				(xy 114.7117 136.092809) (xy 114.717159 136.113181) (xy 114.726891 136.149501) (xy 114.726891 136.149503)
+				(xy 114.742399 136.207384) (xy 114.742401 136.207387) (xy 114.801711 136.310114) (xy 114.801713 136.310116)
+				(xy 117.893581 139.401984) (xy 117.927066 139.463307) (xy 117.9299 139.489665) (xy 117.9299 139.515769)
+				(xy 117.9299 139.515771) (xy 117.929899 139.515771) (xy 117.954897 139.641438) (xy 117.954899 139.641444)
+				(xy 118.003933 139.759824) (xy 118.003938 139.759833) (xy 118.051898 139.831609) (xy 118.072776 139.898286)
+				(xy 118.054292 139.965666) (xy 118.002313 140.012357) (xy 117.948796 140.0245) (xy 109.368421 140.0245)
+				(xy 109.301382 140.004815) (xy 109.28074 139.988181) (xy 105.532072 136.239513) (xy 105.53207 136.239511)
+				(xy 105.476425 136.207384) (xy 105.429344 136.180201) (xy 105.417236 136.176957) (xy 105.405129 136.173713)
+				(xy 105.405126 136.173712) (xy 105.35219 136.159528) (xy 105.314765 136.1495) (xy 105.314764 136.1495)
+				(xy 103.737965 136.1495) (xy 103.670926 136.129815) (xy 103.650284 136.113181) (xy 103.161819 135.624716)
+				(xy 103.128334 135.563393) (xy 103.1255 135.537035) (xy 103.1255 130.937965) (xy 103.145185 130.870926)
+				(xy 103.161819 130.850284) (xy 103.287819 130.724284) (xy 103.349142 130.690799) (xy 103.418834 130.695783)
+				(xy 103.474767 130.737655) (xy 103.499184 130.803119) (xy 103.4995 130.811965) (xy 103.4995 134.793102)
+				(xy 103.505126 134.839954) (xy 103.510122 134.881561) (xy 103.565639 135.022343) (xy 103.657077 135.142922)
+				(xy 103.777656 135.23436) (xy 103.777657 135.23436) (xy 103.777658 135.234361) (xy 103.918436 135.289877)
+				(xy 104.006898 135.3005) (xy 104.006903 135.3005) (xy 106.093097 135.3005) (xy 106.093102 135.3005)
+				(xy 106.181564 135.289877) (xy 106.322342 135.234361) (xy 106.442922 135.142922) (xy 106.534361 135.022342)
+				(xy 106.589877 134.881564) (xy 106.6005 134.793102) (xy 106.6005 133.624837) (xy 106.620185 133.557798)
+				(xy 106.672989 133.512043) (xy 106.676986 133.510302) (xy 106.679179 133.509394) (xy 106.810289 133.421789)
+				(xy 108.521789 131.710289) (xy 108.609394 131.579179) (xy 108.669738 131.433497) (xy 108.7005 131.278842)
+				(xy 108.7005 131.121157) (xy 108.7005 126.041158) (xy 108.7005 126.041155) (xy 108.700499 126.041153)
+				(xy 108.669737 125.886503) (xy 108.644123 125.824665) (xy 108.609397 125.740827) (xy 108.606521 125.735446)
+				(xy 108.608322 125.734483) (xy 108.590234 125.67671) (xy 108.608721 125.60933) (xy 108.660701 125.562641)
+				(xy 108.714214 125.5505) (xy 108.757716 125.5505) (xy 108.815588 125.564833) (xy 113.41761 127.993341)
+				(xy 113.42172 127.995611) (xy 113.463612 128.019798) (xy 113.47112 128.022908) (xy 113.470955 128.023306)
+				(xy 113.471931 128.023689) (xy 113.472081 128.023285) (xy 113.479696 128.026104) (xy 113.479701 128.026107)
+				(xy 113.501948 128.031169) (xy 113.526879 128.036844) (xy 113.531434 128.037971) (xy 113.578191 128.0505)
+				(xy 113.578201 128.0505) (xy 113.586251 128.051561) (xy 113.586194 128.051987) (xy 113.587226 128.052103)
+				(xy 113.587266 128.051675) (xy 113.595355 128.052427) (xy 113.595363 128.052429) (xy 113.642141 128.050648)
+				(xy 113.643686 128.05059) (xy 113.648401 128.0505) (xy 113.7505 128.0505) (xy 113.817539 128.070185)
+				(xy 113.863294 128.122989) (xy 113.8745 128.1745) (xy 113.8745 128.268102) (xy 113.875218 128.274077)
+				(xy 113.885122 128.356561) (xy 113.885122 128.356563) (xy 113.885123 128.356564) (xy 113.89864 128.390841)
+				(xy 113.940639 128.497343) (xy 114.032077 128.617922) (xy 114.152656 128.70936) (xy 114.152657 128.70936)
+				(xy 114.152658 128.709361) (xy 114.293436 128.764877) (xy 114.381898 128.7755) (xy 114.381903 128.7755)
+				(xy 115.093097 128.7755) (xy 115.093102 128.7755) (xy 115.181564 128.764877) (xy 115.322342 128.709361)
+				(xy 115.442922 128.617922) (xy 115.534361 128.497342) (xy 115.589877 128.356564) (xy 115.6005 128.268102)
+				(xy 115.6005 127.959235) (xy 115.620185 127.892196) (xy 115.672989 127.846441) (xy 115.742147 127.836497)
+				(xy 115.748692 127.837618) (xy 115.846128 127.857) (xy 115.846131 127.857) (xy 115.974271 127.857)
+				(xy 116.071706 127.837618) (xy 116.099944 127.832001) (xy 116.218327 127.782965) (xy 116.324869 127.711776)
+				(xy 116.415476 127.621169) (xy 116.486665 127.514627) (xy 116.535701 127.396244) (xy 116.543882 127.355115)
+				(xy 116.5607 127.270571) (xy 116.5607 127.142428) (xy 116.535702 127.016761) (xy 116.535701 127.01676)
+				(xy 116.535701 127.016756) (xy 116.486665 126.898373) (xy 116.486664 126.898372) (xy 116.486661 126.898366)
+				(xy 116.415476 126.791831) (xy 116.415473 126.791827) (xy 116.397019 126.773373) (xy 116.363534 126.71205)
+				(xy 116.3607 126.685692) (xy 116.3607 122.416108) (xy 116.380385 122.349069) (xy 116.397019 122.328427)
+				(xy 116.465673 122.259772) (xy 116.465676 122.259769) (xy 116.536865 122.153227) (xy 116.585901 122.034844)
+				(xy 116.599483 121.966564) (xy 116.6109 121.909171) (xy 116.6109 121.781028) (xy 116.585902 121.655361)
+				(xy 116.585901 121.65536) (xy 116.585901 121.655356) (xy 116.536865 121.536973) (xy 116.536864 121.536972)
+				(xy 116.536861 121.536966) (xy 116.465676 121.430431) (xy 116.465673 121.430427) (xy 116.375072 121.339826)
+				(xy 116.375068 121.339823) (xy 116.268533 121.268638) (xy 116.268524 121.268633) (xy 116.150144 121.219599)
+				(xy 116.150138 121.219597) (xy 116.024471 121.1946) (xy 116.024469 121.1946) (xy 115.896331 121.1946)
+				(xy 115.896329 121.1946) (xy 115.770661 121.219597) (xy 115.764829 121.221367) (xy 115.764378 121.21988)
+				(xy 115.70246 121.226526) (xy 115.639987 121.195239) (xy 115.604346 121.135143) (xy 115.6005 121.1045)
+				(xy 115.6005 120.931903) (xy 115.6005 120.931898) (xy 115.589877 120.843436) (xy 115.534361 120.702658)
+				(xy 115.53436 120.702657) (xy 115.53436 120.702656) (xy 115.442922 120.582077) (xy 115.322343 120.490639)
+				(xy 115.181561 120.435122) (xy 115.135926 120.429642) (xy 115.093102 120.4245) (xy 114.381898 120.4245)
+				(xy 114.342853 120.429188) (xy 114.293438 120.435122) (xy 114.152656 120.490639) (xy 114.032077 120.582077)
+				(xy 113.940639 120.702656) (xy 113.885122 120.843438) (xy 113.879188 120.892853) (xy 113.8745 120.931898)
+				(xy 113.8745 120.931903) (xy 113.8745 121.0255) (xy 113.854815 121.092539) (xy 113.802011 121.138294)
+				(xy 113.7505 121.1495) (xy 113.648401 121.1495) (xy 113.643686 121.14941) (xy 113.595363 121.147571)
+				(xy 113.587266 121.148325) (xy 113.587226 121.147896) (xy 113.586188 121.148012) (xy 113.586245 121.14844)
+				(xy 113.578185 121.1495) (xy 113.531454 121.162022) (xy 113.526881 121.163155) (xy 113.479701 121.173893)
+				(xy 113.47208 121.176715) (xy 113.471931 121.176314) (xy 113.47096 121.176694) (xy 113.471124 121.17709)
+				(xy 113.463612 121.180202) (xy 113.421719 121.204388) (xy 113.417594 121.206666) (xy 108.815588 123.635167)
+				(xy 108.757716 123.6495) (xy 108.714214 123.6495) (xy 108.647175 123.629815) (xy 108.60142 123.577011)
+				(xy 108.591476 123.507853) (xy 108.607804 123.465239) (xy 108.606521 123.464554) (xy 108.60939 123.459184)
+				(xy 108.609394 123.459179) (xy 108.669737 123.313497) (xy 108.7005 123.158842) (xy 108.7005 123.001158)
+				(xy 108.7005 114.124499) (xy 108.720185 114.05746) (xy 108.772989 114.011705) (xy 108.8245 114.000499)
+				(xy 109.244856 114.000499) (xy 109.244864 114.000499) (xy 109.244879 114.000497) (xy 109.244882 114.000497)
+				(xy 109.269987 113.997586) (xy 109.269988 113.997585) (xy 109.269991 113.997585) (xy 109.372765 113.952206)
+				(xy 109.452206 113.872765) (xy 109.497585 113.769991) (xy 109.5005 113.744865) (xy 109.5005 113.3245)
+				(xy 109.520185 113.257461) (xy 109.572989 113.211706) (xy 109.6245 113.2005) (xy 109.99206 113.2005)
 			)
 		)
 		(filled_polygon
@@ -24924,7 +25287,7 @@
 				(xy 153.958436 117.089876) (xy 154.046901 117.1005) (xy 156.433098 117.100499) (xy 156.521564 117.089876)
 				(xy 156.662342 117.034361) (xy 156.782922 116.942922) (xy 156.874361 116.822342) (xy 156.929876 116.681564)
 				(xy 156.9405 116.593099) (xy 156.940499 114.206902) (xy 156.929876 114.118436) (xy 156.874361 113.977658)
-				(xy 156.869911 113.97179) (xy 156.782922 113.857077) (xy 156.662344 113.76564) (xy 156.662342 113.765639)
+				(xy 156.874359 113.977655) (xy 156.782922 113.857077) (xy 156.662344 113.76564) (xy 156.662342 113.765639)
 				(xy 156.521564 113.710124) (xy 156.521561 113.710123) (xy 156.433099 113.6995) (xy 154.046908 113.6995)
 				(xy 153.958437 113.710123) (xy 153.817657 113.765639) (xy 153.817655 113.76564) (xy 153.697077 113.857077)
 				(xy 153.60564 113.977655) (xy 153.596632 114.000499) (xy 153.573409 114.05939) (xy 153.550124 114.118437)

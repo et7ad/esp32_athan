@@ -1,12 +1,13 @@
 # MAX98357A amplifier: replicating the Adafruit 3006 board on the version 3 PCB
 
-Date: 2026-10-04. Companion to `HARDWARE.md` (parts, pin map and power: sections 3 and 4). In the firmware,
+Date: 2026-10-04. Companion to `HARDWARE.md` (power, pin map and parts: sections 2, 3 and 7). In the firmware,
 SD_MODE is `output: amp_enable` (GPIO15, `pin_amp_sd` in `firmware/athan.yaml`): switched on before any playback
 (`amp_wake`) and off 5 s after the player goes idle (`amp_idle_off`), also when a requested sound never started.
 
 The version 3 board uses the bare MAX98357A chip (MAX98357AETE+T, LCSC/JLCPCB C910544) wired the way Adafruit wires
 its [MAX98357A I2S amp breakout, product 3006](https://www.adafruit.com/product/3006), with three changes: SD_MODE is
-driven by an ESP32-S3 GPIO through 4.7 kΩ and selects the left channel (section 5), the gain is selectable with a jumper so it can be tried out on the real speaker, and the
+driven by an ESP32-S3 GPIO through 4.7 kΩ and selects the left channel (section 5), the gain is set with solder
+jumpers so it can be tried out on the real speaker, and the
 output EMI filter is left out because the speaker wires are only about 5 cm (it is described in section 8 in case
 it is ever needed).
 
@@ -94,38 +95,38 @@ and hundreds of ohms at MHz, where the switching noise is.
 
 | Part | Adafruit 3006 | Maxim evaluation board | Maxim's rule / note | Ours (section 3) |
 |---|---|---|---|---|
-| VDD bypass | 0.1 µF + 10 µF ceramic | 0.1 µF 16 V X7R + 10 µF 6.3 V X5R | datasheet: 0.1 µF + 10 µF | 0.1 µF X7R + 10 µF X5R/X7R, ≥ 10 V |
+| VDD bypass | 0.1 µF + 10 µF ceramic | 0.1 µF 16 V X7R + 10 µF 6.3 V X5R | datasheet: 0.1 µF + 10 µF | 0.1 µF X7R + 22 µF X5R/X7R |
 | SD_MODE for the mono mix | 1 MΩ from VIN (5 V) | 634 kΩ ±1 % from 3.3 V logic | RLARGE = 222.2 × VDDIO − 100 kΩ | not used (artifacts in testing, section 5) |
 | SD_MODE for right only | (not fitted) | 226 kΩ ±1 % | RSMALL = 94 × VDDIO − 100 kΩ (210 kΩ at 3.3 V) | not used |
 | SD_MODE for left only | (not fitted) | 2 kΩ to 3.3 V logic | series resistor limits pin current | 4.7 kΩ from the 3.3 V ESP GPIO (section 5) |
-| Gain | pin left open (9 dB) | 5-pin jumper with two 100 kΩ ±5 % | datasheet: ±5 % resistors | 2 × 3 jumper with two 100 kΩ ±5 % |
+| Gain | pin left open (9 dB) | 5-pin jumper with two 100 kΩ ±5 % | datasheet: ±5 % resistors | solder jumpers, one 100 kΩ for 15 dB |
 | Output ferrite beads | "Ferrite" (0805), no part number | Murata BLM18SG331TN1D (0603): 330 Ω at 100 MHz, 1.5 A, 0.07 Ω max | 100–600 Ω at high frequency, low DC resistance, rated at least 1 A | not fitted (section 8) |
 | Output capacitors | 220 pF (0805) | 680 pF C0G (TDK CGA2B1C0G2A681J) | under 1 nF, value tuned for EMI with the chosen bead | not fitted (section 8) |
 | When the filter is needed | fitted | optional; ships with 0 Ω links instead of beads and no capacitors | for speaker leads longer than about 12 in (30 cm); never together with an LC class-D filter | our leads are about 5 cm: left out |
 
 ## 3. Our version (on the version 3 PCB)
 
-Same circuit, with SD_MODE fed from an ESP GPIO, a jumper block on GAIN, and the speaker wired straight to OUTP/OUTN
-(no output filter). The pins match `HARDWARE.md` section 3.2 and the `pin_*` substitutions in `firmware/athan.yaml`.
+Same circuit, with SD_MODE fed from an ESP GPIO, solder jumpers on GAIN, and the speaker wired straight to OUTP/OUTN
+(no output filter). The part numbers below are the board's. The pins match `HARDWARE.md` section 3 and the `pin_*` substitutions in `firmware/athan.yaml`.
 
 ```text
                            +5V (main rail; the 470 uF bulk cap sits next to the amp)
                             |
                   +---------+---------+
                   |         |         |
-                 C1        C2         |
-                0.1uF     10uF        |
+                 C7        C6         |
+                0.1uF     22uF        |
                   |         |    pins 7, 8
                  GND       GND        |
                             +---------+----------+
                             |        VDD         |
-   ESP GPIO7  --------------| 1  DIN      OUTP 9 |----------------o SPK +   back-side terminal,
+   ESP GPIO7  --------------| 1  DIN      OUTP 9 |----------------o SPK +   terminal J3 (front),
    ESP GPIO5  --------------| 16 BCLK            |                          about 5 cm of wire
    ESP GPIO6  --------------| 14 LRCLK           |                          to the speaker
                             |                    |
-   ESP GPIO15 ---[R_SD]-----| 4  SD_MODE         |
+   ESP GPIO15 ---[R5]-------| 4  SD_MODE         |
                  4.7k       |                    |
-   gain block --------------| 2  GAIN_SLOT       |
+   JP3 (gain) --------------| 2  GAIN_SLOT       |
    (section 4)              |            OUTN 10 |----------------o SPK -
                             |        GND         |
                             +--+----+----+----+--+
@@ -135,17 +136,17 @@ Same circuit, with SD_MODE fed from an ESP GPIO, a jumper block on GAIN, and the
                                      GND        (pins 5, 6, 12, 13 unconnected)
 ```
 
-### Parts, and which can be through-hole
+### Parts
 
-| Ref | Value | Through-hole? | Notes |
-|---|---|---|---|
-| U1 | MAX98357AETE+T (C910544) | No | TQFN with exposed pad: reflow only, placed by the PCB house with the other front-side SMD parts |
-| C1 | 0.1 µF, X7R, 16 V (Maxim's value) | Possible, SMD preferred | Must sit right at pins 7/8 with a short path to GND. An SMD part placed by the PCB house does that best; a THT ceramic disc works only with very short leads, a few mm from the chip |
-| C2 | 10 µF, X5R/X7R ceramic, ≥ 10 V | Possible, SMD preferred | Next to C1. Maxim fits a 6.3 V part, but a ceramic loses capacitance under DC voltage, so on a 5 V rail a 10–16 V rating keeps it near 10 µF. THT option: radial MLCC or low-ESR electrolytic |
-| R_SD | 4.7 kΩ | Yes | Section 5: left channel; anything from 1 kΩ to about 47 kΩ works |
-| R_G1, R_G2 | 100 kΩ ±5 % or better | Yes | Gain block, section 4 (the datasheet asks for ±5 %) |
-| Gain header | 2 × 3 pins, 2.54 mm, plus one jumper cap | Yes | Section 4 |
-| Speaker terminal | 2-pin screw terminal | Yes | Back side, as planned, wired straight to OUTP/OUTN |
+| Ref | Value | Notes |
+|---|---|---|
+| U4 | MAX98357AETE+T (C910544), TQFN-16 | On the back. Its exposed pad needs hot air or a hot plate |
+| C7 | 0.1 µF, X7R, 1206 | Right at pins 7/8, with a short path to GND |
+| C6 | 22 µF, X5R/X7R ceramic, 1206 | Next to C7. A ceramic loses capacitance under DC voltage, so on the 5 V rail the larger value keeps it well above the datasheet's 10 µF |
+| R5 | 4.7 kΩ, 1206 | Section 5: left channel; anything from 1 kΩ to about 47 kΩ works |
+| R7 | 100 kΩ ±5 % or better, 1206 | Only for 15 dB (section 4); the datasheet asks for ±5 % |
+| JP2, JP3 | solder jumpers | The gain, section 4 |
+| J3 | 2-pin screw terminal | On the front, wired straight to OUTP/OUTN |
 
 No output filter: Maxim recommends one only for speaker leads longer than about 30 cm, its own evaluation board
 ships without it, and ours are about 5 cm. Section 8 has the filter for later, in case it is ever needed.
@@ -193,30 +194,26 @@ the waveform is cut flat by the supply voltage (clipping).
 3. **12 dB is the fallback** for recordings that are quiet and that you do not want to reprocess. Then cap the
    firmware's maximum volume at roughly 60 % of full scale so the loud parts do not clip.
 4. **15 dB: avoid** with this speaker at 5 V. It only makes sense for very quiet sources.
-5. **6 dB or 3 dB** if the speaker turns out to be too loud or too weak for 2.5 W (for example a smaller 1–2 W
-   speaker), or the room is small: they cap the maximum at 1.6 W and 0.8 W, and nothing can clip.
+5. **6 dB** if the speaker turns out to be too loud or too weak for 2.5 W (for example a smaller 1–2 W speaker),
+   or the room is small: it caps the maximum at 1.6 W, and nothing can clip. (3 dB needs 100 kΩ to VDD, which the
+   board does not have.)
 
-### Gain jumper block (so it can be tried on the real board)
+### Gain solder jumpers (so it can be tried on the real board)
 
-A 2 × 3 pin header next to the chip. The two middle pins are both GAIN; one jumper cap selects the setting.
+JP3 has three pads next to the chip: its centre is GAIN, one side is +5V, and the other side goes to GND through
+JP2 (bridged), or through R7 (100 kΩ) once JP2 is cut.
 
-```text
-                column A         column B     column C
-             +---------------+-----------+---------------+
-     row 1   |  VDD          |   GAIN    |  GND          |    jumper B1-A1 = 6 dB    jumper B1-C1 = 12 dB
-             +---------------+-----------+---------------+
-     row 2   |  R_G1 to VDD  |   GAIN    |  R_G2 to GND  |    jumper B2-A2 = 3 dB    jumper B2-C2 = 15 dB
-             +---------------+-----------+---------------+
-                            no jumper = 9 dB (default)
+| Gain | Jumpers |
+|---|---|
+| 9 dB (as the board comes) | JP3 open |
+| 6 dB | JP3: centre bridged to the +5V side |
+| 12 dB | JP3: centre bridged to the JP2 side, JP2 bridged |
+| 15 dB | JP3: centre bridged to the JP2 side, JP2 cut, R7 (100 kΩ) fitted |
 
-     R_G1 = 100 k between pin A2 and VDD,   R_G2 = 100 k between pin C2 and GND
-```
-
-- Silkscreen the dB values next to each pair. Only one jumper at a time.
-- Change the jumper with the power off (the datasheet does not say whether the pin is read only at start-up).
-- Keep the GAIN trace short and away from the speaker outputs and the I2S lines: in the 9 dB (open) position the pin
+- The silkscreen shows "GAIN open = 9 dB", 6 dB and 12 dB beside the pads.
+- Change the gain with the power off (the datasheet does not say whether the pin is read only at start-up).
+- The GAIN trace is short and away from the speaker outputs and the I2S lines: in the 9 dB (open) setting the pin
   sits at its own internal bias (0.4–0.6 × VDD).
-- Once a setting is chosen, the header can stay (with its jumper) or a later board revision can hard-wire it.
 
 ## 5. SD_MODE: shutdown and channel
 
@@ -277,13 +274,13 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 - Settled: left channel only. The firmware sends the same mono samples in both slots, so the level matches the
   mono mix, but the mono mix had artifacts and left-only did not (tested 2026-10-06). The mono samples are
   themselves the left channel: ESPHome's mixer keeps channel 0 of a stereo source. So a sound plays in full only if
-  it is mono or has its whole content in the left channel (README 1.5).
+  it is mono or has its whole content in the left channel (guides/using.md section 5).
 
 ## 6. Layout
 
 - Exposed pad soldered to a solid ground pour with several thermal vias to the other layer; GND pins 3, 11 and 15
   on the same ground.
-- C1 closest to pins 7/8, C2 right after it, both with the shortest possible return to the GND pins.
+- C7 closest to pins 7/8, C6 right after it, both with the shortest possible return to the GND pins.
 - Wide traces for VDD, GND, OUTP and OUTN. The datasheet's example: 100 mΩ of speaker trace loses about 5 % of 2 W
   into 4 Ω, 10 mΩ loses about 2.5 %.
 - Run OUTP and OUTN side by side, short and wide, straight to the speaker terminal. Keep them away from the ESP
@@ -296,7 +293,7 @@ B0 0.08–0.355 V, B1 0.65–0.825 V, B2 1.245–1.5 V):
 - Speaker: 4 Ω or more, with a voice-coil inductance above 10 µH (normal for real speakers). Never connect OUTP or
   OUTN to ground or to another amplifier's input: the outputs are bridge-tied.
 
-## 7. Prototype checks (part of items 6 and 11 of the checklist in `HARDWARE.md` section 9)
+## 7. Prototype checks (part of items 6 and 11 of the checklist in `guides/building.md` section 7)
 
 1. 9 dB: play the loudest athan at 100 %. Listen for crackle on the loudest syllables; note how loud it is in the
    room.

@@ -2,7 +2,7 @@
 
 Version 3 runs on an **ESP32-S3-WROOM-1-N16R8** (16 MB flash, 8 MB octal PSRAM, LCSC C2913202). This file explains
 which feature needs which part of that chip, so that a future build can drop features and use a smaller or cheaper
-one. Section 5 lists the other designs that were considered. Prices are in [HARDWARE.md](HARDWARE.md) section 4,
+one. Section 5 lists the other designs that were considered. Prices are in [HARDWARE.md](HARDWARE.md) section 7,
 the wiring in the rest of that file.
 
 Figures are from the firmware as of October 2026 (3.0.0); sizes are binary (1 MB = 1024 KB). The firmware itself is
@@ -83,7 +83,7 @@ The cheaper modules save little: the N16R8 is $5.19 at quantity 1, $4.56 for 10+
 
 For any board without octal PSRAM, `athan.yaml` also needs its `psram:` block, `task_stack_in_psram`,
 `esp32_ble: use_psram` and `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC` adjusted, and the GPIO substitutions at the top of
-the file checked against the new board (HARDWARE.md 3.2 lists the pins to avoid).
+the file checked against the new board (HARDWARE.md section 3 lists the pins to avoid).
 
 ## 5. Other designs considered
 

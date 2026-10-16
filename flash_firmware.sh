@@ -182,7 +182,7 @@ flash_usb_full() {
   port="$(pick_port "${2:-}")"
   say "Flashing $(basename "$file") over USB ($port): full image from 0x0"
   "$ESPTOOL" --chip esp32s3 --port "$port" write-flash 0x0 "$file"
-  say "Done. On the V3 board: remove the J6 jumper and power-cycle it; then set up its Wi-Fi again (README 1.1)."
+  say "Done. On the V3 board: remove the J6 jumper and power-cycle it; then set up its Wi-Fi again (guides/using.md section 1)."
 }
 
 flash_main() {

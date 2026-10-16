@@ -16,7 +16,7 @@
 #   ./build_firmware.sh clean [all]     delete the build folder (all: also ESPHome and the toolchain)
 #
 # Display: --display oled or --display tft, before or after the command, builds for that display (wiring:
-# HARDWARE.md 3.2). Without it, display_type at the top of firmware/athan.yaml decides (oled as shipped). Each
+# HARDWARE.md section 3). Without it, display_type at the top of firmware/athan.yaml decides (oled as shipped). Each
 # display has its own files below and its own update manifest. ota refuses a clock that runs the other display's
 # build (it would show a dark screen); --any-display sends it anyway.
 #
@@ -26,7 +26,7 @@
 # firmware/binaries/ after a build (a TFT build: athan-v3-tft-<version>.factory.bin, athan-v3-tft.ota.bin and
 # manifest-tft.json):
 #   athan-v3-<version>.factory.bin  full image for a blank board (any ESP web flasher / esptool at offset 0x0)
-#   athan-v3.ota.bin + manifest.json   the two assets of a GitHub Release (README section 3.4)
+#   athan-v3.ota.bin + manifest.json   the two assets of a GitHub Release (guides/maintaining.md section 5)
 #
 # Settings (environment variables):
 #   ESPHOME_VERSION   ESPHome to use (default 2026.9.1, the version the firmware was checked against)
@@ -35,7 +35,7 @@
 #   PYTHON            Python 3.12-3.14 to create the environment with (default: the first one found)
 #
 # Needs: Python 3.12, 3.13 or 3.14 and internet on the first run. Before the first build, put click.wav and
-# volume.wav into firmware/sounds/ (README section 2.2).
+# volume.wav into firmware/sounds/ (guides/building.md section 3).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -132,7 +132,7 @@ check_sounds() {
     [ -f "$ROOT/firmware/sounds/$t.wav" ] || missing+=("firmware/sounds/$t.wav")
   done
   if [ ${#missing[@]} -gt 0 ]; then
-    die "missing ${missing[*]}. These are the menu click and the volume tone built into the firmware: short mono 16-bit 44.1 kHz WAV files. See README section 2.2."
+    die "missing ${missing[*]}. These are the menu click and the volume tone built into the firmware: short mono 16-bit 44.1 kHz WAV files. See guides/building.md section 3."
   fi
 }
 
@@ -217,7 +217,7 @@ collect_binaries() {
     cp "$factory" "$OUT/athan-v3$sfx-$version.factory.bin"
   fi
   cp "$ota" "$OUT/athan-v3$sfx.ota.bin"
-  # Writes manifest$sfx.json next to it (the GitHub Release pair, README section 3.4).
+  # Writes manifest$sfx.json next to it (the GitHub Release pair, guides/maintaining.md section 5).
   "$VENV/bin/python" "$ROOT/scripts/make_release_manifest.py" "$OUT/athan-v3$sfx.ota.bin" --version "$version" \
     --display "$(display_type)" >/dev/null
   say "Firmware $version ($(display_type) display) built:"

@@ -11,13 +11,15 @@ Errors (exit 1): what a clock would refuse or get wrong, and lists that disagree
   - radio/stations.json: exactly 10 entries, names as above, links http(s) or empty.
   - athantimes/mosques.json: keys and time zones as the clock takes them (scripts/athan_yearly.py, the rules of
     tz_posix.cpp), and the same keys in mosques.json, the Location options in firmware/athan.yaml, the table in
-    README 1.7 and the folders under docs/athantimes/.
+    guides/using.md section 7 and the folders under docs/athantimes/.
   - every athantimes/<key>/<year>.json: prayertimes_specs.md "What the clock checks", its tz equal to mosques.json.
+  - guides/using.md section 4 gives Home Assistant the api encryption key of firmware/athan.yaml.
   - with --harness (test_year_files, built by run_tests.sh): the clock's own parse_year_file() accepts every
     yearly file, and its parse_posix_tz() accepts exactly the time zones athan_yearly.PosixTZ accepts.
 Warnings (printed): a sample rate other than the clock's I2S rate, stereo sounds, iqama before adhan, steps of
 more than athan_yearly.MAX_DAY_JUMP minutes from one day to the next and changes of more than 3 minutes from last
-year (both through UTC), Doha not at mosques.json's doha_after_sunrise, README 1.7 years that differ from the files.
+year (both through UTC), Doha not at mosques.json's doha_after_sunrise,
+guides/using.md section 7 years that differ from the files.
 """
 
 import argparse
@@ -233,7 +235,7 @@ def check_keys(mosques: dict):
     options = [x.strip().strip("\"'") for x in m.group(1).split(",")] if m else None
     if options is None:
         err("cannot read the Location select's options from firmware/athan.yaml")
-    readme = source(REPO / "README.md")
+    readme = source(REPO / "guides" / "using.md")
     m = re.search(r"Mosques available now:\s*\n\s*\n((?:\|[^\n]*\n)+)", readme)
     table = {}
     if m:
@@ -243,10 +245,10 @@ def check_keys(mosques: dict):
             if k and len(cells) >= 3:
                 table[k.group(1)] = cells[2]
     else:
-        err("cannot find the mosque table of README 1.7 (Mosques available now:)")
+        err("cannot find the mosque table in guides/using.md section 7 (Mosques available now:)")
     folders = {p.name for p in (DOCS / "athantimes").iterdir() if p.is_dir()}
     sets = {"mosques.json": set(mosques), "the Location options (athan.yaml)": set(options or []),
-            "README 1.7": set(table), "docs/athantimes folders": folders}
+            "guides/using.md section 7": set(table), "docs/athantimes folders": folders}
     every = set().union(*sets.values())
     for k in sorted(every):
         missing = [name for name, s in sets.items() if k not in s and (name != "the Location options (athan.yaml)"
@@ -261,8 +263,17 @@ def check_keys(mosques: dict):
         if files and r:
             lo, hi = (int(r.group(1)), int(r.group(2))) if r.group(1) else (int(r.group(3)), int(r.group(3)))
             if (lo, hi) != (files[0], files[-1]):
-                warn(f"README 1.7 says {k}: {years}, the files are {files[0]}–{files[-1]}")
+                warn(f"guides/using.md section 7 says {k}: {years}, the files are {files[0]}-{files[-1]}")
     return f"{len(mosques)} mosques"
+
+
+def check_api_key():
+    m = re.search(r'^api:\s*\n(?:[ \t]+[^\n]*\n)*?[ \t]+key:\s*"?([^"\s]+)', source(REPO / "firmware" / "athan.yaml"),
+                  re.M)
+    if not m:
+        err("cannot read the api encryption key from firmware/athan.yaml")
+    elif f"`{m.group(1)}`" not in source(REPO / "guides" / "using.md"):
+        err("guides/using.md section 4 does not give Home Assistant the api encryption key in firmware/athan.yaml")
 
 
 def check_registry():
@@ -430,6 +441,7 @@ def main() -> int:
     if i2s_rate is None:
         warn("cannot read the I2S speaker's sample_rate from firmware/athan.yaml: sample rates not compared")
     done = [check_catalog(data_url, i2s_rate), check_stations()]
+    check_api_key()
     mosques = check_registry()
     done.append(check_keys(mosques))
     years, _ = check_years(mosques)

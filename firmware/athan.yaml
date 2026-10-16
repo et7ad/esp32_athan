@@ -4,11 +4,11 @@
 #
 #   Build:   esphome run firmware/athan.yaml        (first flash over the J6 header, as USB-C is power only; it also
 #                                                    writes partitions.csv)
-#   Docs:    README.md (owners), DEVELOPER.md (internals), firmware_rules.md (the rules the code depends on),
-#            HARDWARE.md (board, prototype checklist)
+#   Docs:    guides/ (using, building, maintaining), DEVELOPER.md (internals), firmware_rules.md (the rules the
+#            code depends on), HARDWARE.md (the board)
 #
-# Before the first build, put the two menu tones in firmware/sounds/ (README "Building"):
-#   sounds/click.wav   (menu click)      sounds/volume.wav  (volume tone): mono 16-bit 44.1 kHz WAV (README 2.2)
+# Before the first build, put the two menu tones in firmware/sounds/ (guides/building.md section 3):
+#   sounds/click.wav   (menu click)      sounds/volume.wav  (volume tone): mono 16-bit 44.1 kHz WAV
 #
 # Behaviour lives here (menus, schedule, web entities). What ESPHome lacks (replaceable sounds in flash, the
 # GitHub lists, radio subscriptions, yearly prayer files, runtime time zone, the /audio page) is the custom
@@ -37,7 +37,7 @@ substitutions:
   # Choices: NONE, ERROR, WARN, INFO, DEBUG, VERBOSE.
   log_level: DEBUG
 
-  # Pins: HARDWARE.md 3.2
+  # Pins: HARDWARE.md section 3
   pin_i2s_bclk: GPIO5
   pin_i2s_lrclk: GPIO6
   pin_i2s_dout: GPIO7
@@ -66,7 +66,7 @@ substitutions:
   # menu's 60 s, so the menu never goes dark while open.
   screen_wake_s: "120"
 
-  # The fallback hotspot for Wi-Fi setup (README 1.1). The TFT's setup screen shows both.
+  # The fallback hotspot for Wi-Fi setup (guides/using.md section 1). The TFT's setup screen shows both.
   hotspot_ssid: "AthanFallbackHotspot"
   hotspot_password: "athan404"
 
@@ -238,6 +238,12 @@ ota:
     encryption:
       key: "/A5YakHWYfXLiBWI5Z92v0FWiaMsWbCUCWD41zlLPYk="   # same key as the api (ESPHome's recommendation)
   - platform: http_request
+    # An install that fails (download, checksum) leaves the update pending; the menu's Update row and Firmware
+    # Version say so for that version (fw_failed_version) until the next install starts.
+    on_begin:
+      - lambda: 'id(fw_failed_version).clear();'
+    on_error:
+      - lambda: 'id(fw_failed_version) = id(fw_update).update_info.latest_version;'
   # The web page's firmware upload form. Also REQUIRED for the /audio page's file upload: ESPHome only routes
   # multipart uploads to handlers when this platform is present.
   - platform: web_server
@@ -251,7 +257,13 @@ update:
     id: fw_update
     name: "Firmware"
     source: ${update_manifest}
-    update_interval: 6h
+    # Checked once after each start (script fw_check_after_start) and once a day at 03:00 (time: on_time), never
+    # installed by itself: the owner installs from the web page, the menu's Update row or Home Assistant. ESPHome's
+    # own check after a start gives up when Wi-Fi takes more than a minute, as a router restarting after the same
+    # power cut does. A found update shows as a mark on the screen (displays/*.yaml).
+    update_interval: never
+    on_update_available:
+      - script.execute: update_display
     web_server:
       sorting_group_id: grp_system
       sorting_weight: 1
@@ -267,6 +279,11 @@ wifi:
     - script.stop: ble_when_offline
     - ble.disable:
     - script.execute: update_display
+    - if:
+        condition:
+          lambda: 'return !id(fw_checked_after_start) && !id(fw_check_after_start).is_running();'
+        then:
+          - script.execute: fw_check_after_start
     # No Wi-Fi modem sleep once Bluetooth is really off: streams start faster and play steadier. ESP-IDF needs
     # modem sleep while Bluetooth runs, so it comes back before ble.enable below.
     - wait_until:
@@ -312,7 +329,7 @@ esp32_improv:
 # 44.1 kHz: the stations and tones are 44.1 kHz MP3s, so the resamplers pass them through without resampling.
 # Left channel only. The mono mixer keeps channel 0 of a stereo source, and channel: mono sends that sample in
 # both I2S slots. The amp plays the left slot (SD_MODE through 4.7 kOhm): its (L+R)/2 mode gave artifacts in testing.
-# So every sound needs its whole content in the left channel (README 1.5).
+# So every sound needs its whole content in the left channel (guides/using.md section 5).
 # ---------------------------------------------------------------------------------------------------------------------
 i2s_audio:
   - id: i2s_out
@@ -887,6 +904,12 @@ time:
       - seconds: 0
         then:
           - script.execute: update_display
+      # Firmware: one check a day (the other is after each start: fw_check_after_start). Only a check.
+      - hours: 3
+        minutes: 0
+        seconds: 0
+        then:
+          - update.check: fw_update
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Globals. Persisted ones live in NVS keyed by id: adding or removing one does not disturb the others.
@@ -942,7 +965,11 @@ globals:
   # The relay is on because of Pre-Fajr, its timer running (the relay itself restores its state after a restart, the
   # timer does not): on_boot switches it off.
   - {id: relay_by_prefajr, type: bool, initial_value: "false", restore_value: true}
-  - {id: update_check_state, type: int, initial_value: "0"}   # 0 idle, 1 up to date, 2 available, 3 checking, 4 installing, 5 check failed
+  # The menu's Update row: 1 its check runs, 2 it got no answer (offline: ESPHome skips the check, no error). What a
+  # check found, and an install, is fw_update's own state.
+  - {id: update_check_state, type: int, initial_value: "0"}
+  - {id: fw_checked_after_start, type: bool, initial_value: "false"}
+  - {id: fw_failed_version, type: std::string}                  # the version whose install failed (ota on_error)
   - {id: screen_woken_ms, type: uint32_t, initial_value: "0"}  # last key press: a dark screen stays lit after it
   - {id: screen_pct_applied, type: int, initial_value: "-1"}  # the level the display has now (0 = dark, -1 = not set)
   - {id: screen_dark_in, type: int, initial_value: "-1"}      # seconds until a lit screen goes dark (-1: it stays)
@@ -1234,7 +1261,7 @@ script:
               return;
             }
             if (!id(athan_core).catalog_ready()) id(athan_core).fetch_catalog();   // for the sound rows
-            id(update_check_state) = 0;
+            if (id(update_check_state) == 2) id(update_check_state) = 0;   // an old "Check failed", not a running check
             id(play_tone_click).execute();
             menu.open();
           }
@@ -1697,7 +1724,9 @@ script:
           // The display's own rows (displays/*.yaml, script menu_display_rows): the TFT's Screen Colour.
           id(menu_display_rows).execute();
 
-          // Update: Select checks the GitHub Release, then installs a newer version.
+          // Update: Select installs an update that is there (found by any check: after a start, the daily one, the web
+          // page's or this row's), else checks now. It reads fw_update's own state, so an install that fails offers
+          // the update again.
           {
             MenuRow r;
             r.title = "Update";
@@ -1705,27 +1734,27 @@ script:
             r.kind = RowKind::ACTION;
             r.count = []() { return 1; };
             r.label = [](int) -> std::string {
-              switch (id(update_check_state)) {
-                case 2: return "Install " + id(fw_update).update_info.latest_version;
-                case 3: return "Checking...";
-                case 4: return "Installing...";
-                default: return "Check now";
-              }
+              const auto st = id(fw_update).state;
+              if (st == update::UPDATE_STATE_INSTALLING) return "Installing...";
+              if (id(update_check_state) == 1) return "Checking...";
+              if (st == update::UPDATE_STATE_AVAILABLE) return "Install " + id(fw_update).update_info.latest_version;
+              return "Check now";
             };
             r.caption = [](int) -> std::string {
-              switch (id(update_check_state)) {
-                case 1: return "V${project_version} is the latest";
-                case 5: return "Check failed (offline?)";
-                default: return "Installed: V${project_version}";
-              }
+              const auto st = id(fw_update).state;
+              if (st == update::UPDATE_STATE_AVAILABLE)
+                return id(fw_failed_version) == id(fw_update).update_info.latest_version ? "Install failed: try again"
+                                                                                           : "Installed: V${project_version}";
+              if (id(fw_update).status_has_error() || id(update_check_state) == 2) return "Check failed (offline?)";
+              if (st == update::UPDATE_STATE_NO_UPDATE) return "V${project_version} is the latest";
+              return "Installed: V${project_version}";
             };
             r.apply = [](int) {
-              if (id(update_check_state) == 2) {
-                id(update_check_state) = 4;
+              const auto st = id(fw_update).state;
+              if (st == update::UPDATE_STATE_AVAILABLE)
                 id(fw_update).perform(false);
-              } else if (id(update_check_state) != 3 && id(update_check_state) != 4) {
+              else if (st != update::UPDATE_STATE_INSTALLING && id(update_check_state) != 1)
                 id(check_update).execute();
-              }
               return false;
             };
             menu.add_row(std::move(r));
@@ -1981,16 +2010,26 @@ script:
   - id: check_update
     mode: single
     then:
-      - lambda: 'id(update_check_state) = 3; id(update_display).execute();'
+      - lambda: 'id(update_check_state) = 1; id(update_display).execute();'
       - update.check: fw_update
       - delay: 8s
       - lambda: |-
-          // A failed check (no release published yet, no internet) leaves the state UNKNOWN: not "up to date".
-          if (id(fw_update).status_has_error() || id(fw_update).state == update::UPDATE_STATE_UNKNOWN)
-            id(update_check_state) = 5;
-          else
-            id(update_check_state) = (id(fw_update).state == update::UPDATE_STATE_AVAILABLE) ? 2 : 1;
+          // The answer is fw_update's state. Still UNKNOWN without an error: the check never ran (offline).
+          id(update_check_state) =
+              id(fw_update).state == update::UPDATE_STATE_UNKNOWN && !id(fw_update).status_has_error() ? 2 : 0;
           id(update_display).execute();
+
+  # The firmware check after a start: 30 s after Wi-Fi first connects (the time, the prayer times and the lists go
+  # first). A Wi-Fi that drops in those 30 s leaves it for the next connection.
+  - id: fw_check_after_start
+    mode: single
+    then:
+      - delay: 30s
+      - if:
+          condition: wifi.connected
+          then:
+            - lambda: 'id(fw_checked_after_start) = true;'
+            - update.check: fw_update
 
   # ---------------- schedule ----------------
   # Today's times from the athan component (stored yearly file, or last year's as a stand-in).
@@ -2200,7 +2239,11 @@ script:
             // This build's version (project_version) and what the last check of the GitHub Release said.
             const char *latest = id(fw_update).update_info.latest_version.c_str();
             const auto st = id(fw_update).state;
+            // A failed install also sets the entity's error: tell it apart from a failed check (fw_failed_version).
+            const bool install_failed = st == update::UPDATE_STATE_AVAILABLE &&
+                                        id(fw_failed_version) == id(fw_update).update_info.latest_version;
             if (st == update::UPDATE_STATE_INSTALLING) snprintf(buf, sizeof(buf), "${project_version} (installing %s)", latest);
+            else if (install_failed) snprintf(buf, sizeof(buf), "${project_version} (installing %s failed, try again)", latest);
             else if (id(fw_update).status_has_error()) snprintf(buf, sizeof(buf), "${project_version} (no release found on GitHub, or no internet)");
             else if (st == update::UPDATE_STATE_AVAILABLE) snprintf(buf, sizeof(buf), "${project_version} (%s available)", latest);
             else if (st == update::UPDATE_STATE_NO_UPDATE) snprintf(buf, sizeof(buf), "${project_version} (latest)");

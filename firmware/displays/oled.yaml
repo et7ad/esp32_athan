@@ -2,7 +2,7 @@
 # Display: the 128x64 one-colour OLED on I2C (SSD1306 0.96" or SH1106 1.3"). The default (display_type: oled in
 # athan.yaml). Everything that depends on the display lives here: the bus, the display, the fonts, every screen
 # (update_display: the clock, pop-ups, Wi-Fi setup; the menu is drawn by components/athan/menu_view.cpp) and the
-# hot-plug watchdog. The other display is displays/tft.yaml; HARDWARE.md 3.2 has both wirings.
+# hot-plug watchdog. The other display is displays/tft.yaml; HARDWARE.md section 3 has both wirings.
 #
 # Optional: a missing OLED marks itself failed and everything else runs.
 # =====================================================================================================================
@@ -178,9 +178,9 @@ script:
           };
 
           const bool time_ok = now.is_valid();
-          // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (README 1.1). Bluetooth: its
+          // Wi-Fi setup open (Bluetooth or hotspot) and no clock yet: say how to connect (guides/using.md section 1). Bluetooth: its
           // state, and the page to open (Web Bluetooth: Chrome or Edge, not Safari). The hotspot's name is too wide
-          // for this screen; it is in the README.
+          // for this screen; it is in guides/using.md.
           if (!time_ok && !wifi_ok && (id(improv_ble).is_active() || wifi::global_wifi_component->is_ap_active())) {
             d.print(0, 6, id(font4), TextAlign::BASELINE_LEFT, "WI-FI SETUP");
             const auto st = id(improv_ble).get_improv_state();
@@ -218,8 +218,8 @@ script:
             time_end += 1 + text_w(id(font3), ap);
           }
           // Top right: the weekday small, the status marks to its left (times borrowed from last year: a hollow
-          // square; no Wi-Fi; buttons locked; the radio slot playing), the date in the medium font under them. With
-          // no room beside the time for the marks, the weekday hides.
+          // square; no Wi-Fi; buttons locked; a firmware update to install; the radio slot playing), the date in the
+          // medium font under them. With no room beside the time for the marks, the weekday hides.
           {
             const int base = 8;
             const char *wd = time_ok ? days_uc[(now.day_of_week + 6) % 7] : "---";
@@ -227,8 +227,10 @@ script:
             char num[4];
             snprintf(num, sizeof(num), "%d", r + 1);
             const bool standin = times_ok && id(athan_core).times_standin();
+            // Only while online (it cannot install without): the marks then never get wider than with no Wi-Fi.
+            const bool update_ready = wifi_ok && id(fw_update).state == update::UPDATE_STATE_AVAILABLE;
             const int marks = (standin ? 9 : 0) + (!wifi_ok ? 13 : 0) + (id(buttons_locked) ? 11 : 0) +
-                              (r >= 0 ? text_w(id(font4), num) + 3 + 9 : 0);
+                              (update_ready ? 11 : 0) + (r >= 0 ? text_w(id(font4), num) + 3 + 9 : 0);
             const int ww = text_w(id(font4), wd);
             const bool show_wd = 127 - ww - 4 - marks >= time_end + 3;
             int x = 127;
@@ -249,6 +251,13 @@ script:
               const int lx = x - 7, ly = base - 8;
               d.rectangle(lx + 1, ly, 5, 4); d.draw_pixel_at(lx + 1, ly, display::COLOR_OFF); d.draw_pixel_at(lx + 5, ly, display::COLOR_OFF);
               d.filled_rectangle(lx, ly + 3, 7, 5); d.draw_pixel_at(lx + 3, ly + 5, display::COLOR_OFF);
+              x -= 11;
+            }
+            if (update_ready) {   // an arrow up on a bar: 7 x 8
+              const int ux = x - 7, uy = base - 8;
+              for (int k = 0; k < 4; k++) d.horizontal_line(ux + 3 - k, uy + k, 2 * k + 1);   // the head
+              d.filled_rectangle(ux + 2, uy + 4, 3, 2);                                       // the stem
+              d.horizontal_line(ux, uy + 7, 7);                                               // the bar
               x -= 11;
             }
             if (r >= 0) {   // the play mark, a pixel of space, the slot number (1-10)

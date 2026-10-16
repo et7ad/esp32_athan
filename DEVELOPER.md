@@ -1,8 +1,9 @@
 # Developer notes (version 3 firmware)
 
-How the firmware is put together, for anyone changing it. Owner-facing behaviour is in `README.md`, the board and
-the prototype's acceptance checklist in `HARDWARE.md`, why this chip in `microcontroller_demand.md`, and the short
-list of rules the code depends on in [firmware_rules.md](firmware_rules.md).
+How the firmware is put together, for anyone changing it. Owner-facing behaviour is in
+[guides/using.md](guides/using.md), the board's design in [HARDWARE.md](HARDWARE.md), the prototype's acceptance
+checklist in [guides/building.md](guides/building.md) section 7, why this chip in `microcontroller_demand.md`, and
+the short list of rules the code depends on in [firmware_rules.md](firmware_rules.md).
 
 ## 1. Files
 
@@ -296,7 +297,8 @@ relay is on because of Pre-Fajr: on_boot switches it off). The ten `radio_url_N`
 | `make_athan` | Regular or Fajr slot, Fajr volume at Fajr, LED on, waits for the end (at most 5 s past the sound's length; ≤ 7 min), resumes the radio |
 | `run_prefajr` | Relay on, tawashih at the Fajr volume, resume the radio; `prefajr_relay_off` turns the relay off `prefajr_relay_min` after the tawashih (or `prefajr_relay_min` + 7 min after the start, if it was stopped) |
 | `play_tick` | Tick over the ducked radio |
-| `check_update` | `update.check`, then sets `update_check_state` for the menu |
+| `check_update` | The Update row's and the web page's check: `update.check`; `update_check_state` is 1 while it runs, 2 when it got no answer (offline: ESPHome skips the check without an error) |
+| `fw_check_after_start` | The firmware check after a start, 30 s after Wi-Fi first connects (once: `fw_checked_after_start`) |
 | `load_today`, `compute_coming_prayer`, `jump_to_next_prayer` | Schedule |
 | `sync_web_state` (1 s interval) | Publish entities only on change: values are formatted into a buffer and compared in place; the status lines are copied each second (short strings, under the component's lock) |
 | `screen_refresh` (1 s interval, and after a change) | The screen's level: Brightness (0 % = dark), or at night (Night From to Until) by Screen at Night (`night_level()` in `day_window.h`): the same as by day (Normal, which never looks at the window), `screen_dim_pct` (Dim) or dark (Turned off). A screen that would be dark is lit dim for `screen_wake_s` (120 s) after a key, and while the athan or the Pre-Fajr Tawashih plays (the 120 s start when it ends); `screen_dark_in` holds the seconds left (-1 when it stays lit), redrawn each second, and the display files draw it as a tab in a corner. Brightness set to 0 % sets `screen_force_dark`: dark at once, until the next key or the athan / Pre-Fajr Tawashih. Calls the display file's `apply_screen` only when the level changes (`screen_pct_applied`; 0 = dark, which `ui_key` reads: that key press only lights the screen) |
@@ -352,9 +354,19 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
   **Reload page**. Plain HTML, no JavaScript.
 - ESPHome's page loads one script, `firmware/web_audio_link.js` (`web_server: js_include`, served as `/0.js`). It
   underlines the **Change Sounds At** value and opens `/audio` on click, without replacing ESPHome's elements.
-- Firmware updates: `update: platform: http_request` with the Releases manifest (every 6 h, the Update menu
-  item, the Check For Update button). `ota:` has `esphome` (encrypted, same key as the API), `http_request` and
-  `web_server` (needed for multipart uploads to reach custom handlers).
+- Firmware updates: `update: platform: http_request` with the Releases manifest, `update_interval: never`. The
+  clock checks 30 s after Wi-Fi first connects after a start (`fw_check_after_start`; ESPHome's own check after a
+  start gives up when Wi-Fi takes over a minute), daily at 03:00 (`time: on_time`), and when asked (the Update menu
+  row, the Check For Update button). It never installs by itself.
+  - An update found shows as the update mark on both screens while online (`update_ready` in `displays/*.yaml`, in
+    the TFT face's fingerprint; `on_update_available` redraws at once).
+  - The menu's Update row reads `fw_update`'s own state: **Install x.y.z** while one is available, Installing while
+    it installs. `ota: http_request` records the version of an install that failed (`fw_failed_version`, set by
+    `on_error`, cleared by `on_begin`) for the row's caption and Firmware Version.
+  - The install runs on the main loop (ESPHome's `OtaHttpRequestComponent::flash()`): nothing else runs until the
+    restart, so a prayer whose minute passes meanwhile is not called after it.
+- `ota:` has `esphome` (encrypted, same key as the API), `http_request` and `web_server` (needed for multipart
+  uploads to reach custom handlers).
 
 ## 10. Checks you can run without hardware
 
@@ -374,7 +386,7 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
   `ring()` draw the same pixels as a plain scan that works out the angle of every pixel, for 5,820 rings and arcs.
 - `docs/` (`check_docs.py`): the catalog (at most 64 KB, names ASCII and at most 12 characters, no duplicate links,
   relative links that exist, the slot limits; sample rate and stereo as warnings), the 10 stations, the mosque keys
-  (mosques.json = the Location options = README 1.7 = the folders) and every yearly file (its structure, plus the
+  (mosques.json = the Location options = guides/using.md section 7 = the folders) and every yearly file (its structure, plus the
   day-to-day and year-to-year warnings). Errors fail the run, warnings are listed.
 - With ArduinoJson on the computer (a build_firmware.sh build, syntax_check.sh's download, or `ARDUINOJSON=`):
   the clock's own `parse_year_file()` on every yearly file and its time zone parser against the scripts'
@@ -391,7 +403,7 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
 
 ## 11. To verify on the prototype
 
-The full acceptance list is `HARDWARE.md` section 9. These points in this implementation rest on assumptions that
+The full acceptance list is `guides/building.md` section 7. These points in this implementation rest on assumptions that
 only hardware can confirm:
 
 - Firmware size against the 0x360000 app slots, and internal heap with BLE + hotspot + an athan.

@@ -70,6 +70,7 @@ constexpr const char *VOLUME_OFF = "\ue04f";     // a prayer whose athan is off
 constexpr const char *WIFI = "\ue63e";
 constexpr const char *WIFI_OFF = "\ue648";
 constexpr const char *HISTORY = "\ue8b3";        // times borrowed from last year
+constexpr const char *UPGRADE = "\uf0fb";        // a firmware update is ready to install
 constexpr const char *BLUETOOTH = "\ue1a7";
 constexpr const char *HOTSPOT = "\ue1e2";        // wifi_tethering
 constexpr const char *POWER = "\uf8c7";          // power_settings_new: the relay pop-up

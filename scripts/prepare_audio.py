@@ -25,7 +25,7 @@ Per recording:
      ever sped up or cut). A recording longer than its limit is refused; shorten it at the source. Each file is
      encoded next to its target and replaces it only once every check passed, so a failure keeps the old file.
 
-Limits the clock enforces (README 1.5): athan, fajr, tawashih at most 3,000,000 bytes and 5:00; tick 400,000 bytes
+Limits the clock enforces (guides/using.md section 5): athan, fajr, tawashih at most 3,000,000 bytes and 5:00; tick 400,000 bytes
 and 1:00. C1-C4 (V2 menu tones) and Z_fallback_* are not part of the library.
 
 Usage (needs ffmpeg and ffprobe; from the root of this repository, V2 repository next to it):
