@@ -17,8 +17,9 @@
 # so it never rewrites the project file here.
 #
 # Before the JLCPCB files, a window shows the board's front and back with every part: click a part to take it out of
-# the JLCPCB order (you solder it yourself), for example a part JLCPCB cannot supply and its neighbours. "Save and
-# continue" keeps the choice in jlcpcb_selection.json; closing the window keeps the previous one.
+# the JLCPCB order (you solder it yourself), for example a part JLCPCB cannot supply and its neighbours. The USB-C
+# J1 fits either side: click it on the side JLCPCB should put it (the back unless chosen). "Save and continue" keeps
+# the choice in jlcpcb_selection.json; closing the window keeps the previous one.
 #
 # Usage: ./generate_fab_files.sh [--verify] [--no-step] [--no-gui]
 #   --verify   also check every assembled part against its footprint in JLCPCB's library (downloads them)
@@ -110,6 +111,8 @@ echo "== JLCPCB assembly: BOM and CPL -> fab_files/jlcpcb/"
   2> >(grep -v -E 'Fontconfig|Debug|assert|swig/python' >&2)
 LEFT_OUT="$("$KPY" -c "import json,sys; print(', '.join(json.load(open(sys.argv[1])).get('excluded', [])) or 'none')" \
   "$SELECTION" 2>/dev/null || echo none)"
+SIDES="$("$KPY" -c "import json,sys; print(', '.join(f'{r} on the {s}' for r, s in json.load(open(sys.argv[1])).get('sides', {}).items()))" \
+  "$SELECTION" 2>/dev/null || true)"
 
 if [ "$STEP" = 1 ]; then
   echo "== 3D model -> generated_imgs_and_3d/$PROJECT.step"
@@ -132,7 +135,8 @@ Made by \`generate_fab_files.sh\` from the saved KiCad project. Don't edit these
 | Assembly, both sides: BOM and CPL | \`jlcpcb/${NAME}_BOM_JLCPCB_both.csv\`, \`jlcpcb/${NAME}_CPL_JLCPCB_both.csv\` |
 
 Taken out of the JLCPCB order (solder them yourself, with the through-hole parts): $LEFT_OUT.
-
+${SIDES:+Parts that fit either side, placed: $SIDES (unless taken out above).
+}
 Checks when made: DRC errors $DRC_ERR, unconnected items $UNCONN, schematic mismatches $PARITY, ERC errors $ERC_ERR
 (details in \`reports/\`). How to order: \`guides/jlcpcb_assembly.md\`.
 EOF

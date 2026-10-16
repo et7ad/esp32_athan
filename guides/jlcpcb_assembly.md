@@ -163,6 +163,8 @@ board's front and back, drawn from the KiCad file in the solder mask colour you 
   to put it back. The list on the right does the same, with each part's LCSC number, Basic or Extended, and stock.
 - An orange border marks a part JLCPCB cannot supply now (out of stock or no longer sold), checked online when the
   window opens. Dashed grey parts are soldered by hand anyway (through-hole, DNP, or no LCSC number).
+- The USB-C J1 fits either side, so it shows on both: in colour where it is fitted, dotted blue on the other side.
+  Click it there to move it to that side.
 - To solder a missing part before the machine-placed ones, take its neighbours out too: click the part, then
   **Take out its neighbours** (within the distance you set). Soldering it first is easier with nothing around it.
 - Drag to move the board, the wheel or the buttons to zoom and turn it.
@@ -175,10 +177,21 @@ board's front and back, drawn from the KiCad file in the solder mask colour you 
   module's ground pad sits under the module.
 - One-side assembly is the cheaper service. When ordering, check that the economic service offers the bottom side
   for this board; if it offers only the top, order the back in the standard service.
-- The front's five surface-mount parts are large and quick to solder by hand, along with the through-hole parts.
+- The USB-C J1 goes on the back in this order, so its small pads are machine-soldered too.
+- The front's four surface-mount parts (C1, D1, R1, R2) are large and quick to solder by hand, along with the
+  through-hole parts.
 
-The `_both` files add the front's surface-mount parts, for the standard service. The USB-C J1 is among them:
-JLCPCB lists it (C3151650) for surface-mount assembly, its through-hole shell pegs included.
+The `_both` files add the front's surface-mount parts, for the standard service.
+
+**The USB-C, front or back.** J1's footprint has the same pads on the front and the back, and the receptacle's four
+shell legs go through shared holes, so it can be soldered on either side.
+- JLCPCB lists it (C3151650) for surface-mount assembly, its through-hole shell pegs included. The selection
+  window chooses the side (the back unless you click it on the front), saved as `"sides"` in
+  `jlcpcb_selection.json`. Taken out of the order, it can be hand-soldered on either side.
+- On the back the receptacle lies flipped, so its A and B pins land on each other's pads: CC1 and CC2 trade places
+  (each has its own 4.7 kΩ to ground), VBUS and GND stay on their nets.
+- Its opening is at the board's left edge either way. On the back it sits about 5 mm lower, below the board: the
+  enclosure's opening has to match the side.
 
 **The parts.** Every part JLCPCB can place has its LCSC number in the schematic's **LCSC** field.
 
@@ -196,21 +209,23 @@ JLCPCB lists it (C3151650) for surface-mount assembly, its through-hole shell pe
 | C5 | 1 µF 50 V X7R, 1206 (Samsung CL31B105KBHNNNE) | C1848 | basic |
 | C1 (front) | 470 µF 10 V, 8 mm (Panasonic EEE-FK1A471P) | C178530 | extended |
 | D1 (front) | blue LED, 1206 (NationStar NCD1206B1) | C130717 | extended |
-| J1 (front) | USB-C 6-pin (GCT USB4125-GF-A) | C3151650 | extended |
+| J1 (back or front) | USB-C 6-pin (GCT USB4125-GF-A) | C3151650 | extended |
 | J2 | barrel jack (CUI PJ-102AH), through-hole | C3096093 | extended |
 | J3, J5 | 2-pin screw terminal (MaiXu MX126-5.0-02P), through-hole | C5188434 | extended |
 
 - R7 and R11 are marked **DNP**: they are fitted by hand only when needed (15 dB gain; a resistor in series with the
   relay output). The parts lists still name them; the JLCPCB files leave them out.
-- Each different extended part adds one loading fee: two for a back-only order (U1, U4), five for both sides (also
-  C1, D1, J1). Every resistor and capacitor is a basic part.
-- Not in JLCPCB's library, so always by hand: the switch U2 (Alps SKQUAAA010), the header J6 and the display header.
+- Each different extended part adds one loading fee: three for a back-only order (U1, U4, J1), five for both sides
+  (also C1, D1). Every resistor and capacitor is a basic part.
+- Not in JLCPCB's library, so always by hand: the switch U2 (a 10 × 10 mm 5-way switch, SKQUCAA010 type), the header J6 and the display header.
 
 **What the files take care of.**
 - Each part's position is the centre of its pads, which is where JLCPCB centres its own footprint (the USB-C's
   KiCad origin, for example, sits 1.1 mm off its centre).
 - Two parts sit turned in JLCPCB's library against KiCad's footprint, and the CPL turns them back: the regulator U3
   by 180° and the amplifier U4 by 270°.
+- J1 on the back is written as the same receptacle flipped over (bottom side, 90°), and `--verify` checks it
+  against JLCPCB's footprint pad by pad like every other part.
 - The LED's footprint in JLCPCB's library has its cathode on pad 1, as KiCad's does, so it needs no turn. (Some
   LEDs there number the cathode 2: `--verify` matches pads by number, so check the polarity in the preview after
   choosing a different LED.)
@@ -222,8 +237,9 @@ JLCPCB lists it (C3151650) for surface-mount assembly, its through-hole shell pe
 - U4: its pin-1 dot sits in the corner marked on the silkscreen.
 - U1: its antenna end lies at the board's bottom edge, over the area without copper.
 - U3: its wide tab points toward the module.
-- For a front order also D1 and C1 (polarity) and J1 (its opening at the left edge). JLCPCB may add edge rails
-  for the machines there; they are cut off afterwards.
+- J1: its opening at the board's edge (seen from below, the right edge). JLCPCB may add edge rails for the
+  machines there; they are cut off afterwards.
+- For a front order also D1 and C1 (polarity).
 
 The resistors and ceramic capacitors have no polarity.
 

@@ -9590,7 +9590,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_USB:USB_C_Receptacle_GCT_USB4125-xx-x_6P_TopMnt_Horizontal"
+		(property "Footprint" "Library:USB_C_Receptacle_GCT_USB4125_6P_BothSides"
 			(at 50.8 53.34 0)
 			(hide yes)
 			(show_name no)
@@ -9612,7 +9612,7 @@
 				)
 			)
 		)
-		(property "Description" "USB-C power input, 5 V (power only, no data)"
+		(property "Description" "USB-C power input, 5 V (power only, no data); fits on the front or the back"
 			(at 46.99 55.88 0)
 			(hide yes)
 			(show_name no)
@@ -13403,7 +13403,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "SKQUAAA010"
+		(property "Value" "5-way switch (SKQUCAA010 type)"
 			(at 144.78 167.6399 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13437,7 +13437,7 @@
 				)
 			)
 		)
-		(property "Description" "5-way switch (4 directions and a centre push), Alps SKQUAAA010, through-hole"
+		(property "Description" "5-way switch, 10 x 10 mm through-hole, 4 directions and a centre push: Alps SKQUCAA010 or a copy (sold as 5-way switch 10*10*10 mm). Not SKQUAAA010, which has no centre push"
 			(at 146.05 158.75 0)
 			(hide yes)
 			(show_name no)
@@ -13461,79 +13461,7 @@
 				(justify bottom)
 			)
 		)
-		(property "Package" "None"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "Price" "None"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "SnapEDA_Link" "https://www.snapeda.com/parts/SKQUAAA010/ALPS/view-part/?ref=snap"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "MP" "SKQUAAA010"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "Purchase-URL" "https://www.snapeda.com/api/url_track_click_mouser/?unipart_id=104101&manufacturer=ALPS&part_name=SKQUAAA010&search_term=skquaaa010"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "Availability" "In Stock"
-			(at 146.05 158.75 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify bottom)
-			)
-		)
-		(property "Check_prices" "https://www.snapeda.com/parts/SKQUAAA010/ALPS/view-part/?ref=eda"
+		(property "MP" "SKQUCAA010"
 			(at 146.05 158.75 0)
 			(hide yes)
 			(show_name no)

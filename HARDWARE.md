@@ -37,11 +37,15 @@ USB-C, power only (J1) ──┐
 
 ## 2. Power
 
-- **J1, USB-C receptacle,** 6-pin, power only (footprint `USB_C_Receptacle_GCT_USB4125-xx-x_6P_TopMnt_Horizontal`):
+- **J1, USB-C receptacle,** 6-pin, power only, soldered on the front or the back (footprint
+  `USB_C_Receptacle_GCT_USB4125_6P_BothSides` in the project library: the same pads on both sides, the four shell
+  legs in shared holes; section 8):
   - VBUS (A9, B9) to **+5V**.
   - CC1 (A5) and CC2 (B5) each through 4.7 kΩ to GND (R1, R2). USB-C asks for 5.1 kΩ ±20 %, so anything from 4.08
     to 6.12 kΩ works; without them a C-to-C charger gives no power.
   - GND (A12, B12) and the shield to GND.
+  - On the back the receptacle lies flipped, so its A and B pins trade places: CC1 and CC2 swap (each has its own
+    resistor), VBUS and GND stay on their nets.
   - It has no data lines: the first flash and the serial log go through J6 (section 3).
 - **J2, barrel jack** (CUI PJ-102AH), centre positive, also on **+5V**. It takes a regulated 5 V supply only. Use one
   input at a time: the two are joined directly.
@@ -158,8 +162,10 @@ Start at 9 dB. If the loudest athan distorts at full volume, lower the gain; if 
 
 ## 6. The 5-way switch
 
-**U2 is an Alps SKQUAAA010,** a through-hole switch with four directions and a centre push, each closing to one
-common pin. Its library is in `hardware/pcb/libs/SKQUAAA010/`.
+**U2 is a 10 × 10 mm through-hole 5-way switch** (four directions and a centre push, each closing to one common
+pin): the Alps SKQUCAA010 or one of its many copies, sold as "5-way switch 10*10*10 mm". Alps' SKQUAAA010 looks the
+same and fits the same holes but has no centre push, so the menu could not be opened with it. Every SKQU model
+shares the footprint in `hardware/pcb/libs/SKQUAAA010/`.
 
 | Pin | 1 | 2 | 3 | 4 | 5 | 6 |
 |---|---|---|---|---|---|---|
@@ -180,10 +186,10 @@ common pin. Its library is in `hardware/pcb/libs/SKQUAAA010/`.
 | Ref | Part | Side |
 |---|---|---|
 | U1 | ESP32-S3-WROOM-1-N16R8 (LCSC C2913202) | back |
-| U2 | Alps SKQUAAA010 5-way switch, through-hole | front |
+| U2 | 5-way switch with a centre push, 10 × 10 mm through-hole (Alps SKQUCAA010 or a copy; not SKQUAAA010) | front |
 | U3 | AMS1117-3.3, SOT-223 (LCSC C6186) | back |
 | U4 | MAX98357AETE+T, TQFN-16 (LCSC C910544) | back |
-| J1 | USB-C receptacle, 6-pin, power only (GCT USB4125-GF-A, LCSC C3151650) | front |
+| J1 | USB-C receptacle, 6-pin, power only (GCT USB4125-GF-A, LCSC C3151650) | front or back |
 | J2 | Barrel jack, CUI PJ-102AH (LCSC C3096093) | front |
 | J3, J5 | 2-pin screw terminals, 5.0 mm pitch (MaiXu MX126-5.0-02P, LCSC C5188434), speaker and relay | front |
 | J6 | 1×6 pin header, 2.54 mm, with a jumper cap | front |
@@ -218,6 +224,9 @@ The board is 59.6 × 50 mm, with two layers. Every part is soldered by hand, on 
   top left (always visible), and the tall capacitor C1, never under a display.
 - **Back:** the module with its antenna end at the bottom edge, over a copper keep-out on both layers, and the
   amplifier, the regulator and the small parts above it.
+- **USB-C:** J1 has its pads on both sides and its four shell legs in shared holes. Solder it on the front by hand,
+  or have JLCPCB place it on the back ([guides/jlcpcb_assembly.md](guides/jlcpcb_assembly.md)). Its opening is at
+  the left edge either way; on the back it sits about 5 mm lower, below the board.
 - **Antenna:** no copper, metal screws or speaker magnet near the antenna end. The mounting holes beside it take
   nylon screws.
 - **Amplifier:** short I2S traces kept away from the antenna; solid ground under the amplifier, with thermal vias in
@@ -240,7 +249,7 @@ round and rectangular speaker variants) is a good starting point. It needs:
 | Item | What it needs |
 |---|---|
 | Board mount | The board's outline and its four M3 holes |
-| Power | Openings for the USB-C (big enough for common cable boots, about 12 × 7 mm) and the barrel jack |
+| Power | Openings for the USB-C (big enough for common cable boots, about 12 × 7 mm; about 5 mm lower, below the board, when J1 is on the back) and the barrel jack |
 | J6 | Reachable with the case open (for the first flash), or a small slot to flash it closed |
 | Switch | An opening or a cap over the 5-way switch's stem, with room to tilt it four ways and press it in |
 | LED | A light pipe or a hole over it |
@@ -261,7 +270,6 @@ ESP32-C5, 32 MB of flash) are in microcontroller_demand.md section 3; firmware i
 | Idea | What it gives | What it takes |
 |---|---|---|
 | **A real-time clock** (PCF85063A with a CR1220 or a supercap) | With the year's prayer times stored, the time is the only thing that still needs the internet after a power cut. An RTC makes the clock fully offline | About $1 on I2C (with a TFT the I2C pins carry SPI, so two of the free GPIOs); ESPHome's RTC time platform, synced from SNTP and read at boot |
-| **The USB-C on the back** | JLCPCB then solders it in a back-only order: its small pads are the hardest part to solder by hand on the front | Flip J1 where it is: its four shell legs use the same holes, and its VBUS pads line up with the two +5V vias already there. Two small vias take the CC lines to R1 and R2 on the front (or R1 and R2 move to the back), and two ground vias under its body go. About an hour on the board, then DRC and new files. The enclosure's USB-C opening moves about 5 mm, to below the board. One more extended part in a back-only order (one more loading fee) |
 | **USB data on the USB-C** | Flashing and the log over the charging cable, without J6 | A 16-pin USB 2.0 receptacle with D+/D− on GPIO20/19 and a USBLC6-2SC6 ESD part; a few cents more, and harder to solder by hand |
 | **3.5 mm line out** | Feeds an external speaker or amplifier | A PCM5102A DAC on the second I2S port and a jack; a second speaker in the firmware's audio chain. The MAX98357A's output is a speaker output, not line level |
 | **Speaker EMI filter** | Less radio interference if the speaker ever sits on wires longer than about 30 cm | A ferrite bead and a 680 pF C0G capacitor on each output: max98357a_amplifier.md section 8 |

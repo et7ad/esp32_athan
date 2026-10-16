@@ -9,7 +9,9 @@ keeps the previous choice. --snapshot out.png draws the window's two board views
 On the board:
 - green: JLCPCB places it; red with a cross: taken out, you solder it;
 - orange border: JLCPCB cannot supply it now (out of stock or not sold), checked online when the window opens;
-- dashed grey: soldered by hand anyway (through-hole, marked DNP, or no LCSC number).
+- dashed grey: soldered by hand anyway (through-hole, marked DNP, or no LCSC number);
+- dotted blue: a part that fits either side (the USB-C J1), drawn where it is not fitted: click it there to move it
+  to that side. Its side is saved too ("sides"), the back when the file names none.
 
 To solder a part JLCPCB lacks before the machine-placed ones, take out its neighbours too: select it (click) and
 use "Take out its neighbours".
@@ -62,6 +64,9 @@ class Part:
         self.value = fp.GetValue()
         self.lcsc = fp.GetFieldText('LCSC') if fp.HasField('LCSC') else ''
         self.side = 'B' if fp.IsFlipped() else 'F'
+        smd = [q for q in fp.Pads() if q.GetAttribute() == pcbnew.PAD_ATTRIB_SMD]
+        self.dual = any(q.IsOnLayer(pcbnew.F_Cu) for q in smd) and any(q.IsOnLayer(pcbnew.B_Cu) for q in smd)
+        self.sides = 'FB' if self.dual else self.side        # where it can be fitted
         a = fp.GetAttributes()
         self.smd = bool(a & pcbnew.FP_SMD)
         self.dnp = fp.IsDNP()
@@ -248,7 +253,7 @@ class BoardView(wx.Panel):
 
     def part_at(self, sx, sy):
         x, y = self.to_board(sx, sy)
-        hits = [p for p in self.frame.board.parts if p.side == self.side
+        hits = [p for p in self.frame.board.parts if self.side in p.sides
                 and p.box[0] <= x <= p.box[2] and p.box[1] <= y <= p.box[3]]
         hits.sort(key=lambda p: ((p.box[2] - p.box[0]) * (p.box[3] - p.box[1])))   # the smallest one on top
         return hits[0] if hits else None
@@ -268,23 +273,26 @@ class BoardView(wx.Panel):
         gc.PopState()
         font = wx.Font(wx.FontInfo(9).Bold())
         for p in f.parts:
-            if p.side != self.side:
+            if self.side not in p.sides:
                 continue
             pts = [self.to_screen(x, y) for x, y in ((p.box[0], p.box[1]), (p.box[2], p.box[1]),
                                                        (p.box[2], p.box[3]), (p.box[0], p.box[3]))]
             xs, ys = [q[0] for q in pts], [q[1] for q in pts]
             x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
             out = p.ref in frame.excluded
-            if p.placeable and not out:
+            elsewhere = p.placeable and frame.side_of(p) != self.side      # fits here, fitted on the other side
+            if elsewhere:
+                brush, pen = wx.TRANSPARENT_BRUSH, wx.Pen(wx.Colour(110, 170, 255), 2, wx.PENSTYLE_DOT)
+            elif p.placeable and not out:
                 brush, pen = wx.Brush(wx.Colour(40, 210, 90, 90)), wx.Pen(wx.Colour(60, 230, 110), 2)
             elif p.placeable:
                 brush, pen = wx.Brush(wx.Colour(230, 50, 50, 110)), wx.Pen(wx.Colour(255, 80, 80), 2)
             else:
                 brush, pen = wx.TRANSPARENT_BRUSH, wx.Pen(wx.Colour(190, 190, 190, 170), 1, wx.PENSTYLE_SHORT_DASH)
             gc.SetBrush(brush); gc.SetPen(pen); gc.DrawRectangle(x0, y0, x1 - x0, y1 - y0)
-            if p.placeable and out:
+            if p.placeable and out and not elsewhere:
                 gc.StrokeLine(x0, y0, x1, y1); gc.StrokeLine(x0, y1, x1, y0)
-            if p.placeable and p.stock and (p.stock[0] <= 0 or not p.stock[2]):
+            if p.placeable and not elsewhere and p.stock and (p.stock[0] <= 0 or not p.stock[2]):
                 gc.SetBrush(wx.TRANSPARENT_BRUSH); gc.SetPen(wx.Pen(wx.Colour(255, 165, 0), 3))
                 gc.DrawRectangle(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6)
             if p.ref == frame.selected:
@@ -322,7 +330,7 @@ class BoardView(wx.Panel):
         if self.drag and not self.drag[2]:
             p = self.part_at(*e.GetPosition())
             if p:
-                self.frame.click(p)
+                self.frame.click(p, self.side)
         self.drag = None
 
     def on_wheel(self, e):
@@ -341,6 +349,7 @@ class Frame(wx.Frame):
                 saved = {}
         refs = {p.ref for p in board.parts if p.placeable}
         self.excluded = set(saved.get('excluded', [])) & refs
+        self.fit = self.saved_sides(saved)    # parts that fit either side: 'F' or 'B'
         self.colour = saved.get('pcb_color', 'Green') if saved.get('pcb_color') in COLOURS else 'Green'
         self.selected = None
         self.view = View()
@@ -393,7 +402,7 @@ class Frame(wx.Frame):
         self.list = wx.ListCtrl(root, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.list.EnableCheckBoxes(True)
         for i, (name, width) in enumerate((('Part', 60), ('Value', 120), ('LCSC', 82), ('Library', 66),
-                                           ('Stock', 110), ('Side', 46))):
+                                           ('Stock', 110), ('Side', 62))):
             self.list.InsertColumn(i, name, width=width)
         self.rows = [p for p in board.parts if p.placeable]
         self.updating = True
@@ -401,7 +410,7 @@ class Frame(wx.Frame):
             self.list.InsertItem(i, p.ref)
             self.list.SetItem(i, 1, p.value); self.list.SetItem(i, 2, p.lcsc)
             self.list.SetItem(i, 3, '…'); self.list.SetItem(i, 4, 'checking…')
-            self.list.SetItem(i, 5, 'front' if p.side == 'F' else 'back')
+            self.list.SetItem(i, 5, self.side_label(p))
             self.list.CheckItem(i, p.ref not in self.excluded)
         self.updating = False
         self.list.Bind(wx.EVT_LIST_ITEM_CHECKED, self.on_check)
@@ -428,6 +437,16 @@ class Frame(wx.Frame):
 
         codes = sorted({p.lcsc for p in self.rows})
         threading.Thread(target=check_stock, args=(codes, self.on_stock), daemon=True).start()
+
+    def saved_sides(self, saved):
+        names = saved.get('sides', {})
+        return {p.ref: ('F' if names.get(p.ref) == 'front' else 'B') for p in self.board.parts if p.dual}
+
+    def side_of(self, p):
+        return self.fit.get(p.ref, p.side)
+
+    def side_label(self, p):
+        return ('front' if self.side_of(p) == 'F' else 'back') + (' ⇄' if p.dual else '')
 
     # ---- actions
     def refresh_views(self):
@@ -469,14 +488,24 @@ class Frame(wx.Frame):
             except ValueError:
                 pass
         self.excluded = set(saved.get('excluded', [])) & {p.ref for p in self.rows}
+        self.fit = self.saved_sides(saved)
+        self.show_sides()
         self.set_out([], True)
 
-    def click(self, p):
+    def show_sides(self):
+        for i, p in enumerate(self.rows):
+            self.list.SetItem(i, 5, self.side_label(p))
+
+    def click(self, p, side):
         self.selected = p.ref
-        if p.placeable:
+        if p.placeable and self.side_of(p) != side:      # a part that fits either side: moved to the side clicked
+            self.fit[p.ref] = side
+            self.show_sides()
+            self.set_out([p.ref], False)
+        elif p.placeable:
             self.set_out([p.ref], p.ref not in self.excluded)
-            i = self.rows.index(p)
-            self.list.EnsureVisible(i)
+        if p.placeable:
+            self.list.EnsureVisible(self.rows.index(p))
         self.show_info(p); self.refresh_views()
 
     def take_out_neighbours(self):
@@ -484,7 +513,8 @@ class Frame(wx.Frame):
         if not sel:
             self.info.SetLabel('Select a part first (click it), then take out its neighbours.'); return
         d = self.near.GetValue()
-        near = [p.ref for p in self.rows if p.side == sel.side and p.ref != sel.ref and gap(p.box, sel.box) <= d]
+        near = [p.ref for p in self.rows if self.side_of(p) == self.side_of(sel) and p.ref != sel.ref
+                and gap(p.box, sel.box) <= d]
         if sel.placeable:
             near.append(sel.ref)
         self.set_out(near, True)
@@ -530,7 +560,11 @@ class Frame(wx.Frame):
             if p.stock:
                 stock, lib, buyable, reason = p.stock
                 st = f' · {lib} · ' + (f'{stock:,} in stock' if buyable and stock > 0 else (reason or 'out of stock'))
-            self.info.SetLabel(f'{p.ref} · {p.value} · {p.lcsc}{st} · {state}')
+            where = ''
+            if p.dual:
+                here, there = ('front', 'back') if self.side_of(p) == 'F' else ('back', 'front')
+                where = f' · fits either side: on the {here} (click it on the {there} view to move it)'
+            self.info.SetLabel(f'{p.ref} · {p.value} · {p.lcsc}{st} · {state}{where}')
         else:
             self.info.SetLabel(f'{p.ref} · {p.value} · soldered by hand ({p.why})')
         self.info.Wrap(380)
@@ -541,16 +575,19 @@ class Frame(wx.Frame):
         lines = len({(p.value, p.lcsc) for p in placed})
         bad = [p.ref for p in placed if p.stock and (p.stock[0] <= 0 or not p.stock[2])]
         text = (f'JLCPCB places {len(placed)} parts ({lines} BOM lines): back '
-                f'{sum(p.side == "B" for p in placed)}, front {sum(p.side == "F" for p in placed)} (front parts only in '
-                f'the "_both" files).\nTaken out, you solder them: {", ".join(out) or "none"}.')
+                f'{sum(self.side_of(p) == "B" for p in placed)}, front {sum(self.side_of(p) == "F" for p in placed)} '
+                f'(front parts only in the "_both" files).\nTaken out, you solder them: {", ".join(out) or "none"}.')
         if bad:
             text += f'\nCannot be supplied now: {", ".join(bad)}. Take them out (and their neighbours).'
         self.summary.SetLabel(text); self.summary.Wrap(380)
         self.Layout()
 
     def save(self):
-        data = {'excluded': sorted(self.excluded, key=natural), 'pcb_color': self.colour,
-                'note': 'Parts left out of the JLCPCB order (written by jlcpcb_select.py).'}
+        data = {'excluded': sorted(self.excluded, key=natural),
+                'sides': {r: ('front' if s == 'F' else 'back') for r, s in sorted(self.fit.items())},
+                'pcb_color': self.colour,
+                'note': 'Parts left out of the JLCPCB order, and the side of parts that fit either side '
+                        '(written by jlcpcb_select.py).'}
         with open(self.sel_path, 'w') as f:
             json.dump(data, f, indent=2); f.write('\n')
         self.saved = True

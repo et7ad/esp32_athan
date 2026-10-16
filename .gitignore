@@ -53,6 +53,7 @@ SDCard_files/
 firmware/binaries/
 scripts/parse_Islamicfinder/preparing/
 hardware/pcb/esp32_athan-backups/
+hardware/pcb/generated_imgs_and_3d/*.step
 
 secrets.yaml
 

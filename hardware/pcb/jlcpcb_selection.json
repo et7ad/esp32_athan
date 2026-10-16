@@ -5,6 +5,9 @@
     "R9",
     "U1"
   ],
+  "sides": {
+    "J1": "back"
+  },
   "pcb_color": "Green",
-  "note": "Parts left out of the JLCPCB order (written by jlcpcb_select.py)."
+  "note": "Parts left out of the JLCPCB order, and the side of parts that fit either side (written by jlcpcb_select.py)."
 }

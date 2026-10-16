@@ -19,7 +19,7 @@ board's design (circuit, pin map, parts list) is in [HARDWARE.md](../HARDWARE.md
 | ESP32-S3-WROOM-1-**N16R8** module (LCSC C2913202) | 16 MB flash and 8 MB PSRAM. Other variants lack the memory for the stored sounds |
 | MAX98357A amplifier (MAX98357AETE+T, LCSC C910544) | Turns the I2S audio into up to 3 W for the speaker |
 | A display: a 1.3" 128×64 I2C OLED (SH1106 or SSD1306), or a 1.54" 240×240 ST7789 IPS colour screen | One or the other; the firmware is built for the one you fit |
-| Alps SKQUAAA010 5-way switch | Up, Down, Left, Right and a centre push |
+| 5-way switch, 10 × 10 mm through-hole (Alps SKQUCAA010 or a copy, sold as "5-way switch 10*10*10 mm") | Up, Down, Left, Right and a centre push |
 | A 4 Ω 3 W speaker | |
 | USB-C receptacle (6-pin, power only) and a 5 V barrel jack, AMS1117-3.3 regulator, resistors and capacitors | The full list is in [HARDWARE.md](../HARDWARE.md) section 7 |
 | A 3.3 V USB-serial adapter (CP2102, or CH340 set to 3.3 V) | For the first flash through the board's 6-pin header J6 |
@@ -194,7 +194,7 @@ hand.
 
 - **The front** (the side you look at) carries one display (the TFT or the OLED, on long pin headers so the small
   parts fit under it), the 5-way switch, the status LED, the USB-C and barrel jacks, and the screw terminals for the
-  speaker and the relay.
+  speaker and the relay. The USB-C can go on the back instead: its pads are on both sides.
 - **The back** carries the ESP32 module (its antenna at the bottom edge, with no copper under it), the amplifier,
   the regulator and the small parts.
 - Every resistor and capacitor has its value printed next to it, and the programming header J6 is labelled on both
@@ -213,7 +213,9 @@ or ENIG (ENIG makes the amplifier's small pads easier to solder). The parts and 
 
 **Soldering.** Start with the back: the amplifier (its exposed pad underneath needs hot air or a hot plate), the
 module, the regulator and the small parts. Then the front: the switch, the connectors, the LED, the large capacitor
-C1, and the header for your display. Only one display is fitted: DS1 for the OLED, or DS2 for the TFT.
+C1, and the header for your display. Only one display is fitted: DS1 for the OLED, or DS2 for the TFT. The USB-C
+J1 goes on either side (on the back its opening sits about 5 mm lower): pick the side your enclosure's opening is
+on.
 
 **Jumpers.** The solder jumpers on the back come set for a normal clock:
 - The amplifier's gain is 9 dB. To change it, see [HARDWARE.md](../HARDWARE.md) section 4.

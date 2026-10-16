@@ -7,6 +7,10 @@ Which parts: surface-mount footprints with an LCSC field that are not marked DNP
 jlcpcb_select.py (the "excluded" list of the selection file). Through-hole parts, the displays, the solder jumpers,
 the holes and the QR codes are soldered (or not soldered) by hand.
 
+A footprint with its pads on both sides (the USB-C J1: the same pads on the front and the back) is placed on the side
+the selection file names ("sides": {"J1": "back"}), the back when it names none. On its other side it is placed as
+the same part flipped over: a flipped copy of the footprint, turned until its pads land on the board's pads there.
+
 Each placement, as JLCPCB expects it:
 - position: the centre of the part's soldered pads, in the same coordinates as the Gerbers (y up);
 - rotation: KiCad's angle; on the bottom side 180 minus that angle (JLCPCB looks at the bottom from below); plus a
@@ -48,7 +52,37 @@ def ascii_value(fp):
 
 
 def soldered_pads(fp):
-    return [p for p in fp.Pads() if p.GetAttribute() != pcbnew.PAD_ATTRIB_NPTH and p.IsOnCopperLayer()]
+    """The pads the part is soldered to: through-hole ones and the surface pads on its own side."""
+    cu = pcbnew.B_Cu if fp.IsFlipped() else pcbnew.F_Cu
+    return [p for p in fp.Pads() if p.GetAttribute() != pcbnew.PAD_ATTRIB_NPTH and (p.HasHole() or p.IsOnLayer(cu))]
+
+
+def dual_sided(fp):
+    """True for a footprint with surface pads on both copper sides: its part can be fitted on either side."""
+    smd = [p for p in fp.Pads() if p.GetAttribute() == pcbnew.PAD_ATTRIB_SMD]
+    return any(p.IsOnLayer(pcbnew.F_Cu) for p in smd) and any(p.IsOnLayer(pcbnew.B_Cu) for p in smd)
+
+
+def pad_spots(fp, cu):
+    return sorted((round(p.GetPosition().x / 1000), round(p.GetPosition().y / 1000))       # micrometres
+                  for p in fp.Pads() if p.GetAttribute() != pcbnew.PAD_ATTRIB_NPTH and (p.HasHole() or p.IsOnLayer(cu)))
+
+
+def fitted(fp, side):
+    """The footprint as its part sits on the board: fp itself, or for a dual-sided footprint fitted on its other side
+    ('front'/'back') a flipped copy turned until its pads land on the board's pads on that side."""
+    own = 'back' if fp.IsFlipped() else 'front'
+    if side == own or not dual_sided(fp):
+        return fp
+    cu = pcbnew.B_Cu if side == 'back' else pcbnew.F_Cu
+    want = pad_spots(fp, cu)
+    c = pcbnew.FOOTPRINT(fp)
+    c.Flip(c.GetPosition(), pcbnew.FLIP_DIRECTION_TOP_BOTTOM)
+    for _ in range(4):
+        if pad_spots(c, cu) == want:
+            return c
+        c.Rotate(c.GetPosition(), pcbnew.EDA_ANGLE(90, pcbnew.DEGREES_T))
+    sys.exit(f'{fp.GetReference()}: its pads on the {side} do not match the part flipped over; fix the footprint')
 
 
 def placement(board, fp, origin):
@@ -65,8 +99,9 @@ def placement(board, fp, origin):
     return mm(c.x - origin.x), -mm(c.y - origin.y), rot, 'bottom' if bottom else 'top'
 
 
-def parts(board, excluded=()):
-    """Footprints JLCPCB places, with a warning for surface-mount parts left without a part number."""
+def parts(board, excluded=(), sides=None):
+    """Footprints JLCPCB places, as fitted (see fitted()), with a warning for surface-mount parts left without a part
+    number."""
     out = []
     for fp in board.GetFootprints():
         if not (fp.GetAttributes() & pcbnew.FP_SMD) or fp.IsDNP() or fp.GetReference() in excluded:
@@ -77,7 +112,7 @@ def parts(board, excluded=()):
         if not lcsc:
             print(f'  warning: {fp.GetReference()} ({fp.GetValue()}) is surface-mount but has no LCSC number: not placed')
             continue
-        out.append(fp)
+        out.append(fitted(fp, (sides or {}).get(fp.GetReference(), 'back')) if dual_sided(fp) else fp)
     return sorted(out, key=lambda f: natural(f.GetReference()))
 
 
@@ -134,9 +169,10 @@ def verify(board, fps):
         x, y, rot, side = placement(board, fp, origin)
         a = math.radians(rot); pm = PADS.get(code, {})
         errs = []
-        for p in soldered_pads(fp):
+        pads = soldered_pads(fp)
+        for p in pads:
             n = pm.get(p.GetNumber(), p.GetNumber())
-            if n not in ep or len(ep[n]) != 1 or sum(q.GetNumber() == p.GetNumber() for q in fp.Pads()) != 1:
+            if n not in ep or len(ep[n]) != 1 or sum(q.GetNumber() == p.GetNumber() for q in pads) != 1:
                 continue
             ex, ey = ep[n][0]
             vx, vy = ex * math.cos(a) + ey * math.sin(a), -ex * math.sin(a) + ey * math.cos(a)   # y down, CCW
@@ -155,15 +191,19 @@ def verify(board, fps):
 
 if __name__ == '__main__':
     board_file, out_dir, prefix = sys.argv[1:4]
-    excluded = []
+    excluded, sides = [], {}
     if '--selection' in sys.argv:
         sel = sys.argv[sys.argv.index('--selection') + 1]
         if os.path.exists(sel):
-            excluded = json.load(open(sel)).get('excluded', [])
+            saved = json.load(open(sel))
+            excluded, sides = saved.get('excluded', []), saved.get('sides', {})
     board = pcbnew.LoadBoard(board_file)
-    fps = parts(board, set(excluded))
+    fps = parts(board, set(excluded), sides)
     if excluded:
         print(f'  taken out of the JLCPCB order (you solder them): {", ".join(excluded)}')
+    for fp in board.GetFootprints():
+        if dual_sided(fp) and fp.GetReference() not in excluded:
+            print(f'  {fp.GetReference()} fits either side: on the {sides.get(fp.GetReference(), "back")}')
     back = [f for f in fps if f.IsFlipped()]
     os.makedirs(out_dir, exist_ok=True)
     n, g = write(board, back, out_dir, prefix, 'back')
