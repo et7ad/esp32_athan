@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "athan_prog")(type "KiCad")(uri "${KIPRJMOD}/athan_prog.pretty")(options "")(descr "The programmer's two headers"))
+)
