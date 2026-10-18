@@ -20,7 +20,9 @@ board's design (circuit, pin map, parts list) is in [HARDWARE.md](../HARDWARE.md
 | MAX98357A amplifier (MAX98357AETE+T, LCSC C910544) | Turns the I2S audio into up to 3 W for the speaker |
 | A display: a 1.3" 128×64 I2C OLED (SH1106 or SSD1306), or a 1.54" 240×240 ST7789 IPS colour screen | One or the other; the firmware is built for the one you fit |
 | 5-way switch, 10 × 10 mm through-hole (Alps SKQUCAA010 or a copy, sold as "5-way switch 10*10*10 mm") | Up, Down, Left, Right and a centre push |
-| A 4 Ω 3 W speaker | |
+| A 40 mm round 4 Ω 3 W speaker | The case holds a 40 mm speaker up to 17 mm deep |
+| A long-pin 2.54 mm header, 4 pins (OLED) or 8 pins (TFT), about 19 mm long | For the display, which sits about 10 mm above the board in the case |
+| The case: three printed parts and 6 × M3 × 16 countersunk screws | [hardware/enclosure/README.md](../hardware/enclosure/README.md) |
 | USB-C receptacle (6-pin, power only) and a 5 V barrel jack, AMS1117-3.3 regulator, resistors and capacitors | The full list is in [HARDWARE.md](../HARDWARE.md) section 7 |
 | A 3.3 V USB-serial adapter (CP2102, or CH340 set to 3.3 V) | For the first flash through the board's 6-pin header J6 |
 
@@ -160,6 +162,10 @@ USB-serial adapter. This flash also writes the bootloader and the memory layout:
 
 4. Remove the jumper, then unplug and replug the USB-C.
 
+Without a header on J6, the programmer in `hardware/programmer/` drops into J6's holes unsoldered and holds GPIO0
+low itself. Wire GND, TX, RX and 3V3 to it, push it into J6 (GND to GND), and the clock starts in download mode from
+the adapter's 3.3 V: [hardware/programmer/README.md](../hardware/programmer/README.md).
+
 The log comes out on the same adapter (UART0, J6 pins 4 and 5): `./build_firmware.sh logs /dev/cu.usbserial-…`.
 
 ### Later updates
@@ -211,16 +217,24 @@ pick-and-place files for JLCPCB to assemble the board. Order a two-layer board, 
 or ENIG (ENIG makes the amplifier's small pads easier to solder). The parts and their numbers are in
 [HARDWARE.md](../HARDWARE.md) section 7; ordering the board assembled is in [jlcpcb_assembly.md](jlcpcb_assembly.md).
 
-**Soldering.** Start with the back: the amplifier (its exposed pad underneath needs hot air or a hot plate), the
-module, the regulator and the small parts. Then the front: the switch, the connectors, the LED, the large capacitor
-C1, and the header for your display. Only one display is fitted: DS1 for the OLED, or DS2 for the TFT. The USB-C
-J1 goes on either side (on the back its opening sits about 5 mm lower): pick the side your enclosure's opening is
-on.
+**Soldering.**
+- Start with the back: the amplifier (its exposed pad underneath needs hot air or a hot plate), the module, the
+  regulator and the small parts.
+- Then the front: the switch, the connectors, the LED and the large capacitor C1.
+- The USB-C J1 goes on either side; the case has a back for each.
+- The display comes last, soldered inside the case's front, which holds it at the right height. Only one display is
+  fitted: DS1 for the OLED, or DS2 for the TFT. The TFT covers J6, so flash the board first (section 6).
 
 **Jumpers.** The solder jumpers on the back come set for a normal clock:
 - The amplifier's gain is 9 dB. To change it, see [HARDWARE.md](../HARDWARE.md) section 4.
 - JP4 lets the firmware dim the TFT's backlight. Cut it to keep the backlight at full brightness.
 - JP1 connects the relay output. Cut it and fit R11 to put a resistor in series.
+
+**The case.** The board goes in a 3D-printed case shaped like a mihrab, with the speaker behind a star grille in
+the arch. What to print, the parts it needs, and how the case doubles as the jig for soldering the display are in
+[hardware/enclosure/README.md](../hardware/enclosure/README.md).
+
+![The clock in its case](../hardware/enclosure/images/case.jpg)
 
 ## 6. First power-on of a new board
 

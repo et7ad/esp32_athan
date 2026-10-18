@@ -152,16 +152,52 @@ bool only_digits_and_dots(const std::string &s) {
   return !s.empty() && s.find_first_not_of("0123456789.") == std::string::npos;
 }
 
+// The words of `s` on lines of at most `w` pixels, an entry number ("12.", the radio's "1") kept with the first word;
+// false when a word is wider than a line or they need more than `max_lines` lines.
+static bool wrap_item(Display &d, display::BaseFont *f, const std::string &s, int w, size_t max_lines,
+                      std::vector<std::string> *out) {
+  std::vector<std::string> words;
+  for (size_t i = 0; i <= s.size();) {
+    size_t j = s.find(' ', i);
+    if (j == std::string::npos)
+      j = s.size();
+    if (j > i)
+      words.push_back(s.substr(i, j - i));
+    i = j + 1;
+  }
+  if (words.size() >= 2 && only_digits_and_dots(words[0])) {
+    words[1] = words[0] + " " + words[1];
+    words.erase(words.begin());
+  }
+  out->clear();
+  std::string line;
+  for (const auto &word : words) {
+    if (width_of(d, f, word) > w)
+      return false;
+    const std::string t = line.empty() ? word : line + " " + word;
+    if (line.empty() || width_of(d, f, t) <= w) {
+      line = t;
+    } else {
+      out->push_back(line);
+      line = word;
+    }
+  }
+  if (!line.empty())
+    out->push_back(line);
+  return out->size() <= max_lines;
+}
+
 ItemLines item_lines(Display &d, display::BaseFont *const fonts[3], const std::string &s, int w,
-                     const char *ellipsis) {
+                     const char *ellipsis, int max_lines) {
   ItemLines out;
+  max_lines = std::max(1, std::min(max_lines, ITEM_MAX_LINES));
   for (int k = 0; k < 3; k++) {
     out.font = k;
     if (width_of(d, fonts[k], s) <= w) {
       out.line[0] = s;
       return out;
     }
-    if (k == 0)
+    if (k == 0 || max_lines < 2)
       continue;  // the large font: one line only
     const size_t sp = item_break(s, [&](const std::string &l) { return width_of(d, fonts[k], l); }, w);
     if (sp != std::string::npos) {
@@ -171,9 +207,17 @@ ItemLines item_lines(Display &d, display::BaseFont *const fonts[3], const std::s
       return out;
     }
   }
-  // Too long for two lines of the small font (or a word wider than a line): as much as fits, cut short.
-  const auto lines = wrap_words(d, fonts[2], s, w, 2, ellipsis);
-  out.count = lines.size() > 1 ? 2 : 1;
+  // Longer than two lines of the small font: more lines where the room allows (the TFT), the whole text.
+  std::vector<std::string> lines;
+  if (max_lines > 2 && wrap_item(d, fonts[2], s, w, max_lines, &lines)) {
+    out.count = static_cast<int>(lines.size());
+    for (size_t i = 0; i < lines.size(); i++)
+      out.line[i] = lines[i];
+    return out;
+  }
+  // Too long even so (or a word wider than a line): as much as fits, cut short.
+  lines = wrap_words(d, fonts[2], s, w, max_lines, ellipsis);
+  out.count = std::max(1, static_cast<int>(lines.size()));
   for (size_t i = 0; i < lines.size(); i++)
     out.line[i] = lines[i];
   return out;

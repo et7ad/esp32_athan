@@ -220,11 +220,13 @@ void draw_item(Display &d, const Frame &fr, const MenuFonts &f, const Theme &th)
   }
 
   // A list or a level: the item as large as it fits between the chevrons (item_lines(): 22 px; 18 px on one line or
-  // two, "12. Abdul" / "Basit", "8" / "Al-Dosari"; 13 px on one line or two, cut short only past that), arrows where
-  // Left and Right lead, the marks under it, then dots, the level bar or the caption.
+  // two, "12. Abdul" / "Basit", "8" / "Al-Dosari"; 13 px on one line or two, then up to four for a long mosque name,
+  // cut short only past that), arrows where Left and Right lead, the marks under it, then dots, the level bar or the
+  // caption. Four lines of 13 px span baselines 95-146 around MID: clear of the title, the marks under them at
+  // 154-176, the caption from 211.
   display::BaseFont *const fonts[3] = {f.item, f.item_small, f.small};
   static const int SIZES[3] = {22, 18, 13};
-  const ItemLines item = item_lines(d, fonts, fr.text, ITEM_W, ELLIPSIS);
+  const ItemLines item = item_lines(d, fonts, fr.text, ITEM_W, ELLIPSIS, ITEM_MAX_LINES);
   const int size = SIZES[item.font], nl = item.count;
   const int lh = size + 4, ty = MID + size * 36 / 100 - (nl - 1) * lh / 2;
   for (int i = 0; i < nl; i++)

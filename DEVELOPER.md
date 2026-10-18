@@ -44,7 +44,8 @@ the short list of rules the code depends on in [firmware_rules.md](firmware_rule
       direction held unlocks the buttons.
    5. Applies the volume and draws the screen.
 3. `AthanComponent::loop()` runs a 1 s tick:
-   1. Fetches the catalog and the station list when due.
+   1. Fetches the catalog, the station list and the mosque list when due. Entering a sound row or the Location row
+      makes that list due when its copy is older than 2 hours (`refresh_catalog()`, `refresh_mosques()`).
    2. Downloads the default into an empty slot (catalog entry 0; per slot at most every 30 min). While the location
       has no prayer times at all, this waits until their download has run once (`prayer_first_()`, at most 90 s after
       the network came up): a year of times is about 10 KB, a sound 3 MB plus a flash erase, on the same worker.
@@ -72,6 +73,8 @@ Nothing in a setup-time trigger may draw or play (`firmware_rules.md` 3.2). Temp
 | `sound_name(s)` | The slot's sound as the menu and web page name it: "2. Abdul Basit" (a list entry, `numbered()`), the file's name (an upload), "" (empty). The web page's Selected Sounds |
 | `sound_busy()`, `sound_status()` | One download/upload at a time |
 | `fetch_catalog()`, `catalog_ready()`, `catalog_size(l)`, `catalog_name(l, e)` | Suggested lists, any number of entries each. `catalog_name` is the bare name; `athan::numbered(e, name)` (`menu.h`) gives "e+1. name" |
+| `refresh_catalog()`, `refresh_mosques()` | A sound row or the Location row was entered: that list is loaded again if its copy is older than 2 hours (at most one request a minute); the copy in memory stays in use meanwhile and when loading fails |
+| `mosques_gen()`, `location_choices(key)`, `location_key(i)`, `location_index(key)`, `location_coords(i, &lat, &lon)` | The Location select's options: the mosques' names from `docs/athantimes/mosques.json` (section 6), and the key and place behind each choice. Main loop |
 | `has_custom(list)` | The slot holds a sound that is not a list entry: an upload (source 0), or a download the loaded list no longer has. Shown as "Custom" in the menu and on `/audio` |
 | `menu_size(l, off)`, `menu_item(l, off, i)`, `menu_index(l, off, item)` | The OLED sound list: `MENU_OFF` (tick only), `MENU_RANDOM` (tawashih, first), `MENU_CUSTOM` (while `has_custom`), then the entries. `MENU_NONE` for an index with nothing there |
 | `tawashih_random()`, `set_tawashih_random(on)` | The Random tawashih (default, saved as a preference). On frees the stored tawashih (`CLEAR_SLOT` once nothing plays from it); a download or upload started after the choice turns it off |
@@ -99,7 +102,7 @@ open menu.
 ## 4. Threading
 
 - **Main loop:** the yaml, `loop()`, the media player calls, entity publishing, the stored-sound map.
-- **Worker task:** a FIFO of `Job`s (`CATALOG`, `STATIONS`, `STATION_PLAY`, `DOWNLOAD_URL`, `COMMIT_BUFFER`,
+- **Worker task:** a FIFO of `Job`s (`CATALOG`, `STATIONS`, `MOSQUES`, `STATION_PLAY`, `DOWNLOAD_URL`, `COMMIT_BUFFER`,
   `PRAYER_YEAR`, `CHECK_STREAM`, `CLEAR_SLOT`). It does HTTPS (`http_get_`: crt bundle, manual redirect loop up to 5 hops, 20 s timeout, size
   limit before and during the read, PSRAM buffer), JSON parsing and flash erase/write. Results come back with
   `defer()`.
@@ -202,14 +205,39 @@ or queues `COMMIT_BUFFER`, which runs steps 2–4 above.
 - **Catalog** `docs/audio/catalog.json` (≤ 64 KB, over 1,000 entries in all): lists `athan`, `fajr`,
   `tawashih`, `tick`, each any number of `{name, url}`, numbered in file order on the clock and the web page
   (`numbered()`). A relative URL resolves against `<data_url>/audio/`. It is fetched at boot, then every 12 h
-  (retry every 1 min on failure), and kept in RAM only: `CatalogList` (PSRAM), each entry with its full link and
-  that link's source CRC.
+  (retry every 1 min on failure), and when a sound row is entered if the copy is older than 2 h
+  (`refresh_catalog()`, at most one request a minute; opening the menu loads it only when no copy exists). A failed
+  load keeps the copy in memory. Kept in RAM only: `CatalogList` (PSRAM), each entry
+  with its full link and that link's source CRC.
 - **Stations** `docs/radio/stations.json` (≤ 16 KB): 10 `{name, url}`, kept in memory (`stations_`). Fetched at
   boot and every 6 h (retry every 1 min until a first copy exists, then every 30 min), and early when a
   subscribed station gives up after 6 reconnects (about a minute) (at most every 10 min, `stations_fetched_at_`). `radio_play()`
   uses the copy in memory at once; only without any copy it queues `STATION_PLAY` (fetch, then play; a waiting
   one is replaced, not doubled, `enqueue_(job, true)`). The yaml labels the Radio Station select options from it
   (fixed buffers, rewritten in place; the select is synced by index).
+- **Mosques** `docs/athantimes/mosques.json` (≤ 32 KB): the Location choices, never compiled in.
+  - `parse_mosques()` (`prayer_store.cpp`, host-tested by `test_year_files`, which `check_docs.py` runs) keeps the
+    entries of `mosques` in file order and leaves out `"active": false`, keys the clock would refuse and repeated
+    keys. Each is labelled with its `name` (1 to 40 printable ASCII characters), or with its key when the name is
+    unusable (data `check_docs.py` refuses). `location_choices()` numbers the labels in list order ("1. Islamic
+    Center of Davis", `numbered()`), which also keeps equal names apart. The TFT draws a long one on up to four
+    lines (`item_lines(..., ITEM_MAX_LINES)`), the OLED on two.
+  - `lat` and `lon` (decimal degrees, as a map gives them) are kept when both are numbers in range; the TFT's
+    Location row shows them as its caption (`location_coords(i)`, `menu_mosque_coords` in `displays/*.yaml`).
+  - Kept in PSRAM (`mosques_`). Fetched at boot and every 6 h (retry every 1 min until a first copy exists, then
+    every 30 min), and when the Location row is entered if older than 2 h (`refresh_mosques()`). A failed load
+    keeps the list in memory; one that changed it bumps `mosques_gen()`.
+  - Owners never see keys. The clock's own mosque is saved as the list last showed it (`own_`, preference
+    `athan_own_mosque`: key, name, coordinates; `remember_own_mosque_()` on a location change and a new list), so a
+    list that lacks it (not loaded yet, or no longer offered) still shows it by name; a clock that never had a list
+    shows "Current mosque". The Prayer Data lines name no mosque.
+  - The yaml's `sync_web_state` then gives the Location select new options: `location_choices(key)`, the names plus
+    this clock's key when the list lacks it. They go into two stores in turn, since the select keeps pointers to its
+    options (`firmware_rules.md` 3.3). The select and the menu row show names and store the key (`location_key(i)`,
+    `location_index(key)`); the menu row keeps its cursor on a mosque by its key when the list changes.
+  - Size: the clock took 209 mosques (about 30 KB of mosques.json; at most 0.23 ms per draw for the row's hooks), but
+    the web page's select stops at ESPHome's 5120-byte JSON limit, about 150 numbered names; `check_docs.py` refuses
+    a list past that (`firmware_rules.md` 3.3).
 - **`radio_play(slot, subscribed)`:** a subscribed slot plays the link from the list in memory (or queues
   `STATION_PLAY` when no list was ever loaded), an own slot plays the slot's `text` entity (`radio_url_N`). Each play bumps `radio_token_`, so a stale answer from an older request is
   dropped.
@@ -386,10 +414,12 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
   `ring()` draw the same pixels as a plain scan that works out the angle of every pixel, for 5,820 rings and arcs.
 - `docs/` (`check_docs.py`): the catalog (at most 64 KB, names ASCII and at most 12 characters, no duplicate links,
   relative links that exist, the slot limits; sample rate and stereo as warnings), the 10 stations, the mosque keys
-  (mosques.json = the Location options = guides/using.md section 7 = the folders) and every yearly file (its structure, plus the
+  (mosques.json = the folders, its active mosques = guides/using.md section 7, the firmware's default mosque active,
+  names the clock can show and no two alike) and every yearly file (its structure, plus the
   day-to-day and year-to-year warnings). Errors fail the run, warnings are listed.
 - With ArduinoJson on the computer (a build_firmware.sh build, syntax_check.sh's download, or `ARDUINOJSON=`):
-  the clock's own `parse_year_file()` on every yearly file and its time zone parser against the scripts'
+  the clock's own `parse_year_file()` on every yearly file, its time zone parser against the scripts', and its
+  `parse_mosques()` on mosques.json (the same mosques, order and names) and on 17 made-up files
   (`test_year_files.cpp`, stand-ins in `tests/host_prayer/`); skipped with a message otherwise.
 
 `firmware/tests/syntax_check.sh`:

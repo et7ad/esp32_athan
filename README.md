@@ -19,7 +19,8 @@ the clock all of them, this project splits the job of keeping a clock in step wi
 The clock's part is small, and the same for every mosque. It downloads its mosque's times for a whole year from
 this repository on GitHub, as one small file in one fixed format ([prayertimes_specs.md](prayertimes_specs.md)),
 and keeps them in its own memory. It never contacts a mosque's website, so a site that changes or goes offline
-can't affect it.
+can't affect it. The list of mosques it offers comes from here as well, so adding a mosque needs no change to the
+clock.
 
 The other part, getting each mosque's times right, happens here before anything reaches a clock. A mosque's
 timetable becomes that one file in whatever way suits that mosque: a script that reads its PDF or web page, a table
@@ -42,11 +43,12 @@ mosque happens in one place, with whatever tools it takes.
      Then type your network SSID (which is the name of your Wi-Fi network) and type its password.
    - Option2: With any phone, iPhones included, or a computer: join the Wi-Fi network `AthanFallbackHotspot` with the password `athan404`.
       A setup page opens (if it doesn't, open <http://192.168.4.1>). Pick your network, type its password and save.
-3. Choose your mosque. A new clock starts with the first one in the list (Davis): pick yours under **Location**, on the clock's web page (below) or in its menu. The clock then downloads the year's prayer times and its sounds, which takes a few minutes the first time.
+3. Choose your mosque. A new clock starts with the Islamic Center of Davis: pick yours by name under **Location**, on the clock's web page (below) or in its menu. The clock then downloads the year's prayer times and its sounds, which takes a few minutes the first time.
 
 From then on the clock runs by itself and keeps its Wi-Fi and settings through power cuts. For the athan it needs
 the internet only to set its time after a power cut. If your mosque isn't in the list, open an
-[issue](https://github.com/et7ad/esp32_athan/issues) with its timetable.
+[issue](https://github.com/et7ad/esp32_athan/issues) with its timetable. Once it is added here, it shows up on every
+clock by itself.
 
 ## Using it
 
@@ -130,8 +132,8 @@ radio stations, and what to do if your router keeps dropping the clock.
 | Understand the circuit board | [HARDWARE.md](HARDWARE.md), [max98357a_amplifier.md](max98357a_amplifier.md), [microcontroller_demand.md](microcontroller_demand.md) |
 | Read or write a prayer-time file | [prayertimes_specs.md](prayertimes_specs.md) |
 
-**Status:** firmware 3.0.0 runs on the breadboard prototype. The circuit board is designed (`hardware/pcb/`); the
-enclosure is not designed yet.
+**Status:** firmware 3.0.0 runs on the breadboard prototype. The circuit board (`hardware/pcb/`) and its
+3D-printed case (`hardware/enclosure/`) are designed.
 
 ## Repository layout
 
@@ -145,13 +147,14 @@ firmware/
   sounds/                  click.wav and volume.wav, the two menu tones
   tests/                   tests and checks that run on a computer
 docs/                      everything the clocks download
-  athantimes/              mosques.json and <key>/<year>.json
+  athantimes/              mosques.json (the mosques) and a folder per mosque, a file per year
   audio/                   catalog.json and the sounds (athan/ fajr/ tawashih/ tick/)
   radio/stations.json      the project's ten radio stations
 guides/                    using.md, building.md, maintaining.md
 scripts/                   prayer-time converters, the sound library builder, the release manifest
 hardware/pcb/              the KiCad project
-hardware/enclosure/        the enclosure (to be designed)
+hardware/enclosure/        the 3D-printed case (STL to print, STEP, the CadQuery script)
+hardware/programmer/       a press-in programmer for J6 (KiCad project)
 images/                    pictures for the guides
 build_firmware.sh          build, flash and update without Docker (guides/building.md)
 flash_firmware.sh          flash existing files over Wi-Fi or USB, without building

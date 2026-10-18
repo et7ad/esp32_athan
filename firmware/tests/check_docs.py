@@ -10,12 +10,16 @@ Errors (exit 1): what a clock would refuse or get wrong, and lists that disagree
     (audio_slots.h) as MPEG Layer III.
   - radio/stations.json: exactly 10 entries, names as above, links http(s) or empty.
   - athantimes/mosques.json: keys and time zones as the clock takes them (scripts/athan_yearly.py, the rules of
-    tz_posix.cpp), and the same keys in mosques.json, the Location options in firmware/athan.yaml, the table in
-    guides/using.md section 7 and the folders under docs/athantimes/.
+    tz_posix.cpp), no key twice, "active" true or false where given; the firmware's default mosque (the
+    selected_location_key global and the Location select's placeholder in firmware/athan.yaml) is an active one;
+    the same keys in mosques.json and the folders under docs/athantimes/, and the active ones in the table in
+    guides/using.md section 7; names and coordinates the clock can show; the numbered names small enough for the web
+    page's Location list (ESPHome's 5120-byte limit per entity).
   - every athantimes/<key>/<year>.json: prayertimes_specs.md "What the clock checks", its tz equal to mosques.json.
   - guides/using.md section 4 gives Home Assistant the api encryption key of firmware/athan.yaml.
   - with --harness (test_year_files, built by run_tests.sh): the clock's own parse_year_file() accepts every
-    yearly file, and its parse_posix_tz() accepts exactly the time zones athan_yearly.PosixTZ accepts.
+    yearly file, its parse_posix_tz() accepts exactly the time zones athan_yearly.PosixTZ accepts, and its
+    parse_mosques() offers exactly the active mosques of mosques.json, in its order (and passes its self-test).
 Warnings (printed): a sample rate other than the clock's I2S rate, stereo sounds, iqama before adhan, steps of
 more than athan_yearly.MAX_DAY_JUMP minutes from one day to the next and changes of more than 3 minutes from last
 year (both through UTC), Doha not at mosques.json's doha_after_sunrise,
@@ -229,42 +233,70 @@ def check_stations():
     return "stations 10"
 
 
+def active_keys(mosques: dict) -> list:
+    """The keys the clocks offer, in file order: parse_mosques() in prayer_store.cpp."""
+    return [k for k, m in mosques.items() if not (isinstance(m, dict) and m.get("active") is False)]
+
+
 def check_keys(mosques: dict):
+    # The clocks load the list from mosques.json; the firmware only names the mosque a new clock starts with.
+    active = active_keys(mosques)
     yaml = source(REPO / "firmware" / "athan.yaml")
-    m = re.search(r'name:\s*"Location"(?:\n[^\n]*){0,6}?\n\s*options:\s*\[([^\]]*)\]', yaml)
-    options = [x.strip().strip("\"'") for x in m.group(1).split(",")] if m else None
-    if options is None:
-        err("cannot read the Location select's options from firmware/athan.yaml")
+    m = re.search(r'id:\s*selected_location_key\b[^}\n]*initial_value:\s*\'"([^"]*)"\'', yaml)
+    if not m:
+        err("cannot read the default mosque (the selected_location_key global) from firmware/athan.yaml")
+    elif m.group(1) not in active:
+        err(f"the default mosque {m.group(1)!r} (selected_location_key, firmware/athan.yaml) is not an active "
+            "mosque in mosques.json")
+    m2 = re.search(r'name:\s*"Location"(?:\n[^\n]*){0,8}?\n\s*options:\s*\[([^\]]*)\]', yaml)
+    placeholder = [x.strip().strip("\"'") for x in m2.group(1).split(",")] if m2 else None
+    if placeholder is None:
+        err("cannot read the Location select's placeholder option from firmware/athan.yaml")
+    elif m and placeholder != [m.group(1)]:
+        err(f"the Location select's placeholder {placeholder} should be the default mosque [{m.group(1)!r}]")
+    # The table owners read lists mosques by name (owners never see keys): | Mosque | Where (a map link) | Years |.
     readme = source(REPO / "guides" / "using.md")
     m = re.search(r"Mosques available now:\s*\n\s*\n((?:\|[^\n]*\n)+)", readme)
-    table = {}
+    by_name = {mosques[k].get("name"): k for k in active}
+    table, where = {}, {}
     if m:
-        for row in m.group(1).splitlines():
+        for row in m.group(1).splitlines()[2:]:  # past the header and its rule
             cells = [c.strip() for c in row.strip().strip("|").split("|")]
-            k = re.fullmatch(r"`([^`]+)`", cells[0]) if cells else None
-            if k and len(cells) >= 3:
-                table[k.group(1)] = cells[2]
+            if len(cells) < 3:
+                err(f"guides/using.md section 7: the row {row.strip()!r} needs Mosque, Where and Years")
+                continue
+            k = by_name.get(cells[0])
+            if k is None:
+                err(f"guides/using.md section 7 lists {cells[0]!r}, which mosques.json does not offer by that name")
+                continue
+            table[k], where[k] = cells[2], cells[1]
     else:
         err("cannot find the mosque table in guides/using.md section 7 (Mosques available now:)")
     folders = {p.name for p in (DOCS / "athantimes").iterdir() if p.is_dir()}
-    sets = {"mosques.json": set(mosques), "the Location options (athan.yaml)": set(options or []),
-            "guides/using.md section 7": set(table), "docs/athantimes folders": folders}
-    every = set().union(*sets.values())
-    for k in sorted(every):
-        missing = [name for name, s in sets.items() if k not in s and (name != "the Location options (athan.yaml)"
-                                                                         or options is not None)]
-        if missing:
-            err(f"mosque key {k!r} is missing from {', '.join(missing)}")
-    if options is not None and len(options) != len(set(options)):
-        err("the Location select lists a key twice")
+    for k in sorted(set(mosques) | folders):
+        if k not in mosques:
+            err(f"docs/athantimes/{k}/ has no entry in mosques.json")
+        elif k not in folders:
+            err(f"mosque key {k!r} in mosques.json has no folder docs/athantimes/{k}/")
+    for k in active:
+        if k not in table:
+            err(f"active mosque {mosques[k].get('name')!r} ({k}) is missing from the table in guides/using.md section 7")
+    for k, cell in where.items():
+        q = re.search(r"\?q=(-?[0-9.]+),(-?[0-9.]+)\)", cell)
+        want = (mosques[k].get("lat"), mosques[k].get("lon"))
+        if not q or (float(q.group(1)), float(q.group(2))) != want:
+            err(f"guides/using.md section 7: {mosques[k].get('name')!r} links {q.groups() if q else cell!r}; "
+                f"mosques.json has {want}")
     for k, years in table.items():
         files = sorted(int(p.stem) for p in (DOCS / "athantimes" / k).glob("*.json") if re.fullmatch(r"\d{4}", p.stem))
         r = re.fullmatch(r"(\d{4})\s*[–-]\s*(\d{4})|(\d{4})", years)
         if files and r:
             lo, hi = (int(r.group(1)), int(r.group(2))) if r.group(1) else (int(r.group(3)), int(r.group(3)))
             if (lo, hi) != (files[0], files[-1]):
-                warn(f"guides/using.md section 7 says {k}: {years}, the files are {files[0]}-{files[-1]}")
-    return f"{len(mosques)} mosques"
+                warn(f"guides/using.md section 7 says {mosques[k].get('name')}: {years}, the files are "
+                     f"{files[0]}-{files[-1]}")
+    inactive = len(mosques) - len(active)
+    return f"{len(active)} mosques" + (f" (+{inactive} inactive)" if inactive else "")
 
 
 def check_api_key():
@@ -277,7 +309,17 @@ def check_api_key():
 
 
 def check_registry():
-    reg = json.loads((DOCS / "athantimes" / "mosques.json").read_text())
+    def no_twice(pairs):
+        seen = [k for k, _ in pairs]
+        for k in sorted({k for k in seen if seen.count(k) > 1}):
+            err(f"athantimes/mosques.json: {k!r} appears twice in an object")
+        return dict(pairs)
+
+    path = DOCS / "athantimes" / "mosques.json"
+    limit = cpp_number(source(COMP / "prayer_store.h"), "MAX_MOSQUES_FILE_BYTES", "prayer_store.h")
+    if limit and path.stat().st_size > limit:
+        err(f"athantimes/mosques.json is {path.stat().st_size} bytes, over the clock's {limit} (prayer_store.h)")
+    reg = json.loads(path.read_text(), object_pairs_hook=no_twice)
     mosques = reg.get("mosques", {})
     for k, m in mosques.items():
         try:
@@ -285,6 +327,38 @@ def check_registry():
             ay.check_tz(k, m.get("tz"))
         except ay.DataError as e:
             err(f"athantimes/mosques.json: {e}")
+        if "active" in m and not isinstance(m["active"], bool):
+            err(f"athantimes/mosques.json {k}: active is {m['active']!r}; use true or false (the clock takes only "
+                "false as off)")
+    # Where each mosque is (the colour screen shows it under the name, guides/using.md links it): decimal degrees.
+    for k in active_keys(mosques):
+        lat, lon = mosques[k].get("lat"), mosques[k].get("lon")
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lat, lon)) or \
+                not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            err(f"athantimes/mosques.json {k}: lat {lat!r}, lon {lon!r}: give both, in decimal degrees as a map shows "
+                "them (the clock would show no coordinates)")
+    # The clocks show each mosque numbered and by its name (parse_mosques(): a name they cannot show falls back to
+    # the key, which owners must never see).
+    max_name = cpp_number(source(COMP / "prayer_store.h"), "MAX_MOSQUE_NAME", "prayer_store.h") or 40
+    names = {}
+    for k in active_keys(mosques):
+        n = mosques[k].get("name")
+        if not isinstance(n, str) or not n.strip() or len(n) > max_name or any(not " " <= ch <= "~" for ch in n):
+            err(f"athantimes/mosques.json {k}: name {n!r} is not 1 to {max_name} printable ASCII characters (the "
+                "clock would show the key)")
+        elif n in names:
+            err(f"athantimes/mosques.json {k}: name {n!r} is also {names[n]}'s (owners could tell them apart only by "
+                "their numbers)")
+        else:
+            names[n] = k
+    # The web page gets the Location select with all its options in one JSON message, and ESPHome cuts any such
+    # message at 5120 bytes (components/json/json_util.cpp). Measured on the clock: 49 options 1535 bytes plus about
+    # 250 for the rest (which holds the current name twice). The clock's own menu has no such limit.
+    labels = [f"{i + 1}. {mosques[k].get('name')}" for i, k in enumerate(active_keys(mosques))]
+    options_json = len(json.dumps(labels, separators=(",", ":")))
+    if options_json > 4700:
+        err(f"athantimes/mosques.json: the web page's Location list would be cut off ({len(labels)} mosques make "
+            f"{options_json} bytes of options; ESPHome sends at most 5120 bytes per entity, so about 4700 for them)")
         d = m.get("doha_after_sunrise")
         if not isinstance(d, int) or d < 1:
             warn(f"athantimes/mosques.json {k}: doha_after_sunrise {d!r} (the scripts need minutes > 0 when a "
@@ -399,6 +473,31 @@ def check_harness(harness: str, mosques: dict):
         if line.startswith("BAD"):
             err(f"the clock's parse_year_file() refuses {line[4:]}")
     ok = sum(1 for line in r.stdout.splitlines() if line.startswith("OK"))
+    # The clock's parse_mosques(): its self-test, and the same mosques in the same order as mosques.json offers.
+    out = subprocess.run([harness, "mosques-selftest", f"mosques:{DOCS / 'athantimes' / 'mosques.json'}"],
+                         capture_output=True, text=True).stdout
+    if "FAILED" in out or not re.search(r"mosques self-test: (\d+) of \1 cases passed", out):
+        err("the clock's parse_mosques() fails its self-test: " + " | ".join(out.strip().splitlines()[:3]))
+    offered = re.search(r"^mosques offered: (.*)$", out, re.M)
+    if not offered:
+        err("the clock's parse_mosques() refuses mosques.json: " + " | ".join(out.strip().splitlines()[-1:]))
+    elif offered.group(1).split() != active_keys(mosques):
+        err(f"the clock would offer {offered.group(1).split()}; mosques.json's active mosques are "
+            f"{active_keys(mosques)}")
+    else:
+        shown = re.search(r"^mosques shown: (.*)$", out, re.M)
+        want = [mosques[k].get("name") for k in active_keys(mosques)]
+        if not shown or shown.group(1).split("|") != want:
+            err(f"the clock would show {shown.group(1).split('|') if shown else None}; the names are {want}")
+        at = re.search(r"^mosques at: (.*)$", out, re.M)
+        places = []
+        for k in active_keys(mosques):
+            lat, lon = mosques[k].get("lat"), mosques[k].get("lon")
+            ok_num = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (lat, lon))
+            places.append(f"{lat:.6f},{lon:.6f}" if ok_num and -90 <= lat <= 90 and -180 <= lon <= 180 else "-")
+        if not at or at.group(1).split("|") != places:
+            err(f"the clock would place the mosques at {at.group(1).split('|') if at else None}; mosques.json says "
+                f"{places}")
     # The scripts' time zone parser and the clock's: the same strings accepted and refused.
     cases = [m.get("tz", "") for m in mosques.values()] + [
         "PST8PDT,M3.2.0,M11.1.0", "EST5EDT", "<+03>-3", "IST-5:30", "EET-2EEST,M4.5.5/0,M10.5.4/24",
@@ -426,7 +525,8 @@ def check_harness(harness: str, mosques: dict):
             differ.append(repr(c))
     if differ:
         err(f"time zones the scripts and the clock judge differently: {', '.join(differ[:5])}")
-    return f"clock checks: {ok} of {len(files)} files accepted, {len(cases)} time zones judged alike"
+    return (f"clock checks: {ok} of {len(files)} files accepted, {len(cases)} time zones judged alike, "
+            f"{len(offered.group(1).split()) if offered else 0} mosques offered")
 
 
 def main() -> int:

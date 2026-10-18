@@ -53,14 +53,31 @@ Make those with that repository's own scripts and commit them there; the scripts
 
 ### Adding a mosque
 
-1. Add it to [docs/athantimes/mosques.json](../docs/athantimes/mosques.json): its name, its POSIX time zone (for
-   example `PST8PDT,M3.2.0,M11.1.0`, not `America/Los_Angeles`), and how many minutes after sunrise Doha is.
+1. Add it to [docs/athantimes/mosques.json](../docs/athantimes/mosques.json):
+   - its key: the folder name, lowercase letters, digits and `_`, at most 31. Only the files and the clocks use it;
+     owners never see it;
+   - its name, which the clocks show in their menu and on their web page: plain ASCII, at most 40 characters,
+     different from every other mosque's;
+   - where it is, `lat` and `lon` in decimal degrees as a map shows them (in Google Maps, right-click the building:
+     the first line is the two numbers). Colour-screen clocks show them under the name;
+   - its POSIX time zone (for example `PST8PDT,M3.2.0,M11.1.0`, not `America/Los_Angeles`), and how many minutes
+     after sunrise Doha is.
 2. Make its yearly file or files with one of the scripts above.
-3. Add its key to the `options:` of the **Location** select in `firmware/athan.yaml`. The position doesn't matter:
-   clocks store the key. Then release a firmware update (section 5).
-4. Add it to the table in [using.md](using.md) section 7.
-5. If version 2 clocks there need it too, add it to the version 2 repository as well: its own Location list, daily
+3. Add it to the table in [using.md](using.md) section 7: its name, its map link and its years.
+4. If version 2 clocks there need it too, add it to the version 2 repository as well: its own Location list, daily
    files and time zone file.
+
+No firmware update is needed. Clocks read the list of mosques from mosques.json when they start, every 6 hours, and
+when an owner opens the menu's Location row if their copy is more than 2 hours old (a restart loads it at once); they
+keep the list they have when they can't. They number the mosques in the file's order ("1. Islamic Center of Davis"),
+so switching one off renumbers the ones after it, and store the key of the one an owner picks.
+
+The clocks' web page holds about 150 mosques (ESPHome sends a list in one message of at most 5 KB); the clock's menu
+has no limit. `firmware/tests/run_tests.sh` says when the list gets too long for the web page.
+
+To stop offering a mosque without deleting it, add `"active": false` to its entry. It leaves the clocks' list, and
+clocks already set to it keep it, shown by its name, and keep its stored years. Other clocks just drop it from
+their list at their next reload.
 
 ## 3. Sounds
 
@@ -86,7 +103,8 @@ The library itself:
 - Names are plain ASCII, at most 12 characters, so they fit the small screen.
 - Every file has to pass the clock's checks ([using.md](using.md) section 5). The `ffmpeg` line there makes a big
   file smaller; use `48k` for ticks.
-- Clocks read the list again twice a day.
+- Clocks read the list again twice a day, and when an owner opens one of the menu's sound rows if their copy is more
+  than 2 hours old (a restart loads it at once).
 
 Entries whose reciter is not known yet keep a placeholder name ("Athan 1", "Tick 1"). Rename them in the list when
 it is.

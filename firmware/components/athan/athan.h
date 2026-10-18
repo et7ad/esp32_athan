@@ -3,7 +3,8 @@
 //
 //  * Four replaceable sounds in flash (athan, fajr, tawashih, tick): download from the suggested list on GitHub or
 //    upload from the /audio web page; every file is checked (MP3, size, duration) in PSRAM before flash is touched.
-//  * The suggested lists (docs/audio/catalog.json) and the radio stations (docs/radio/stations.json).
+//  * The suggested lists (docs/audio/catalog.json), the radio stations (docs/radio/stations.json) and the mosques
+//    (docs/athantimes/mosques.json), kept in memory and loaded again now and then.
 //  * Radio: ten slots, each either subscribed to the project's station list (kept in memory, refreshed every
 //    6 h) or playing the owner's own URL.
 //  * Prayer times: one yearly file per mosque (docs/athantimes/<key>/<year>.json), stored in flash, next year
@@ -25,6 +26,7 @@
 #include "esphome/components/text/text.h"
 #include "esphome/components/time/real_time_clock.h"
 #include "esphome/core/component.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
 
 #include <freertos/FreeRTOS.h>
@@ -135,6 +137,29 @@ class AthanComponent : public Component {
   /// Stops the random tawashih (Up/Down/Select while it plays). Nothing else.
   void stop_tawashih();
 
+  // ---------------- lists a menu row shows ----------------
+  /// A menu row that chooses from a list was entered (the sound rows, Location): that list is loaded again if its
+  /// copy is older than 2 hours, with at most one request a minute. The copy in memory stays in use meanwhile,
+  /// and stays if the load fails. Nothing else in the menu asks for a download.
+  void refresh_catalog();
+  void refresh_mosques();
+
+  // ---------------- mosques ----------------
+  /// Counts the changes of the mosque list (docs/athantimes/mosques.json, loaded at boot, every 6 h and when the
+  /// menu opens; a list that did not change does not count). The Location select takes new options then. Main loop.
+  uint32_t mosques_gen() const { return this->mosques_gen_; }
+  /// The Location choices, as the select's options and the menu's items: each mosque's name (parse_mosques()'s label)
+  /// in the order of the list in memory, and `current` at the end, shown by its key, when the list lacks it (not
+  /// loaded yet, or no longer offered). A select keeps pointers to its option strings and the web server's task may
+  /// still read the last ones, so they stay valid through the next call. Main loop.
+  const FixedVector<const char *> &location_choices(const std::string &current);
+  /// The key of choice `i` of the last location_choices(), what the clock stores ("" when there is none). Main loop.
+  std::string location_key(int i) const;
+  /// Where choice `i` of the last location_choices() is (decimal degrees, as a map gives them); false when unknown.
+  bool location_coords(int i, double *lat, double *lon) const;
+  /// Which choice of the last location_choices() `key` is, or -1. Main loop.
+  int location_index(const std::string &key) const;
+
   // ---------------- suggested lists ----------------
   void fetch_catalog();
   bool catalog_ready() const { return this->catalog_ready_.load(); }
@@ -233,6 +258,7 @@ class AthanComponent : public Component {
   enum class JobType : uint8_t {
     CATALOG,
     STATIONS,
+    MOSQUES,
     STATION_PLAY,
     DOWNLOAD_URL,
     COMMIT_BUFFER,
@@ -273,6 +299,7 @@ class AthanComponent : public Component {
   void job_check_stream_(Job &job);
   void job_catalog_();
   void job_stations_(Job &job, bool for_play);
+  void job_mosques_();
   void web_download_(int slot, int entry);
   void job_download_url_(Job &job);
   void job_commit_(int slot, uint8_t *data, size_t len, const std::string &label, uint32_t source = 0,
@@ -366,6 +393,7 @@ class AthanComponent : public Component {
   };
   mutable Selected selected_[NUM_SLOTS];
   std::vector<NamedUrl> stations_;
+  PsramVector<MosqueEntry> mosques_;  // the mosques docs/athantimes/mosques.json offers, in file order
   std::string sound_status_;
   std::string radio_status_;
   std::string prayer_status_;
@@ -384,6 +412,23 @@ class AthanComponent : public Component {
   std::atomic<bool> catalog_pending_{false};
   std::atomic<bool> stations_ready_{false};
   std::atomic<bool> stations_pending_{false};
+  std::atomic<bool> mosques_pending_{false};
+  uint32_t mosques_gen_{0};  // main loop: +1 for each changed list (job_mosques_()'s defer)
+  // location_choices(): the Location select's options (labels) with their keys, written to the two stores in turn
+  PsramVector<MosqueEntry> choices_[2];
+  int choice_store_{0};
+  FixedVector<const char *> choice_ptrs_;
+  // This clock's mosque as the list last showed it, saved: the choices show it by its name, never by its key, also
+  // when the list lacks it (not loaded yet after a start, or no longer offered). remember_own_mosque_() fills it.
+  struct OwnMosque {
+    char key[32];
+    char name[48];
+    double lat;
+    double lon;
+  };
+  OwnMosque own_{};
+  ESPPreferenceObject own_pref_;
+  void remember_own_mosque_();
   std::atomic<bool> sound_busy_{false};
   bool writing_{false};                    // a sound's erase and write run (main loop: from its handshake to its end)
   std::atomic<bool> audio_quiet_{true};    // nothing plays or is about to start (loop(); read by write_pace_())
@@ -406,7 +451,13 @@ class AthanComponent : public Component {
   // Retry deadlines in 64-bit milliseconds (millis_64()): a 32-bit deadline goes stale after 24.8 days.
   uint64_t next_catalog_try_{0};
   uint64_t next_stations_try_{0};
+  uint64_t next_mosques_try_{0};
+  uint64_t catalog_loaded_at_{0};    // millis_64() of the last good suggested lists
   uint64_t stations_fetched_at_{0};  // millis_64() of the last good station list
+  uint64_t mosques_loaded_at_{0};    // millis_64() of the last good mosque list
+  // millis_64() of each list's last request: refresh_catalog() and refresh_mosques() ask again at most once a minute
+  uint64_t catalog_tried_at_{0};
+  uint64_t mosques_tried_at_{0};
   uint64_t next_default_try_[NUM_LISTS]{};  // automatic download into an empty slot: at most every 30 min
 
   // playback of stored sounds

@@ -111,6 +111,78 @@ bool parse_year_file(const uint8_t *data, size_t len, const std::string &key, in
   return true;
 }
 
+bool valid_mosque_key(const char *key) {
+  const size_t n = key == nullptr ? 0 : std::strlen(key);
+  if (n == 0 || n > 31)
+    return false;
+  for (size_t i = 0; i < n; i++) {
+    const char c = key[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'))
+      return false;
+  }
+  return true;
+}
+
+bool valid_mosque_name(const char *name) {
+  const size_t n = name == nullptr ? 0 : std::strlen(name);
+  if (n == 0 || n > MAX_MOSQUE_NAME)
+    return false;
+  bool visible = false;
+  for (size_t i = 0; i < n; i++) {
+    const unsigned char c = static_cast<unsigned char>(name[i]);
+    if (c < 0x20 || c > 0x7E)
+      return false;
+    visible = visible || c != ' ';
+  }
+  return visible;
+}
+
+bool parse_mosques(const uint8_t *data, size_t len, PsramVector<MosqueEntry> *out, std::string *err) {
+  out->clear();
+  JsonDocument doc = json::parse_json(data, len);
+  JsonObject root = doc.as<JsonObject>();
+  if (root.isNull()) {
+    *err = "not valid JSON";
+    return false;
+  }
+  JsonObject mosques = root["mosques"].as<JsonObject>();
+  if (mosques.isNull()) {
+    *err = "no \"mosques\" object";
+    return false;
+  }
+  for (JsonPair p : mosques) {
+    const char *key = p.key().c_str();
+    if (!valid_mosque_key(key))
+      continue;
+    JsonVariant active = p.value()["active"];
+    if (active.is<bool>() && !active.as<bool>())
+      continue;
+    bool seen = false;
+    for (const auto &e : *out)
+      seen = seen || e.key == key;
+    if (seen)
+      continue;
+    MosqueEntry e;
+    e.key = key;
+    JsonVariant name = p.value()["name"];
+    e.label = name.is<const char *>() && valid_mosque_name(name.as<const char *>()) ? name.as<const char *>() : key;
+    JsonVariant lat = p.value()["lat"], lon = p.value()["lon"];
+    if (lat.is<double>() && lon.is<double>()) {
+      const double a = lat.as<double>(), b = lon.as<double>();
+      if (a >= -90.0 && a <= 90.0 && b >= -180.0 && b <= 180.0) {
+        e.lat = a;
+        e.lon = b;
+      }
+    }
+    out->push_back(std::move(e));
+  }
+  if (out->empty()) {
+    *err = "no mosque offered";
+    return false;
+  }
+  return true;
+}
+
 bool PrayerStore::begin() {
   this->part_ = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, PRAYER_SUBTYPE, "prayer");
   if (this->part_ == nullptr || this->part_->size < SLOTS * SLOT_SIZE) {

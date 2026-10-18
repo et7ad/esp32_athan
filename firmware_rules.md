@@ -79,6 +79,10 @@ hooks `show` (item on screen: previews), `apply`, `leave` (stop the preview).
 
 **Rules:**
 - `refresh()` never calls hooks with side effects: drawing calls it.
+- Owners never see mosque keys (`davis`, `masjid15`): they are the folder names in `docs/athantimes/` and what the
+  clock stores. The menu, the web page and the owner guides show the mosque's numbered name (and on the TFT its
+  coordinates); the clock's own mosque is saved by name for when the list lacks it (`own_`), and the Prayer Data
+  lines name no mosque.
 - The menu's `on_close` restores the volume and brings back a radio that a menu preview replaced
   (`menu_radio_resume`).
 
@@ -142,6 +146,15 @@ hooks `show` (item on screen: previews), `apply`, `leave` (stop the preview).
 - **Never give an entity an id that equals a C++ namespace** (`mixer_speaker`, `speaker`, `audio`, `time`, …):
   the generated global variable shadows the namespace. The mixer is `audio_mixer` for that reason.
 - `update::UpdateEntity::perform()` is overloaded in a way that hides the base, so call `perform(false)`.
+- **A select keeps pointers to its options** (`traits.set_options()` copies the pointers, not the strings), and the
+  web server's task reads them too (a GET of the select). The strings must outlive the select's use of them: the
+  Radio Station labels are fixed buffers set once, the Location choices go into two stores used in turn
+  (`location_choices()`). `set_options()` also frees the select's old pointer list, so call it only when the
+  options really change, never on a timer.
+- **ESPHome cuts any one entity's JSON at 5120 bytes** (`json_util.cpp`), and the web page gets a select with all its
+  options in one message. Past that the list arrives cut off (seen on the prototype with 209 mosques, 2026-10-18).
+  Keep a select's options under about 4.7 KB: `check_docs.py` checks the Location list (about 150 mosques); the
+  clock's own menu has no such limit.
 - Use `millis_64()` for deadlines that can sit for weeks (a 32-bit `millis()` deadline goes stale after 24.8 days).
   32-bit `millis() - start` for short durations is fine.
 

@@ -46,7 +46,7 @@ hotspot after about 3 minutes, so a short router restart never opens the hotspot
 **To forget the saved Wi-Fi,** unplug the clock, hold **Select**, and plug it back in. The LED blinks three times,
 the clock restarts, and setup starts again (Bluetooth after 15 seconds, the hotspot after about 3 minutes).
 
-**Your mosque.** A new clock starts with the first mosque in the list (Davis). Choose yours in the menu
+**Your mosque.** A new clock starts with the Islamic Center of Davis. Choose yours by name in the menu
 (**Location**) or on the web page. The clock downloads that mosque's prayer times for the year, then its default
 sounds. That takes a few minutes the first time.
 
@@ -154,7 +154,7 @@ its From and Until. The colour screen shows an icon on every row and the full na
 | Tick From, Tick Until | When the tick plays during the day. From: Fajr, Dhuhr, or an hour. Until: Maghrib, Isha, or an hour. A prayer moves with the prayer times every day. The line under it shows the result ("until Isha, 14 h"); the same From and Until means all day | Takes it |
 | Athan On/Off | Each prayer with On or Off; under them, all five by their first letter, with a filled box when the athan is on | Switches the prayer shown |
 | Volume, Fajr Volume | 0 to 100 %, applied at once, with a tone at the new level | Closes |
-| Location | The mosques | Takes it; the clock downloads its prayer times |
+| Location | The mosques this project offers, numbered and by name ("1. Islamic Center of Davis"). The list comes from this repository, so a newly added mosque shows up by itself. Long names take up to four lines on the colour screen. The colour screen shows each mosque's coordinates under its name, to check on a map before you choose | Takes it; the clock downloads its prayer times |
 | Clock | 24-hour, 12-hour | Takes it |
 | Brightness | 0 to 100 %, applied at once. At 0 % the screen goes dark, by day too | Closes |
 | Screen at Night | **Normal** (the same as by day), **Dim**, or **Turned off**, between Night From and Night Until | Takes it |
@@ -182,7 +182,8 @@ grouped:
 - **Sounds:** the sounds in use, the last download's status, and the link to the sounds page (section 5).
 - **Radio:** Radio Station, Play Radio, Stop Radio, Radio Status.
 - **Radio Stations:** the ten slots (section 6).
-- **Location and Prayer Times:** Location, Refresh Prayer Times, and Prayer Data (which years are stored).
+- **Location and Prayer Times:** Location (the mosques, numbered and by name), Refresh Prayer Times, and Prayer Data (which years
+  are stored).
 - **Screen:** Screen Brightness, Screen at Night, Night From, Night Until, Night Window (the night they make), and
   Screen Colour on a colour-screen clock.
 - **System:** Firmware Version (and whether a newer one is out), Firmware (installs updates), Check For Update,
@@ -449,16 +450,21 @@ drops still happen, try these on the router, in this order:
   corrected its timetable.
 - After a power cut with no internet, the clock has no time until the internet comes back. Then it carries on by
   itself.
+- The list of mosques comes from this repository too. The clock loads it when it starts, every 6 hours, and when you
+  open the menu's Location row (if its copy is more than 2 hours old), and keeps the list it has when it can't. A
+  mosque added to the project shows up without a firmware update; on the web page, reload the page to see it.
 
 Mosques available now:
 
-| Key (Location) | Mosque | Years |
+| Mosque | Where | Years |
 |---|---|---|
-| `davis` | Islamic Center of Davis | 2025-2027 |
-| `sclaramca` | MCA Santa Clara | 2025-2026 |
-| `sclaraalnoor` | Masjid Al-Noor, Santa Clara | 2025-2026 |
-| `woodland` | Woodland Mosque | 2026-2027 |
-| `masjid15` | Visalia, California (times from IslamicFinder) | 2026-2027 |
+| Islamic Center of Davis | [38.5465, -121.7563](https://www.google.com/maps?q=38.546506,-121.756307) | 2025-2027 |
+| MCA Santa Clara | [37.3772, -121.9595](https://www.google.com/maps?q=37.377218,-121.959471) | 2025-2026 |
+| Masjid Al-Noor, Santa Clara | [37.3502, -121.9554](https://www.google.com/maps?q=37.350219,-121.955360) | 2025-2026 |
+| Woodland Mosque | [38.6738, -121.7644](https://www.google.com/maps?q=38.673842,-121.764437) | 2026-2027 |
+| Visalia, California | [36.3302, -119.2921](https://www.google.com/maps?q=36.330228,-119.292058) | 2026-2027 |
+
+Visalia's times are IslamicFinder's for the city, not one mosque's.
 
 To add your mosque, open an issue on GitHub with its yearly timetable. [maintaining.md](maintaining.md) section 2
 shows how a mosque is added.

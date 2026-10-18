@@ -29,7 +29,7 @@ Every script in `scripts/` writes exactly this file (through `scripts/athan_year
 | Key | Type | Rule |
 |---|---|---|
 | `v` | number | Format version, `1`. Not checked by the firmware today; raise it only together with a firmware change |
-| `location` | string | The mosque key, equal to the folder name and to an option of the Location select in `firmware/athan.yaml`. At most 31 characters of `[a-z0-9_]` (the scripts refuse any other key). The clock refuses a file whose `location` is not the key it asked for |
+| `location` | string | The mosque key, equal to the folder name and to its entry in `docs/athantimes/mosques.json` (the list the clocks offer). At most 31 characters of `[a-z0-9_]` (the scripts refuse any other key). The clock refuses a file whose `location` is not the key it asked for |
 | `year` | number | Gregorian year, equal to the file name. Refused if different |
 | `tz` | string | POSIX time zone of the mosque, for example `PST8PDT,M3.2.0,M11.1.0` or `<+03>-3`. **Not** `America/Los_Angeles`. At most 63 characters. The clock sets its clock zone from it and computes DST offline |
 | `fields` | list of 12 strings | Column names. All 12 below must be present; the firmware looks columns up by name, but the scripts always write this order |

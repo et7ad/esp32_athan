@@ -11,7 +11,8 @@
 //  (clock) Tick  |   . # . . . . . .      where the list starts again
 //                                         the right pane: the row's full title small at the top, then its item as large
 //                                         as it fits (two lines of the medium font when one is too narrow, then the
-//                                         small font, cut short only past that: item_lines()), arrows where Left/Right
+//                                         small font, on the TFT up to four lines of it, cut short only past that:
+//                                         item_lines()), arrows where Left/Right
 //                                         lead, the check mark (in use) and play mark (playing) under it, then dots, a
 //                                         level bar or the caption (small font, up to two lines)
 //
@@ -85,14 +86,17 @@ std::vector<std::string> wrap_words(display::Display &d, display::BaseFont *f, c
 bool only_digits_and_dots(const std::string &s);
 
 /// A list item's text, as large as it fits `w` pixels: fonts[0] on one line; fonts[1] on one line, or two
-/// (item_break(): "12. Abdul" / "Basit"); fonts[2] on one line, or two; else fonts[2] on two lines cut short.
+/// (item_break(): "12. Abdul" / "Basit"); fonts[2] on one line, or two; then, when `max_lines` allows, fonts[2] on up
+/// to `max_lines` lines (word wrap, an entry number kept with the first word: a long mosque name on the TFT); else
+/// fonts[2] on `max_lines` lines cut short.
+static const int ITEM_MAX_LINES = 4;
 struct ItemLines {
   int font{0};   // the index into fonts
-  int count{1};  // 1 or 2
-  std::string line[2];
+  int count{1};  // 1 to max_lines
+  std::string line[ITEM_MAX_LINES];
 };
 ItemLines item_lines(display::Display &d, display::BaseFont *const fonts[3], const std::string &s, int w,
-                     const char *ellipsis);
+                     const char *ellipsis, int max_lines = 2);
 
 }  // namespace athan
 }  // namespace esphome

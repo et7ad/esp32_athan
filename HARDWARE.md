@@ -192,8 +192,8 @@ shares the footprint in `hardware/pcb/libs/SKQUAAA010/`.
 | J1 | USB-C receptacle, 6-pin, power only (GCT USB4125-GF-A, LCSC C3151650) | front or back |
 | J2 | Barrel jack, CUI PJ-102AH (LCSC C3096093) | front |
 | J3, J5 | 2-pin screw terminals, 5.0 mm pitch (MaiXu MX126-5.0-02P, LCSC C5188434), speaker and relay | front |
-| J6 | 1×6 pin header, 2.54 mm, with a jumper cap | front |
-| DS1 or DS2 | 1×4 header for the OLED, or 1×8 header for the TFT (only the one you use) | front |
+| J6 | 1×6 pin header, 2.54 mm, with a jumper cap; or none, flashing through the press-in programmer ([hardware/programmer](hardware/programmer/README.md)) | front |
+| DS1 or DS2 | 1×4 header for the OLED, or 1×8 header for the TFT (only the one you use): a long-pin header, about 19 mm, so the display sits in the case's window (section 9) | front |
 | C1 | 470 µF 10 V low-ESR electrolytic, 8 × 10.5 mm (Panasonic EEE-FK1A471P, LCSC C178530) | front |
 | C2, C3, C6 | 22 µF 25 V ceramic, 1206, X5R or X7R (Samsung CL31A226KAHNNNE, LCSC C12891) | back |
 | C4, C7 | 100 nF 50 V X7R, 1206 (Samsung CL31B104KBCNNNC, LCSC C24497) | back |
@@ -206,7 +206,8 @@ shares the footprint in `hardware/pcb/libs/SKQUAAA010/`.
 | JP1, JP2, JP4 | solder jumpers, bridged as made; JP3 open | back |
 | H1 to H4 | M3 mounting holes | |
 | | Display module: 1.3" SH1106 (or 0.96" SSD1306) 128×64 I2C OLED, or 1.54" ST7789 240×240 IPS TFT | wired to its header |
-| | Speaker, 4 Ω 3 W | wired to J3 |
+| | Speaker, 40 mm round, 4 Ω 3 W, up to 17 mm deep (the size the case holds) | wired to J3 |
+| | Case: three printed parts and 6 × M3 × 16 countersunk screws (section 9) | |
 
 Every small part is 1206, a size that is easy to solder by hand. The LCSC numbers are also in the schematic (the
 LCSC field), for JLCPCB to assemble the board: [guides/jlcpcb_assembly.md](guides/jlcpcb_assembly.md).
@@ -227,8 +228,8 @@ The board is 59.6 × 50 mm, with two layers. Every part is soldered by hand, on 
 - **USB-C:** J1 has its pads on both sides and its four shell legs in shared holes. Solder it on the front by hand,
   or have JLCPCB place it on the back ([guides/jlcpcb_assembly.md](guides/jlcpcb_assembly.md)). Its opening is at
   the left edge either way; on the back it sits about 5 mm lower, below the board.
-- **Antenna:** no copper, metal screws or speaker magnet near the antenna end. The mounting holes beside it take
-  nylon screws.
+- **Antenna:** no copper, metal screws or speaker magnet near the antenna end. The corner mounting holes are 17 mm
+  from it, and the case keeps every other screw and the speaker further away (section 9).
 - **Amplifier:** short I2S traces kept away from the antenna; solid ground under the amplifier, with thermal vias in
   its exposed pad; its capacitors right at VDD; wide traces to the speaker terminal.
 - **Power and ground:** wide +5V traces (1 mm or more; the amplifier draws peaks of about 1 A), a continuous ground
@@ -243,24 +244,23 @@ datasheets, and check the 3D view for anything tall where it should not be.
 
 ## 9. Enclosure
 
-The enclosure is not designed yet. The version 2 enclosure (`../esp_athan/hardware/encolsure/Iteration13/`, with
-round and rectangular speaker variants) is a good starting point. It needs:
+The case is in `hardware/enclosure/`. It is printed in three parts without supports, and shaped like a mihrab: a
+rectangle with a pointed arch on top. It measures 72 × 115 × 23.5 mm. How to print and assemble it:
+[hardware/enclosure/README.md](hardware/enclosure/README.md).
 
-| Item | What it needs |
+| Item | How the case does it |
 |---|---|
-| Board mount | The board's outline and its four M3 holes |
-| Power | Openings for the USB-C (big enough for common cable boots, about 12 × 7 mm; about 5 mm lower, below the board, when J1 is on the back) and the barrel jack |
-| J6 | Reachable with the case open (for the first flash), or a small slot to flash it closed |
-| Switch | An opening or a cap over the 5-way switch's stem, with room to tilt it four ways and press it in |
-| LED | A light pipe or a hole over it |
-| Display | A window and clips for the module, and room for its wires to the header (4 for the OLED, 8 for the TFT). Modules differ in size and in where their visible area sits, so take the window from the seller's drawing |
-| Speaker | A sealed space behind it sounds fuller; grille holes in front of the cone |
-| Antenna | No metal, screws or speaker magnet within about 15 mm of the module's antenna end |
-| Relay terminal | A cable exit for the two relay wires |
-| Ventilation | A few slots; the amplifier and the module get warm at full volume |
-| Labels | Arrows around the switch, and optionally a QR code to this repository |
-
-Put the exported STL, STEP or F3D files in `hardware/enclosure/`.
+| Board mount | Four posts on the front and four tubes on the back clamp the board at its M3 holes, held by six M3 × 16 countersunk screws from the back |
+| Display | Soldered on the board with a long-pin header. Its glass sits in a pocket behind a bevelled window, and the front holds it while you solder it, so it ends up flush and centred. There is one front for the OLED and one for the TFT |
+| Power | The barrel jack's face is flush with the left side. A 12.6 × 7 mm opening takes USB-C cable plugs, with one back for J1 on the front and one for J1 on the back |
+| J6 | Inside: lift the board out of the front. On the TFT build the display covers J6, so the first flash comes before the display; updates go over Wi-Fi |
+| Switch | A printed knob pressed onto the stem, through a 10 mm hole that leaves room to tilt it |
+| LED | A hole over it, with a tube for a light pipe (1.75 mm clear filament) |
+| Speaker | 40 mm, clipped behind a grille of eight-pointed stars in the arch, with a ring that seals it to the face |
+| Antenna | No metal within 17 mm of the module's antenna end: the screws are at the corners and in the arch, and so is the speaker |
+| Relay terminal | A notch in the right side for the two wires |
+| Ventilation | Star-shaped vents in the back, over the amplifier and the module |
+| Labels | "حي على الصلاة" under the display and "ATHAN V3" on the back; a keyhole to hang it on a wall |
 
 ## 10. Options for later
 

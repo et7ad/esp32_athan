@@ -10,6 +10,8 @@
 substitutions:
   # Build and update files carry no suffix: athan-v3.ota.bin and manifest.json (displays/tft.yaml: -tft).
   variant_suffix: ""
+  # No room for the mosques' coordinates in the menu's Location row (displays/tft.yaml shows them).
+  menu_mosque_coords: "false"
   # Which OLED: keep one of these two lines. Both are 128x64, so every screen stays the same; ESPHome handles the
   # SH1106's 2-pixel offset by itself. Nothing else changes (pins, address 0x3C; the boot log's I2C scan shows the
   # address if a module differs).

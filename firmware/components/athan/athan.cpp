@@ -196,6 +196,11 @@ class AudioWebHandler : public AsyncWebHandler {
 // ==============================================================================================================
 void AthanComponent::setup() {
   this->slots_.begin();
+  this->own_pref_ = global_preferences->make_preference<OwnMosque>(fnv1_hash("athan_own_mosque"));
+  if (!this->own_pref_.load(&this->own_))
+    std::memset(&this->own_, 0, sizeof(this->own_));
+  this->own_.key[sizeof(this->own_.key) - 1] = '\0';  // read back from flash: always a string
+  this->own_.name[sizeof(this->own_.name) - 1] = '\0';
   this->random_pref_ = global_preferences->make_preference<bool>(fnv1_hash("athan_tawashih_random"));
   bool random = true;  // the default: a new clock streams a random tawashih and stores none
   if (!this->random_pref_.load(&random))
@@ -410,6 +415,13 @@ void AthanComponent::loop() {
     job.type = JobType::STATIONS;
     this->enqueue_(std::move(job));
   }
+  if (online && !this->mosques_pending_ && due(now64, this->next_mosques_try_)) {
+    this->mosques_pending_ = true;
+    this->mosques_tried_at_ = now64;
+    Job job;
+    job.type = JobType::MOSQUES;
+    this->enqueue_(std::move(job));
+  }
   // Random was chosen for the tawashih: free the stored one once nothing plays from it or writes it.
   if (this->clear_tawashih_ && this->tawashih_random_ && !this->sound_busy_ && this->playing_slot_ != SLOT_TAWASHIH &&
       this->slots_.valid(SLOT_TAWASHIH) && !this->sound_busy_.exchange(true)) {
@@ -497,6 +509,7 @@ void AthanComponent::run_job_(Job &job) {
   switch (job.type) {
     case JobType::CATALOG: this->job_catalog_(); break;
     case JobType::STATIONS: this->job_stations_(job, false); break;
+    case JobType::MOSQUES: this->job_mosques_(); break;
     case JobType::STATION_PLAY: this->job_stations_(job, true); break;
     case JobType::DOWNLOAD_URL: this->job_download_url_(job); break;
     case JobType::COMMIT_BUFFER: this->job_commit_(job.slot, job.data, job.len, job.label); break;
@@ -623,6 +636,7 @@ std::string AthanComponent::resolve_url_(const std::string &base, const std::str
 void AthanComponent::fetch_catalog() {
   if (this->catalog_pending_.exchange(true))
     return;
+  this->catalog_tried_at_ = millis_64();
   Job job;
   job.type = JobType::CATALOG;
   this->enqueue_(std::move(job));
@@ -686,6 +700,7 @@ void AthanComponent::job_catalog_() {
     this->catalog_pending_ = false;
     if (ok) {
       this->catalog_ready_ = true;
+      this->catalog_loaded_at_ = millis_64();
       this->refresh_slot_view_();  // which entry is selected, and "Custom", depend on the list
       this->next_catalog_try_ = millis_64() + 12 * HOUR_MS;  // pick up list changes twice a day
       ESP_LOGI(TAG, "Suggested lists loaded");
@@ -694,6 +709,133 @@ void AthanComponent::job_catalog_() {
       ESP_LOGW(TAG, "Suggested lists could not be loaded, retrying in a minute");
     }
   });
+}
+
+// ---------------- lists a menu row shows, the mosques ----------------
+// A list is due now (loop() fetches it while online) when its copy is older than 2 hours or there is none, but not
+// within a minute of its last request: entering the row again and again, offline or while GitHub fails, does not ask
+// each time.
+static bool list_stale(uint64_t loaded_at, uint64_t tried_at) {
+  const uint64_t now = millis_64();
+  return (loaded_at == 0 || now - loaded_at > 2 * HOUR_MS) && (tried_at == 0 || now - tried_at > 60000ULL);
+}
+
+void AthanComponent::refresh_catalog() {
+  if (!this->catalog_pending_ && list_stale(this->catalog_loaded_at_, this->catalog_tried_at_))
+    this->next_catalog_try_ = 0;
+}
+
+void AthanComponent::refresh_mosques() {
+  if (!this->mosques_pending_ && list_stale(this->mosques_loaded_at_, this->mosques_tried_at_))
+    this->next_mosques_try_ = 0;
+}
+
+void AthanComponent::job_mosques_() {
+  uint8_t *buf;
+  size_t len;
+  PsramVector<MosqueEntry> list;
+  std::string err;
+  bool ok = false, changed = false;
+  const HttpResult r =
+      this->http_get_(this->data_url_ + "/athantimes/mosques.json", MAX_MOSQUES_FILE_BYTES, &buf, &len, -1);
+  if (r == HttpResult::OK) {
+    ok = parse_mosques(buf, len, &list, &err);
+    heap_caps_free(buf);
+  } else {
+    err = r == HttpResult::NOT_FOUND ? "not found"
+          : r == HttpResult::TOO_BIG ? "over 32 KB"
+          : r == HttpResult::NO_CONNECTION ? "no connection"
+          : r == HttpResult::NO_MEMORY ? "no memory"
+                                        : "download failed";
+  }
+  const size_t count = list.size();
+  if (ok) {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    changed = list != this->mosques_;  // a name changed counts too: the menu and the web page show names
+    if (changed)
+      this->mosques_ = std::move(list);
+  }
+  this->defer([this, ok, changed, count, err]() {
+    this->mosques_pending_ = false;
+    if (ok) {
+      this->mosques_loaded_at_ = millis_64();
+      this->next_mosques_try_ = millis_64() + 6 * HOUR_MS;
+      if (changed) {
+        this->mosques_gen_++;  // the Location select takes the new list (sync_web_state)
+        this->remember_own_mosque_();  // its name or coordinates may have changed
+        ESP_LOGI(TAG, "Mosque list loaded: %u mosques", static_cast<unsigned>(count));
+      }
+    } else {
+      // A failed load keeps the list in memory: tried again every minute until a first one exists, then every 30.
+      this->next_mosques_try_ = millis_64() + (this->mosques_loaded_at_ ? 30 * 60000ULL : 60000ULL);
+      ESP_LOGW(TAG, "Mosque list not loaded (%s)%s", err.c_str(),
+               this->mosques_loaded_at_ ? ", keeping the one in memory" : "");
+    }
+  });
+}
+
+const FixedVector<const char *> &AthanComponent::location_choices(const std::string &current) {
+  // The select keeps pointers into the store it was given last. The web server's task may still be reading those
+  // (a GET of the select), so this call writes the other store, and the last one stays intact until the next call.
+  this->choice_store_ ^= 1;
+  auto &store = this->choices_[this->choice_store_];
+  store.clear();
+  {
+    // Numbered in the list's order ("1. Islamic Center of Davis", as the sound lists are): owners see where they are
+    // and when they went round, and two mosques of the same name still read differently.
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    store.reserve(this->mosques_.size() + 1);  // no reallocation below: the pointers taken stay valid
+    for (size_t i = 0; i < this->mosques_.size(); i++) {
+      store.push_back(this->mosques_[i]);
+      const std::string label = numbered(static_cast<int>(i), std::string(store.back().label.c_str()));
+      store.back().label.assign(label.data(), label.size());
+    }
+  }
+  if (!current.empty() && this->location_index(current) < 0) {
+    // This clock's mosque, which the list lacks: by the name and place saved when the list last had it (no number:
+    // it is not in the list), else as "Current mosque" (a clock whose list never loaded). Never by its key: owners do
+    // not know keys.
+    MosqueEntry own;
+    own.key.assign(current.data(), current.size());
+    const bool known = current == this->own_.key && this->own_.name[0] != '\0';
+    own.label = known ? this->own_.name : "Current mosque";
+    if (known) {
+      own.lat = this->own_.lat;
+      own.lon = this->own_.lon;
+    }
+    for (const auto &m : store)
+      if (m.label == own.label)
+        own.label = "Current mosque";
+    store.push_back(std::move(own));
+  }
+  this->choice_ptrs_.init(store.size());
+  for (const auto &m : store)
+    this->choice_ptrs_.push_back(m.label.c_str());
+  return this->choice_ptrs_;
+}
+
+std::string AthanComponent::location_key(int i) const {
+  const auto &store = this->choices_[this->choice_store_];
+  if (i < 0 || i >= static_cast<int>(store.size()))
+    return "";
+  return std::string(store[i].key.data(), store[i].key.size());
+}
+
+bool AthanComponent::location_coords(int i, double *lat, double *lon) const {
+  const auto &store = this->choices_[this->choice_store_];
+  if (i < 0 || i >= static_cast<int>(store.size()) || std::isnan(store[i].lat) || std::isnan(store[i].lon))
+    return false;
+  *lat = store[i].lat;
+  *lon = store[i].lon;
+  return true;
+}
+
+int AthanComponent::location_index(const std::string &key) const {
+  const auto &store = this->choices_[this->choice_store_];
+  for (size_t i = 0; i < store.size(); i++)
+    if (store[i].key.size() == key.size() && store[i].key.compare(0, key.size(), key.data(), key.size()) == 0)
+      return static_cast<int>(i);
+  return -1;
 }
 
 int AthanComponent::catalog_size(int list) const {
@@ -1911,7 +2053,30 @@ void AthanComponent::set_location(const std::string &key) {
   this->cur_not_published_ = false;
   this->next_cur_try_ = this->next_prev_try_ = this->next_next_try_ = millis_64();
   this->schedule_version_++;
+  this->remember_own_mosque_();
   ESP_LOGI(TAG, "Location: %s", key.c_str());
+}
+
+void AthanComponent::remember_own_mosque_() {
+  OwnMosque m;
+  std::memset(&m, 0, sizeof(m));  // padding too: the saved bytes are compared below
+  {
+    std::lock_guard<std::mutex> lock(this->mutex_);
+    const MosqueEntry *e = nullptr;
+    for (const auto &x : this->mosques_)
+      if (x.key.size() == this->location_.size() && x.key.compare(0, x.key.size(), this->location_) == 0)
+        e = &x;
+    if (e == nullptr)
+      return;  // the list lacks it (not loaded yet): keep what was saved
+    std::strncpy(m.key, e->key.c_str(), sizeof(m.key) - 1);
+    std::strncpy(m.name, e->label.c_str(), sizeof(m.name) - 1);
+    m.lat = e->lat;
+    m.lon = e->lon;
+  }
+  if (std::memcmp(&m, &this->own_, sizeof(m)) == 0)
+    return;
+  this->own_ = m;
+  this->own_pref_.save(&this->own_);
 }
 
 void AthanComponent::refresh_prayer_times() {
@@ -2040,17 +2205,17 @@ void AthanComponent::prayer_tick_(bool online) {
   const uint32_t status_key = this->schedule_version_ * 4 + (this->prayer_job_pending_ ? 2 : 0) + (online ? 1 : 0);
   if (status_key != this->prayer_status_key_) {
     this->prayer_status_key_ = status_key;
+    // No mosque key in these lines: the web page shows them under Location, which names the mosque.
     std::string status;
     if (!this->cur_table_.empty())
-      status = this->location_ + " " + std::to_string(year) + " (stored: " + this->store_.years_of(this->location_) +
-               ")";
+      status = std::to_string(year) + " (stored: " + this->store_.years_of(this->location_) + ")";
     else if (this->standin_)
-      status = this->location_ + ": using " + std::to_string(year - 1) + " times until the " + std::to_string(year) +
+      status = "Using " + std::to_string(year - 1) + " times until the " + std::to_string(year) +
                " timetable is published";
     else if (this->prayer_job_pending_)
-      status = this->location_ + ": downloading " + std::to_string(year);
+      status = "Downloading " + std::to_string(year);
     else
-      status = this->location_ + ": no prayer times yet" + (online ? "" : " (no internet)");
+      status = std::string("No prayer times yet") + (online ? "" : " (no internet)");
     this->set_prayer_status_(status);
   }
 

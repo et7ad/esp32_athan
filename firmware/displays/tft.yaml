@@ -19,6 +19,8 @@
 substitutions:
   # Build and update files carry -tft: athan-v3-tft.ota.bin and manifest-tft.json (an OLED build has no suffix).
   variant_suffix: "-tft"
+  # The menu's Location row shows each mosque's coordinates under its name, grey, for checking before choosing one.
+  menu_mosque_coords: "true"
   # Pins 5-8 of the TFT header DS2 (HARDWARE.md section 3). Clock and data are pin_scl / pin_sda.
   pin_tft_res: GPIO16
   pin_tft_dc: GPIO17

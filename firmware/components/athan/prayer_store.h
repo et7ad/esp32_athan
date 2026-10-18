@@ -8,6 +8,7 @@
 //
 // The yearly file it comes from: docs/athantimes/<key>/<year>.json, format in prayertimes_specs.md.
 
+#include <cmath>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -31,6 +32,35 @@ static const size_t MAX_YEAR_FILE_BYTES = 100000;
 /// Parse and check a yearly file. On success fills table (days * 12 values) and tz. On failure fills err.
 bool parse_year_file(const uint8_t *data, size_t len, const std::string &key, int year, PsramVector<uint16_t> *table,
                      std::string *tz, std::string *err);
+
+static const size_t MAX_MOSQUES_FILE_BYTES = 32 * 1024;
+static const size_t MAX_MOSQUE_NAME = 40;
+/// A mosque key as the clock stores it (selected_location_key, a stored year): 1 to 31 of a-z, 0-9 and _, the rule of
+/// scripts/athan_yearly.py.
+bool valid_mosque_key(const char *key);
+/// A mosque name the clock can show: 1 to MAX_MOSQUE_NAME printable ASCII characters (the menu fonts have no others),
+/// not only spaces. A longer one would still fit the menu cut short; this only bounds it.
+bool valid_mosque_name(const char *name);
+/// One mosque the clocks offer: its key, which the clock stores and downloads the prayer times by (owners never see
+/// it), its label, which the menu and the web page show, and where it is (NAN when the file does not say).
+struct MosqueEntry {
+  PsramString key;
+  PsramString label;
+  double lat{NAN};
+  double lon{NAN};
+  bool operator==(const MosqueEntry &o) const {
+    auto same = [](double a, double b) { return a == b || (std::isnan(a) && std::isnan(b)); };
+    return this->key == o.key && this->label == o.label && same(this->lat, o.lat) && same(this->lon, o.lon);
+  }
+  bool operator!=(const MosqueEntry &o) const { return !(*this == o); }
+};
+/// The mosques the clocks offer, from docs/athantimes/mosques.json: the entries of its "mosques" object in file order,
+/// without those marked "active": false, a key valid_mosque_key() refuses, or a key seen before. The label is the
+/// entry's "name" when valid_mosque_name() takes it, else the key (data check_docs.py refuses). Equal names may stay:
+/// the choices number every label (location_choices()), which keeps them apart. "lat" and "lon" (as a map gives them,
+/// decimal degrees) are kept when both are numbers in range. False (with err) when the file is not that shape or
+/// offers no mosque: the clock then keeps the list it had.
+bool parse_mosques(const uint8_t *data, size_t len, PsramVector<MosqueEntry> *out, std::string *err);
 
 class PrayerStore {
  public:

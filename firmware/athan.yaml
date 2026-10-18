@@ -636,15 +636,18 @@ select:
     name: "Location"
     id: web_location_select
     icon: "mdi:map-marker"
-    # Mosque keys: folder names under docs/athantimes/ (and entries of docs/athantimes/mosques.json).
-    # The device stores the KEY, not the position, so this list may be reordered or extended freely.
-    options: ["davis", "sclaramca", "sclaraalnoor", "woodland", "masjid15"]
+    # The mosques come from docs/athantimes/mosques.json at runtime, shown by name (athan_core.location_choices(),
+    # set by sync_web_state), so a mosque added there shows up without a firmware update. This option, the default
+    # key, only holds the place until then. The device stores the mosque's KEY, never its name.
+    options: ["davis"]
     set_action:
       - lambda: |-
-          std::string key(x.c_str(), x.size());
+          auto i = id(web_location_select).index_of(x.c_str(), x.size());
+          const std::string key = i.has_value() ? id(athan_core).location_key((int) i.value()) : "";
+          if (key.empty()) return;
           id(selected_location_key) = key;
           id(athan_core).set_location(key);
-          id(web_location_select).publish_state(key);
+          id(web_location_select).publish_state(i.value());
     web_server:
       sorting_group_id: grp_location
       sorting_weight: 1
@@ -1422,6 +1425,7 @@ script:
               return "";
             };
             r.show = [=](int i, bool entered) {
+              if (entered) id(athan_core).refresh_catalog();   // the list, loaded again if over 2 hours old
               if (id(athan_playing) || id(prefajr_playing)) return;   // never preview over the athan
               const int it = id(athan_core).menu_item(slot, off, i);
               if (it < 0 && it != athan::MENU_CUSTOM) {
@@ -1609,23 +1613,41 @@ script:
             r.short_title = "Masjid";
             r.symbol = athan::sym::LOCATION;
             r.style = athan::RowStyle::CHOICES;   // side by side while the names fit
-            r.count = []() { return (int) id(web_location_select).size(); };
-            r.label = [](int i) -> std::string {
-              auto k = id(web_location_select).at(i);
-              return k.has_value() ? std::string(k.value()) : std::string("?");
+            // The mosques of docs/athantimes/mosques.json, numbered and by name: the select's options (sync_web_state),
+            // whose keys the component keeps. Choosing one stores its key. Entering the row loads the list again if it
+            // is over 2 hours old, so it can change while the row is open: the cursor keeps its mosque by key.
+            r.show = [](int, bool entered) {
+              if (entered) id(athan_core).refresh_mosques();
             };
-            r.active = []() {
-              for (int i = 0; i < (int) id(web_location_select).size(); i++) {
-                auto k = id(web_location_select).at(i);
-                if (k.has_value() && std::string(k.value()) == id(selected_location_key)) return i;
-              }
+            r.id_at = [](int i) { return (int) fnv1_hash(id(athan_core).location_key(i)); };
+            r.find = [](int key_id) {
+              for (int i = 0; i < (int) id(web_location_select).size(); i++)
+                if ((int) fnv1_hash(id(athan_core).location_key(i)) == key_id) return i;
               return -1;
             };
+            r.count = []() { return (int) id(web_location_select).size(); };
+            r.label = [](int i) -> std::string {
+              auto name = id(web_location_select).at(i);
+              return name.has_value() ? name.value() : std::string("?");
+            };
+            r.active = []() { return id(athan_core).location_index(id(selected_location_key)); };
+            if (${menu_mosque_coords}) {
+              // Where the mosque is, as a map gives it ("38.5465, -121.7563"), grey at the bottom of the pane: the
+              // colour screen has room (menu_mosque_coords in displays/*.yaml). Four decimals (about 11 m) keep it on
+              // one line: the caption has about 118 px, and five decimals (about 125 px) wrapped after the comma.
+              r.caption = [](int i) -> std::string {
+                double lat, lon;
+                if (!id(athan_core).location_coords(i, &lat, &lon)) return "";
+                char buf[40];
+                snprintf(buf, sizeof(buf), "%.4f, %.4f", lat, lon);
+                return buf;
+              };
+            }
             r.apply = [](int i) {
-              auto k = id(web_location_select).at(i);
-              if (k.has_value()) {
-                id(selected_location_key) = std::string(k.value());
-                id(athan_core).set_location(id(selected_location_key));
+              const std::string key = id(athan_core).location_key(i);
+              if (!key.empty()) {
+                id(selected_location_key) = key;
+                id(athan_core).set_location(key);
               }
               return false;
             };
@@ -2105,10 +2127,22 @@ script:
           char buf[320];
           auto pub = [](text_sensor::TextSensor *t, const char *s) { if (t->state != s) t->publish_state(s); };
           {
-            auto loc = id(selected_location_key);
-            if (id(web_location_select).current_option() != loc) {
-              for (size_t i = 0; i < id(web_location_select).size(); i++)
-                if (std::string(id(web_location_select).at(i).value()) == loc) id(web_location_select).publish_state(loc);
+            // Location: the mosques of docs/athantimes/mosques.json by name, as the component loaded them, with this
+            // clock's mosque added when the list lacks it. New options only when the list changed or the mosque is not
+            // among them: the web server's task may read a select's options (a GET of it), so swapping them stays
+            // rare. The select shows the stored key's choice, by position.
+            static uint32_t bound_gen = UINT32_MAX;
+            const std::string &loc = id(selected_location_key);
+            auto *sel = id(web_location_select);
+            int at = id(athan_core).location_index(loc);
+            if (bound_gen != id(athan_core).mosques_gen() || at < 0) {
+              bound_gen = id(athan_core).mosques_gen();
+              sel->traits.set_options(id(athan_core).location_choices(loc));
+              at = id(athan_core).location_index(loc);
+              if (at >= 0) sel->publish_state((size_t) at);   // its position may have moved
+            } else {
+              auto cur = sel->active_index();
+              if (!sel->has_state() || !cur.has_value() || cur.value() != (size_t) at) sel->publish_state((size_t) at);
             }
           }
           {
