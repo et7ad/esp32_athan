@@ -14,6 +14,7 @@
 
 #include "../components/athan/day_window.h"
 #include "../components/athan/mp3_check.h"
+#include "../components/athan/tft_panel.h"
 #include "../components/athan/tz_posix.h"
 
 using namespace esphome::athan;
@@ -158,9 +159,59 @@ static void test_day_window() {
   CHECK(night_level(7, 60, 10) == 60, "an unknown setting behaves as Normal");
 }
 
+// The TFT's start-up commands sent again (tft_panel.h), split around Sleep Out with the pauses left out. The sequence
+// is ESPHome 2026.9.1's for this ST7789V, as the generated main.cpp gives it (tft->set_init_sequence).
+static std::string panel_cmds(const std::vector<uint8_t> &seq, tft::PanelPart part, bool *ok = nullptr) {
+  std::string out;
+  const bool good = tft::panel_part(seq, part, [&out](uint8_t cmd, const uint8_t *args, size_t n) {
+    char b[8];
+    std::snprintf(b, sizeof(b), "%s%02X:", out.empty() ? "" : " ", cmd);
+    out += b;
+    for (size_t i = 0; i < n; i++) {
+      std::snprintf(b, sizeof(b), "%02X", args[i]);
+      out += b;
+    }
+  });
+  if (ok != nullptr)
+    *ok = good;
+  return out;
+}
+
+static void test_panel_sequence() {
+  using tft::PanelPart;
+  const std::vector<uint8_t> st7789v = {
+      10,  255, 182, 2,  10, 130, 178, 5,   12,  12, 0,   51, 51,  183, 1,   53, 187, 1,  40,  192, 1,  12,
+      194, 2,   1,   255, 195, 1, 16,  196, 1,   32, 198, 1,  15,  208, 2,   164, 161, 224, 14, 208, 0,  2,
+      7,   10,  40,  50, 68, 66,  6,   14,  18,  20, 23,  225, 14,  208, 0,   2,  7,   10, 40,  49, 84, 71,
+      14,  28,  23,  27, 30, 58,  1,   85,  33,  0,  0,   255, 17,  0,   10,  255, 41,  0,  10,  255};
+  bool ok = false;
+  const std::string settings = panel_cmds(st7789v, PanelPart::SETTINGS, &ok);
+  CHECK(ok, "ST7789V sequence read");
+  CHECK(settings == "B6:0A82 B2:0C0C003333 B7:35 BB:28 C0:0C C2:01FF C3:10 C4:20 C6:0F D0:A4A1 "
+                    "E0:D00002070A28324442060E121417 E1:D00002070A283154470E1C171B1E 3A:55 21:",
+        "settings: power, gamma, colour format, inversion (got %s)", settings.c_str());
+  CHECK(panel_cmds(st7789v, PanelPart::SLEEP_OUT) == "11:", "Sleep Out alone");
+  CHECK(panel_cmds(st7789v, PanelPart::AFTER_WAKE) == "29:", "then Display On");
+  // A pause of 17 ms (0x11) is not a Sleep Out; without one, everything is a setting.
+  const std::vector<uint8_t> no_wake = {17, 255, 0x29, 0};
+  CHECK(panel_cmds(no_wake, PanelPart::SETTINGS) == "29:" && panel_cmds(no_wake, PanelPart::SLEEP_OUT).empty() &&
+            panel_cmds(no_wake, PanelPart::AFTER_WAKE).empty(),
+        "no Sleep Out: all settings");
+  // n's top bit is a flag; a second Sleep Out belongs after the first.
+  const std::vector<uint8_t> flags = {0x36, 0x81, 0x08, 0x11, 0, 0x11, 0, 0x29, 0};
+  CHECK(panel_cmds(flags, PanelPart::SETTINGS) == "36:08" && panel_cmds(flags, PanelPart::AFTER_WAKE) == "11: 29:",
+        "flag bit, second Sleep Out");
+  panel_cmds({0xB6, 2, 0x0A}, PanelPart::SETTINGS, &ok);
+  CHECK(!ok, "arguments cut off: malformed");
+  panel_cmds({0x29, 0, 0xB6}, PanelPart::SETTINGS, &ok);
+  CHECK(!ok, "command without its length: malformed");
+  CHECK(panel_cmds({}, PanelPart::SETTINGS, &ok).empty() && ok, "empty sequence: nothing to send");
+}
+
 int main(int argc, char **argv) {
   test_calendar();
   test_day_window();
+  test_panel_sequence();
   test_parse();
   if (argc > 1)
     test_vectors(argv[1]);

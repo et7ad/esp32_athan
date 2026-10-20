@@ -45,8 +45,20 @@ substitutions:
   # The clock face as a whole (the ring's progress and its knob) is redrawn at least this often, in seconds; in between,
   # each second redraws and sends only the seconds digits (about 1 KB instead of the whole 115 KB frame). The whole
   # face is also redrawn when the minute changes, at once when anything else on it changes, and every second in the
-  # last minute before a prayer. Measured on the prototype: a whole face about 50 ms, the seconds alone about 2 ms.
+  # last minute before a prayer. Measured on the prototype: a whole face about 55 ms, the seconds alone about 2 ms.
   tft_ring_update_s: "30"
+  # A screen unplugged and plugged back in comes back within this many seconds (at once with a key press): its start-up
+  # commands go again, with a whole frame, at most this often (the display lambda, components/athan/tft_panel.h).
+  tft_resend_s: "30"
+
+# Before the display's setup (priority 600), which sends the screen's start-up commands and then discards them: a copy,
+# to send them again while the clock runs (components/athan/tft_panel.h). athan.yaml's on_boot is a list for this.
+esphome:
+  on_boot:
+    - priority: 700
+      then:
+        - lambda: |-
+            athan::tft::keep_panel_sequence(*id(tft));
 
 spi:
   clk_pin: ${pin_scl}
@@ -136,12 +148,14 @@ display:
     data_rate: ${tft_data_rate}
     # Drawn only when the update_display script asks (update()). The driver draws inside update() alone: it runs this
     # lambda and sends what the lambda drew. It does not clear its buffer first (auto_clear_enabled: false): the lambda
-    # either fills the whole frame black and draws all of it (about 50 ms: 30 to send the 115 KB at 40 MHz, 20 to
-    # draw), or redraws only the seconds, and then only their small box is sent (about 2 ms).
+    # either fills the whole frame black and draws all of it (about 55 ms: 30 to send the 115 KB at 40 MHz, 25 to
+    # draw; over ESPHome's 50 ms for one operation, so the log warns "took a long time" with each), or redraws only
+    # the seconds, and then only their small box is sent (about 2 ms).
     auto_clear_enabled: false
     update_interval: never
     lambda: |-
       auto &d = it;
+      auto &panel_driver = *id(tft);   // the same display as the driver's own type (tft_panel.h); below, tft is a namespace
       // set again below while the clock is in the last minute before an athan; was_flashing: the frame before was
       const bool was_flashing = id(ring_flashing);
       id(ring_flashing) = false;
@@ -264,6 +278,19 @@ display:
       }
       d.fill(black);   // a whole frame: the driver does not clear its buffer (auto_clear_enabled: false)
       face_ok = false;
+      // A screen unplugged and plugged back in powers up dark, and the clock cannot tell (components/athan/tft_panel.h):
+      // its start-up commands go again with a whole frame at most every ${tft_resend_s} s, and with the first one after
+      // a key press (at most once a second). It comes back by itself, or at once with a key.
+      static uint64_t panel_ms = 0;
+      static uint32_t panel_key = 0;
+      const uint64_t since = millis_64() - panel_ms;
+      const bool resend = since + 500 >= ${tft_resend_s} * 1000ULL || (id(ui_last_activity) != panel_key && since >= 1000);
+      tft::PanelResend panel(panel_driver, resend);   // the settings now; the 5 ms after Sleep Out kept at the end
+      if (resend) {
+        panel_ms = millis_64();
+        panel_key = id(ui_last_activity);
+        id(tft_panel_on).execute();   // Display On, once this frame is on the panel
+      }
 
       // The menu draws itself (components/athan/menu_view_tft.cpp).
       if (menu.is_open()) {
@@ -591,6 +618,16 @@ script:
           if (!id(ring_flashing) || id(athan_core).menu().is_open() || id(screen_pct_applied) == 0) return;
           id(ring_flash_on) = false;
           id(update_display).execute();
+
+  # Display On after the start-up commands went again (the display lambda, components/athan/tft_panel.h), on the next
+  # pass of the loop: by then the frame drawn with them is on the panel. Before it, a screen just plugged back in
+  # would show what its memory held.
+  - id: tft_panel_on
+    mode: restart
+    then:
+      - delay: 0ms
+      - lambda: |-
+          athan::tft::panel_on(*id(tft));
 
   # Redraws the TFT (each display file has its own update_display; athan.yaml only asks for it). mode: restart and
   # the delay of 0 fold every request made during one pass of the loop into one draw, as on the OLED.

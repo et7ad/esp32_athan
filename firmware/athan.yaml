@@ -84,8 +84,10 @@ esphome:
   project:
     name: et7ad.esp32_athan
     version: ${project_version}
+  # A list, so that displays/tft.yaml can add its own entry: the packages merge lists, and a single entry written here
+  # without the "- " would take that one's place.
   on_boot:
-    priority: -100
+  - priority: -100
     then:
       - lambda: |-
           // First boot: Fajr volume starts equal to the main volume.

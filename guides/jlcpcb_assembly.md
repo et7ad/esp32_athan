@@ -210,7 +210,7 @@ shell legs go through shared holes, so it can be soldered on either side.
 | C1 (front) | 470 µF 10 V, 8 mm (Panasonic EEE-FK1A471P) | C178530 | extended |
 | D1 (front) | blue LED, 1206 (NationStar NCD1206B1) | C130717 | extended |
 | J1 (back or front) | USB-C 6-pin (GCT USB4125-GF-A) | C3151650 | extended |
-| J2 | barrel jack (CUI PJ-102AH), through-hole | C3096093 | extended |
+| J2 | barrel jack (CUI PJ-102AH), through-hole; a fallback, left off a board that goes in the case | C3096093 | extended |
 | J3, J5 | 2-pin screw terminal (MaiXu MX126-5.0-02P), through-hole | C5188434 | extended |
 
 - R7 and R11 are marked **DNP**: they are fitted by hand only when needed (15 dB gain; a resistor in series with the

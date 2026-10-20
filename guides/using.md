@@ -14,8 +14,8 @@ radio. Building a clock is in [building.md](building.md).
 
 ## 1. First setup
 
-**Power.** Plug the clock into a USB-C charger (5 V, 2 A). The board also has a barrel jack for a regulated 5 V
-supply, centre positive. Use one or the other, and never more than 5 V.
+**Power.** Plug the clock into a USB-C charger (5 V, 2 A), never more than 5 V. A board without the case may also
+have a barrel jack for a regulated 5 V supply, centre positive: use one or the other.
 
 **Wi-Fi.** A new clock, or one that cannot find its saved network, offers two ways to connect it. Use whichever
 suits your phone; the first one to finish wins. The clock joins **2.4 GHz** Wi-Fi only. A router that sends 2.4 GHz

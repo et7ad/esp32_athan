@@ -129,6 +129,12 @@ hooks `show` (item on screen: previews), `apply`, `leave` (stop the preview).
 - **Nothing that can fire during setup may draw or play.** `update_display` guards with `id(oled).is_ready()`
   (`id(tft)`), not `is_in_loop_state()`. The OLED is optional: a dead or missing display marks itself failed, and a
   10 s interval watchdog re-inits it at most once per boot. Never restart the device because of the display.
+- **The TFT cannot be asked whether it is there** (SPI goes one way on its module), and one plugged back in powers
+  up asleep with its display off. So its start-up commands go again, without the reset (it would blank a working
+  screen), with a whole frame at most every `tft_resend_s` (30 s) and after a key press: `components/athan/tft_panel.h`.
+  Never run the driver's `setup()` again instead: it resets the panel with no commands left to send, and allocates
+  a new 115 KB frame buffer each time. athan.yaml's `on_boot` stays a list (`- priority:`): `displays/tft.yaml` adds
+  the entry that keeps those commands at boot, and a single entry would take its place.
 - `Component::defer` is safe from other tasks. Entity `publish_state` is not, so call it from the main loop only.
 - Multipart uploads reach custom web handlers only when `ota: - platform: web_server` is present. It stays even
   though owners rarely use the firmware upload form.

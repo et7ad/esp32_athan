@@ -42,7 +42,7 @@ What each feature costs, and what dropping it would free.
 | **Updates over Wi-Fi** (GitHub Releases, the web page) | A second firmware slot (3.4 MB) | One HTTPS download | Light | 3.4 MB of flash. Without it, firmware goes on over USB only |
 | **Bluetooth Wi-Fi setup** (Improv) | Some firmware size | About 40 KB of Bluetooth buffers (moved to PSRAM: `esp32_ble: use_psram`) | Light | That RAM. The hotspot setup still works. Needs a chip with Bluetooth LE (not the ESP32-S2) |
 | **Web page, `/audio` page, Home Assistant API** | Firmware size | Connections in internal RAM; the `/audio` page is built in PSRAM | Light | Some RAM and firmware size |
-| **OLED and menu** | Fonts (small) | The 1 KB screen buffer and the menu rows in PSRAM (a TFT: a 115 KB frame, also in PSRAM) | One draw is about 23 ms on the I2C bus (a whole TFT frame about 50 ms: 30 to send it over SPI, 20 to draw; the TFT clock draws it every 30 s and on changes, and only its seconds, about 2.5 ms, every other second) | Almost nothing |
+| **OLED and menu** | Fonts (small) | The 1 KB screen buffer and the menu rows in PSRAM (a TFT: a 115 KB frame, also in PSRAM) | One draw is about 23 ms on the I2C bus (a whole TFT frame about 55 ms: 30 to send it over SPI, 25 to draw; the TFT clock draws it every 30 s and on changes, and only its seconds, about 2.5 ms, every other second) | Almost nothing |
 | **5-way switch, relay, LED, hourly tick, time zone, schedule** | Small | Small | Light | GPIO only |
 
 In short:

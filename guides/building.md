@@ -20,10 +20,10 @@ board's design (circuit, pin map, parts list) is in [HARDWARE.md](../HARDWARE.md
 | MAX98357A amplifier (MAX98357AETE+T, LCSC C910544) | Turns the I2S audio into up to 3 W for the speaker |
 | A display: a 1.3" 128×64 I2C OLED (SH1106 or SSD1306), or a 1.54" 240×240 ST7789 IPS colour screen | One or the other; the firmware is built for the one you fit |
 | 5-way switch, 10 × 10 mm through-hole (Alps SKQUCAA010 or a copy, sold as "5-way switch 10*10*10 mm") | Up, Down, Left, Right and a centre push |
-| A 40 mm round 4 Ω 3 W speaker | The case holds a 40 mm speaker up to 17 mm deep |
-| A long-pin 2.54 mm header, 4 pins (OLED) or 8 pins (TFT), about 19 mm long | For the display, which sits about 10 mm above the board in the case |
-| The case: three printed parts and 6 × M3 × 16 countersunk screws | [hardware/enclosure/README.md](../hardware/enclosure/README.md) |
-| USB-C receptacle (6-pin, power only) and a 5 V barrel jack, AMS1117-3.3 regulator, resistors and capacitors | The full list is in [HARDWARE.md](../HARDWARE.md) section 7 |
+| A 40 mm round 4 Ω 3 W speaker | The case holds a 40 mm speaker up to 16.5 mm deep (18.5 mm with the TFT) |
+| Two 2.54 mm headers, 4 pins (OLED) or 8 pins (TFT): a standard male header and an 8.5 mm female header | The male one goes on the board, the female one on the display, which plugs onto the board as the case closes |
+| The case: three printed parts, and 6 × M3 × 16 countersunk screws for extra hold | [hardware/enclosure/README.md](../hardware/enclosure/README.md) |
+| USB-C receptacle (6-pin, power only), AMS1117-3.3 regulator, resistors and capacitors | The full list is in [HARDWARE.md](../HARDWARE.md) section 7. The board also takes a 5 V barrel jack, a fallback for a broken USB-C that the case has no room for |
 | A 3.3 V USB-serial adapter (CP2102, or CH340 set to 3.3 V) | For the first flash through the board's 6-pin header J6 |
 
 The relay output is a 3.3 V logic signal on a screw terminal, not a relay: use a relay module that switches on a
@@ -198,9 +198,9 @@ marked with three tones.
 The KiCad project is in `hardware/pcb/`. The board is 59.6 × 50 mm, with two layers, and every part is soldered by
 hand.
 
-- **The front** (the side you look at) carries one display (the TFT or the OLED, on long pin headers so the small
-  parts fit under it), the 5-way switch, the status LED, the USB-C and barrel jacks, and the screw terminals for the
-  speaker and the relay. The USB-C can go on the back instead: its pads are on both sides.
+- **The front** (the side you look at) carries the header for one display (the TFT or the OLED, which plugs onto it
+  9.3 mm above the board, so the small parts fit under it), the 5-way switch, the status LED, the USB-C, and the
+  screw terminals for the speaker and the relay. The USB-C can go on the back instead: its pads are on both sides.
 - **The back** carries the ESP32 module (its antenna at the bottom edge, with no copper under it), the amplifier,
   the regulator and the small parts.
 - Every resistor and capacitor has its value printed next to it, and the programming header J6 is labelled on both
@@ -220,10 +220,13 @@ or ENIG (ENIG makes the amplifier's small pads easier to solder). The parts and 
 **Soldering.**
 - Start with the back: the amplifier (its exposed pad underneath needs hot air or a hot plate), the module, the
   regulator and the small parts.
-- Then the front: the switch, the connectors, the LED and the large capacitor C1.
+- Then the front: the switch, the terminals, the LED and the large capacitor C1 (at most 10.5 mm tall, for the case).
+  The barrel jack J2 stays off a board that goes in the case.
 - The USB-C J1 goes on either side; the case has a back for each.
-- The display comes last, soldered inside the case's front, which holds it at the right height. Only one display is
-  fitted: DS1 for the OLED, or DS2 for the TFT. The TFT covers J6, so flash the board first (section 6).
+- The display's header: a male header pushed in from the back at DS1 (OLED) or DS2 (TFT), soldered on the front,
+  its short ends cut off under the plastic. The display gets the matching female header and clicks into the case's
+  front; it plugs onto the board as the case closes. With the TFT, J6 sits under the display: leave it without a
+  header and flash with the press-in programmer (section 4).
 
 **Jumpers.** The solder jumpers on the back come set for a normal clock:
 - The amplifier's gain is 9 dB. To change it, see [HARDWARE.md](../HARDWARE.md) section 4.
@@ -231,8 +234,8 @@ or ENIG (ENIG makes the amplifier's small pads easier to solder). The parts and 
 - JP1 connects the relay output. Cut it and fit R11 to put a resistor in series.
 
 **The case.** The board goes in a 3D-printed case shaped like a mihrab, with the speaker behind a star grille in
-the arch. What to print, the parts it needs, and how the case doubles as the jig for soldering the display are in
-[hardware/enclosure/README.md](../hardware/enclosure/README.md).
+the arch. The board clicks into the back, the display into the front, and the front onto the back. What to print,
+the parts it needs and how it goes together are in [hardware/enclosure/README.md](../hardware/enclosure/README.md).
 
 ![The clock in its case](../hardware/enclosure/images/case.jpg)
 
@@ -306,6 +309,8 @@ behind these checks are listed in [DEVELOPER.md](../DEVELOPER.md) section 11; th
       [design page](https://claude.ai/artifact/XttPFXwoSqycdCdLjbHLoi) (clock C, menu M1, Teal).
     - Every icon shows; a missing one would show as an empty box.
     - Screen Colour changes the accent colour at once.
+    - Unplugged and plugged back in while the clock runs, the screen comes back in its own colours within 30
+      seconds, or at once with a key press. While it stays plugged in, nothing on it flickers every 30 seconds.
     - A TFT clock offers only TFT releases (`manifest-tft.json`), and an OLED clock only OLED ones.
 14. **Screen settings,** on both displays:
     - Brightness at 10 % is readable in a dark room, and 100 % in daylight. 0 % turns the screen dark at once.

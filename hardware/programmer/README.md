@@ -42,8 +42,7 @@ into it (from the back, GND is at the right).
   USB-C, plugged in after the programmer is in J6, because the ESP32 reads GPIO0 only as it starts.
 - **The log:** to read the running firmware's log, start the clock first (USB-C, the adapter's 3V3 left off), then
   put the programmer in. GPIO0 doesn't matter once the clock is running.
-- **TFT:** with the TFT fitted, J6 is under the display. Flash before you solder the TFT; later updates go over
-  Wi-Fi.
+- **TFT:** in the case, J6 sits under the TFT, which is held in the case's front. Take the front off to reach J6.
 
 ## 3. How it is wired
 

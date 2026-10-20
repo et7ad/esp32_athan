@@ -11,7 +11,7 @@ the short list of rules the code depends on in [firmware_rules.md](firmware_rule
 |---|---|
 | `firmware/athan.yaml` | All behaviour: entities, menus, schedule, scripts, intervals (ESPHome + inline C++ lambdas). `display_type` (oled or tft) picks the display file |
 | `firmware/displays/oled.yaml` | The OLED build's display part: I2C, the SSD1306/SH1106, fonts, `update_display` (clock screen, pop-ups, Wi-Fi setup), the hot-plug watchdog |
-| `firmware/displays/tft.yaml` | The TFT build's display part: SPI, the ST7789 (`mipi_spi`), the PWM backlight (`apply_screen`), Roboto and Material Symbols fonts (bpp 4), the Screen Colour setting (global, web select, its menu row in `menu_display_rows`), and every screen in the display's `lambda:` (the ring clock, pop-ups, Wi-Fi setup) |
+| `firmware/displays/tft.yaml` | The TFT build's display part: SPI, the ST7789 (`mipi_spi`), the PWM backlight (`apply_screen`), Roboto and Material Symbols fonts (bpp 4), the Screen Colour setting (global, web select, its menu row in `menu_display_rows`), and every screen in the display's `lambda:` (the ring clock, pop-ups, Wi-Fi setup), which also sends the screen's start-up commands again (`tft_panel.h`) |
 | `firmware/partitions.csv` | 16 MB layout: nvs, otadata, app0/app1 (0x360000 each), `prayer` (0x41, 128 KB), `audio` (0x40, 0x910000) |
 | `firmware/components/athan/__init__.py` | Component schema: `media_player`, `media_speaker` and `announcement_speaker` (the two resamplers, for clean starts and format checks), `time_id`, `data_url`, `radio_urls` (list of `text` ids), `display` (oled or tft: defines `ATHAN_DISPLAY_OLED` / `ATHAN_DISPLAY_TFT`). Requests the MP3 decoder, the certificate bundle, `esp_http_client` and `esp-tls` |
 | `athan.h/.cpp` | `AthanComponent`, the worker task, `AudioWebHandler` (the `/audio` page) |
@@ -23,12 +23,15 @@ the short list of rules the code depends on in [firmware_rules.md](firmware_rule
 | `menu.h/.cpp`, `menu_frame.h` | The menu's navigation (host-tested), and the `Frame` both drawings read (`frame_of()`, the redraw fingerprint) |
 | `menu_view.h/.cpp`, `menu_view_tft.cpp` | `draw_menu()` for the OLED (`menu_view.cpp`) or the TFT (`menu_view_tft.cpp`): one of them is compiled (`ATHAN_DISPLAY_TFT`) |
 | `tft_theme.h`, `tft_draw.h/.cpp` | The TFT's colours (neutrals, the five Screen Colour palettes) and Material Symbols code points (`sym::`); `ring()` (the clock's ring: filled part and track in one pass, about 9 ms of a 50 ms frame); shapes with smoothed edges (rounded boxes, circles, ring arcs) and `icon()` |
+| `tft_panel.h` | The TFT's start-up commands sent again with a whole frame, so a screen plugged back in comes back: the copy kept at boot, `PanelResend` (the settings, MADCTL and Sleep Out before the frame is drawn), `panel_on()` (Display On after it), and `panel_part()`, which splits the sequence around Sleep Out (host-tested in `test_helpers.cpp`) |
 | `firmware/tests/` | `run_tests.sh` (host unit tests), `syntax_check.sh` (type check), `idf_stubs/` (SDK stand-ins) |
 | `firmware/sounds/` | `click.wav`, `volume.wav`: built-in tones (`media_player: files:`), mono 16-bit 44.1 kHz WAV (no decoding, no MP3 encoder padding ahead of the sound) |
 
 ## 2. Boot
 
-1. ESPHome setup by priority. `AthanComponent::setup()` (priority `AFTER_WIFI`) does the following:
+1. ESPHome setup by priority. On a TFT build, an `on_boot` entry at priority 700 (`displays/tft.yaml`) first keeps a
+   copy of the screen's start-up commands, which the display's setup (priority 600) sends and then discards
+   (`tft_panel.h`). `AthanComponent::setup()` (priority `AFTER_WIFI`) does the following:
    1. Maps the audio regions and verifies each header and data CRC (`AudioSlots::begin`).
    2. Reads the prayer slot headers (`PrayerStore::begin`).
    3. Starts the worker task (`athan_worker`, 10 KB internal stack, priority 1: the same as ESPHome's main loop and
@@ -331,7 +334,7 @@ relay is on because of Pre-Fajr: on_boot switches it off). The ten `radio_url_N`
 | `sync_web_state` (1 s interval) | Publish entities only on change: values are formatted into a buffer and compared in place; the status lines are copied each second (short strings, under the component's lock) |
 | `screen_refresh` (1 s interval, and after a change) | The screen's level: Brightness (0 % = dark), or at night (Night From to Until) by Screen at Night (`night_level()` in `day_window.h`): the same as by day (Normal, which never looks at the window), `screen_dim_pct` (Dim) or dark (Turned off). A screen that would be dark is lit dim for `screen_wake_s` (120 s) after a key, and while the athan or the Pre-Fajr Tawashih plays (the 120 s start when it ends); `screen_dark_in` holds the seconds left (-1 when it stays lit), redrawn each second, and the display files draw it as a tab in a corner. Brightness set to 0 % sets `screen_force_dark`: dark at once, until the next key or the athan / Pre-Fajr Tawashih. Calls the display file's `apply_screen` only when the level changes (`screen_pct_applied`; 0 = dark, which `ui_key` reads: that key press only lights the screen) |
 | `apply_screen`, `menu_display_rows` | In the display file. OLED: contrast (scaled by `oled_contrast`) or panel off; no rows. TFT: the backlight light (gamma 2); the Screen Colour row |
-| `update_display` | In the display file. TFT: `id(tft).update()`, which runs the display's `lambda:` (mipi_spi draws only inside `update()`, and does not clear its buffer: `auto_clear_enabled: false`); asked with each new second of the clock (a 50 ms interval watching `time()`, so the seconds change within 50 ms of the real second; a 1 s interval would keep its boot-time phase) while the clock shows. The lambda draws the whole face (filling it black first, about 50 ms) at least every `tft_ring_update_s` (30 s), when the minute changes, every second in the last minute before a prayer, and when a fingerprint of all else it shows changes; otherwise only the seconds' box (about 2.5 ms, about 1 KB sent). OLED: the whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`, 26 px), the status marks and the weekday with the date under them, the five prayers with the next one (the calling one during the athan) in a 29-px box, its time in `font3` (Dhuhr only outlined while Sunrise or Doha is next; with Fajr highlighted the other columns move right 1-2 px, clear of its box), and a framed box at the bottom: the next prayer small and its time in `font3`, the time left large (`font1`); while the athan plays it turns white with the prayer's name and ATHAN TIME, joined to its column |
+| `update_display` | In the display file. TFT: `id(tft).update()`, which runs the display's `lambda:` (mipi_spi draws only inside `update()`, and does not clear its buffer: `auto_clear_enabled: false`); asked with each new second of the clock (a 50 ms interval watching `time()`, so the seconds change within 50 ms of the real second; a 1 s interval would keep its boot-time phase) while the clock shows. The lambda draws the whole face (filling it black first; 54-57 ms on the prototype, 2026-10-20, over ESPHome's 50 ms for one operation, so the log warns "update_display took a long time" with each one) at least every `tft_ring_update_s` (30 s), when the minute changes, every second in the last minute before a prayer, and when a fingerprint of all else it shows changes; otherwise only the seconds' box (about 2.5 ms, about 1 KB sent). A whole frame also carries the screen's start-up commands at most every `tft_resend_s` (30 s) and after a key press (at most once a second), with Display On on the next pass of the loop (`tft_panel_on`), once the frame is on the panel: a screen plugged back in powers up dark, and SPI cannot tell (`tft_panel.h`; 16 short commands before the drawing, 1.1 ms, and Display On under 1 ms, measured on the prototype 2026-10-20). OLED: the whole OLED, on the next pass of the loop (`delay: 0ms`, `mode: restart`): requests made in one pass become one draw (about 23 ms of I2C each). The clock screen is the timetable: the time (`font5`, 26 px), the status marks and the weekday with the date under them, the five prayers with the next one (the calling one during the athan) in a 29-px box, its time in `font3` (Dhuhr only outlined while Sunrise or Doha is next; with Fajr highlighted the other columns move right 1-2 px, clear of its box), and a framed box at the bottom: the next prayer small and its time in `font3`, the time left large (`font1`); while the athan plays it turns white with the prayer's name and ATHAN TIME, joined to its column |
 
 **Intervals:** 1 s schedule, 1 s `sync_web_state` (also the menu's 60 s timeout, and its redraw when `menu_changed()`), 100 ms
 window-settings fingerprint (runs `sync_web_state` at once when it changes), 10 s
@@ -408,8 +411,9 @@ CHOICES as chips, SWATCHES as colour dots, marks as icons (check_circle, graphic
   Riyadh (280,512 vectors).
 - With MP3 paths as arguments (relative to the current folder or absolute), `mp3_scan` against `ffprobe`.
 - The device menu's navigation (`test_menu.cpp`).
-- The day windows, `night_level()` and other helpers (`test_helpers.cpp`); every `sym::` icon code point in the TFT's
-  icon fonts.
+- The day windows, `night_level()` and other helpers (`test_helpers.cpp`), among them the TFT's start-up sequence
+  split around Sleep Out (`tft_panel.h`, on ESPHome's own sequence for this panel); every `sym::` icon code point in
+  the TFT's icon fonts.
 - The TFT's ring drawing (`test_tft_draw.cpp`, against a stand-in `display.h` in `tests/host_display/`): `arc()` and
   `ring()` draw the same pixels as a plain scan that works out the angle of every pixel, for 5,820 rings and arcs.
 - `docs/` (`check_docs.py`): the catalog (at most 64 KB, names ASCII and at most 12 characters, no duplicate links,
@@ -448,6 +452,11 @@ only hardware can confirm:
 - The MAX98357A gain jumper and the 4.7 kΩ SD_MODE resistor, left channel (`max98357a_amplifier.md`).
 - Whether the time survives a software restart (an update, the Restart button) before SNTP answers: ESP-IDF keeps
   it across software restarts, but not across a power cut.
+- That a TFT plugged back in while the clock runs wakes on its start-up commands alone (`tft_panel.h`). The ST7789
+  datasheet promises a correct start for a panel that powers up with its reset line held high, as here, only after a
+  hardware reset, which these commands leave out. Seen on the prototype (2026-10-20): the screen came back every
+  time, within 30 s or at once with a key, in its own colours, and while it stayed plugged in nothing on it flickered
+  when the commands repeated. Another module may need the reset.
 
 ## 12. Ideas for later
 

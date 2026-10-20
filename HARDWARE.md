@@ -48,7 +48,8 @@ USB-C, power only (J1) ──┐
     resistor), VBUS and GND stay on their nets.
   - It has no data lines: the first flash and the serial log go through J6 (section 3).
 - **J2, barrel jack** (CUI PJ-102AH), centre positive, also on **+5V**. It takes a regulated 5 V supply only. Use one
-  input at a time: the two are joined directly.
+  input at a time: the two are joined directly. It is a fallback for a board whose USB-C fails: the case has no
+  opening for it, so a board with J2 fitted runs without the case.
 - **C1, 470 µF electrolytic** (8 × 10.5 mm) on +5V: the bulk capacitor for the amplifier's peaks. It is the one tall
   part, on the front.
 - **C2, 22 µF** on +5V at the regulator's input.
@@ -190,10 +191,10 @@ shares the footprint in `hardware/pcb/libs/SKQUAAA010/`.
 | U3 | AMS1117-3.3, SOT-223 (LCSC C6186) | back |
 | U4 | MAX98357AETE+T, TQFN-16 (LCSC C910544) | back |
 | J1 | USB-C receptacle, 6-pin, power only (GCT USB4125-GF-A, LCSC C3151650) | front or back |
-| J2 | Barrel jack, CUI PJ-102AH (LCSC C3096093) | front |
+| J2 | Barrel jack, CUI PJ-102AH (LCSC C3096093); a fallback, not fitted in the case | front |
 | J3, J5 | 2-pin screw terminals, 5.0 mm pitch (MaiXu MX126-5.0-02P, LCSC C5188434), speaker and relay | front |
-| J6 | 1×6 pin header, 2.54 mm, with a jumper cap; or none, flashing through the press-in programmer ([hardware/programmer](hardware/programmer/README.md)) | front |
-| DS1 or DS2 | 1×4 header for the OLED, or 1×8 header for the TFT (only the one you use): a long-pin header, about 19 mm, so the display sits in the case's window (section 9) | front |
+| J6 | 1×6 pin header, 2.54 mm, with a jumper cap; or none, flashing through the press-in programmer ([hardware/programmer](hardware/programmer/README.md)). None with the TFT: it sits under the display | front |
+| DS1 or DS2 | 1×4 header for the OLED, or 1×8 header for the TFT (only the one you use): a standard 2.54 mm male header pushed in from the back, its pins standing up on the front. The display carries the matching 8.5 mm female header and plugs onto it (section 9) | front |
 | C1 | 470 µF 10 V low-ESR electrolytic, 8 × 10.5 mm (Panasonic EEE-FK1A471P, LCSC C178530) | front |
 | C2, C3, C6 | 22 µF 25 V ceramic, 1206, X5R or X7R (Samsung CL31A226KAHNNNE, LCSC C12891) | back |
 | C4, C7 | 100 nF 50 V X7R, 1206 (Samsung CL31B104KBCNNNC, LCSC C24497) | back |
@@ -205,9 +206,9 @@ shares the footprint in `hardware/pcb/libs/SKQUAAA010/`.
 | D1 | Blue LED, 1206 (NationStar NCD1206B1, LCSC C130717) | front |
 | JP1, JP2, JP4 | solder jumpers, bridged as made; JP3 open | back |
 | H1 to H4 | M3 mounting holes | |
-| | Display module: 1.3" SH1106 (or 0.96" SSD1306) 128×64 I2C OLED, or 1.54" ST7789 240×240 IPS TFT | wired to its header |
-| | Speaker, 40 mm round, 4 Ω 3 W, up to 17 mm deep (the size the case holds) | wired to J3 |
-| | Case: three printed parts and 6 × M3 × 16 countersunk screws (section 9) | |
+| | Display module: 1.3" SH1106 (or 0.96" SSD1306) 128×64 I2C OLED, or 1.54" ST7789 240×240 IPS TFT, with a 2.54 mm female header (8.5 mm) on its back | plugs onto DS1 or DS2 |
+| | Speaker, 40 mm round, 4 Ω 3 W, up to 16.5 mm deep (18.5 mm with the TFT's case) | wired to J3 |
+| | Case: three printed parts; 6 × M3 × 16 countersunk screws for extra hold (section 9) | |
 
 Every small part is 1206, a size that is easy to solder by hand. The LCSC numbers are also in the schematic (the
 LCSC field), for JLCPCB to assemble the board: [guides/jlcpcb_assembly.md](guides/jlcpcb_assembly.md).
@@ -220,8 +221,8 @@ Prices (LCSC, October 2026): the module costs $5.19 (10+: $4.56, 100+: $3.64), t
 The board is 59.6 × 50 mm, with two layers. Every part is soldered by hand, on both sides.
 
 - **Front** (the side you look at): the TFT header DS2 at the top centre and the OLED header DS1 above the centre
-  (only one display is fitted, on long headers, so low parts can sit under it), the 5-way switch at the OLED's right
-  edge, the USB-C and barrel jacks on the left, the speaker and relay terminals on the right, the status LED at the
+  (only one display is fitted; it plugs onto its header from the case's front, 9.3 mm above the board, so low parts
+  can sit under it), the 5-way switch at the OLED's right edge, the USB-C and barrel jacks on the left, the speaker and relay terminals on the right, the status LED at the
   top left (always visible), and the tall capacitor C1, never under a display.
 - **Back:** the module with its antenna end at the bottom edge, over a copper keep-out on both layers, and the
   amplifier, the regulator and the small parts above it.
@@ -245,15 +246,17 @@ datasheets, and check the 3D view for anything tall where it should not be.
 ## 9. Enclosure
 
 The case is in `hardware/enclosure/`. It is printed in three parts without supports, and shaped like a mihrab: a
-rectangle with a pointed arch on top. It measures 72 × 115 × 23.5 mm. How to print and assemble it:
-[hardware/enclosure/README.md](hardware/enclosure/README.md).
+rectangle with a pointed arch on top. It measures 69 × 114 × 23 mm with the TFT (21 mm with the OLED). How to print
+and assemble it: [hardware/enclosure/README.md](hardware/enclosure/README.md).
 
 | Item | How the case does it |
 |---|---|
-| Board mount | Four posts on the front and four tubes on the back clamp the board at its M3 holes, held by six M3 × 16 countersunk screws from the back |
-| Display | Soldered on the board with a long-pin header. Its glass sits in a pocket behind a bevelled window, and the front holds it while you solder it, so it ends up flush and centred. There is one front for the OLED and one for the TFT |
-| Power | The barrel jack's face is flush with the left side. A 12.6 × 7 mm opening takes USB-C cable plugs, with one back for J1 on the front and one for J1 on the back |
-| J6 | Inside: lift the board out of the front. On the TFT build the display covers J6, so the first flash comes before the display; updates go over Wi-Fi |
+| Board mount | The board clicks into the back: two ledges take its bottom edge, two hooks snap over its top edge, and ribs centre it. Six M3 × 16 countersunk screws from the back add hold: four clamp the board at its M3 holes between the front's posts and the back's tubes, two go into the arch |
+| Display | Clicks into the front: its glass sits in a pocket behind a bevelled window, its board's bottom edge goes into two grooved stops and two springs catch its sides. A female header on its back plugs onto the board's male header as the case closes, with 0.8 mm to spare, so the case closes on its own seat. There is one front for the OLED and one for the TFT |
+| Closing | The front clicks onto the back. Two long posts in the arch enter sockets in the back, then two pins enter the board's spare display holes, before the headers meet |
+| Power | A 12.6 × 7 mm opening takes USB-C cable plugs, with one back for J1 on the front and one for J1 on the back. No opening for the barrel jack |
+| J6 | Inside, under the TFT: take the front off. No header there with the TFT; flash with the press-in programmer |
+| Terminals | They stand in openings in the face, their screws 4.7 mm below it (2.6 mm with the OLED) |
 | Switch | A printed knob pressed onto the stem, through a 10 mm hole that leaves room to tilt it |
 | LED | A hole over it, with a tube for a light pipe (1.75 mm clear filament) |
 | Speaker | 40 mm, clipped behind a grille of eight-pointed stars in the arch, with a ring that seals it to the face |
