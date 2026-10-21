@@ -8,13 +8,15 @@ releases. This is for whoever maintains the project.
 3. [Sounds](#3-sounds)
 4. [Radio stations](#4-radio-stations)
 5. [Firmware releases](#5-firmware-releases)
+6. [The website](#6-the-website)
 
 ## 1. How the clocks get their data
 
 Everything the clocks download lives under `docs/` on the `main` branch, and they read it over HTTPS from
 `https://raw.githubusercontent.com/et7ad/esp32_athan/main/docs/...`. A change there reaches every clock without a
 firmware update. `firmware/tests/run_tests.sh` checks everything under `docs/` (the lists, the stations, the
-mosques and every yearly file) before you push.
+mosques and every yearly file) before you push. The same folder is also the project's website (section 6); the clocks
+read only their own files in it.
 
 ## 2. Prayer times
 
@@ -37,8 +39,10 @@ minutes away from the day before. Both comparisons go through UTC, so daylight s
 Add `--dry-run` to check without writing. The PDF and HTML parsers need `pip install pdfplumber` and
 `pip install beautifulsoup4`.
 
-`python3 scripts/plot_prayer_times.py docs/athantimes` draws every year as an HTML chart next to its file, plus a
-page that links them all (`docs/index.html`; it needs `pip install plotly`). A typo stands out at a glance there.
+The website's **Prayer times** page draws every published year of every mosque on a chart, straight from these
+files, so a typo stands out at a glance there (in a local preview before you push: section 6). Offline,
+`python3 scripts/plot_prayer_times.py docs/athantimes` draws the same charts as Plotly pages next to each file, with
+`docs/athantimes/charts.html` linking them (it needs `pip install plotly`).
 
 **Publish each new year as soon as the mosque publishes its timetable,** whether that is in November or in
 January. Clocks pick it up within a day in December, or within 6 hours from 1 January. Until then they estimate the
@@ -150,3 +154,33 @@ A change to `firmware/partitions.csv` cannot be delivered as an update: every cl
 USB ([building.md](building.md) section 4).
 
 Version 2 clocks read only their own repository's update file, so they never see these releases.
+
+## 6. The website
+
+The website, [et7ad.github.io/esp32_athan](https://et7ad.github.io/esp32_athan/), is GitHub Pages serving `docs/` on
+`main` as it is (`docs/.nojekyll` switches off GitHub's Jekyll processing). In the repository's settings, Pages takes
+the branch `main` and the folder `/docs`. A push to `main` updates the site within a minute or two.
+
+- **The pages** are `docs/*.html`, plain HTML with their scripts and styles in `docs/assets/`, and no build step.
+  They read the clocks' own files (the mosques, the yearly times, the sound list and the stations), so a mosque, a year
+  or a sound added there appears on the site by itself.
+- **The guides** (`read.html`) are the repository's Markdown files, loaded from GitHub as they are: a change to a
+  guide reaches the site with the push.
+- **Pictures** from outside `docs/` (`images/`, `hardware/…/images/`) come from GitHub too; the site's own screenshots
+  are in `docs/assets/img/`.
+- **The clock in the browser** (`docs/assets/tft.js`) is a copy of the colour screen's drawing, its menu and its keys.
+  When the firmware's screen, menu rows or keys change, change it there too.
+- **The parts and the checklist** on the build page are `docs/assets/parts.js`, from HARDWARE.md section 7 and
+  building.md sections 1, 2 and 7: keep them in step.
+- **The 3D models** (`docs/assets/models/`) are made from the case's assembly files. After
+  `hardware/enclosure/enclosure.py --assembly`, run
+  `uv run --python 3.12 --with cadquery python scripts/make_site_models.py` (it needs Node.js for gltfpack).
+
+To preview before pushing, serve the repository's root and open the `docs/` folder:
+
+```bash
+python3 -m http.server 8000
+# then open http://localhost:8000/docs/
+```
+
+The preview reads pictures and guides from your working copy, so changes show before they are pushed.

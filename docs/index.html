@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Athan clock</title>
+<meta name="description" content="An open prayer clock that calls the athan at your mosque's times, plays Quran radio and keeps a year of prayer times in its own memory. Set it up, use it, or build your own.">
+<meta property="og:title" content="Athan clock">
+<meta property="og:description" content="An open prayer clock that follows your mosque's timetable. Set it up, use it, or build your own.">
+<meta property="og:image" content="https://raw.githubusercontent.com/et7ad/esp32_athan/main/hardware/enclosure/images/colours.jpg">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <div>
+        <h1>A prayer clock that follows your mosque's timetable</h1>
+        <p class="lede">It calls the athan at your mosque's times, shows the next prayer from across the room and plays
+          Quran radio. A whole year of times lives in its own memory, so the athan keeps coming without internet.</p>
+        <div class="btn-row">
+          <a class="btn btn-primary" href="setup.html"><span class="icon">wifi</span>Set up my clock</a>
+          <a class="btn btn-ghost" href="build.html"><span class="icon">build</span>Build one</a>
+        </div>
+        <p class="small muted" style="margin-top:22px">Have an older clock (an ESP8266 with a DFPlayer, version 2)? It
+          has its own project: <a href="https://github.com/et7ad/esp_athan">et7ad/esp_athan</a>.</p>
+      </div>
+      <div class="hero-device">
+        <div class="rig">
+        <div id="hero-device"></div>
+        <div class="joystick" id="hero-keys" aria-label="The clock's joystick">
+          <button class="j-up" data-key="up" aria-label="Up"><span class="icon">keyboard_arrow_up</span></button>
+          <button class="j-left" data-key="left" aria-label="Left"><span class="icon">keyboard_arrow_left</span></button>
+          <button class="j-sel" data-key="select" aria-label="Select (push in)"><span class="icon">radio_button_checked</span></button>
+          <button class="j-right" data-key="right" aria-label="Right"><span class="icon">keyboard_arrow_right</span></button>
+          <button class="j-down" data-key="down" aria-label="Down"><span class="icon">keyboard_arrow_down</span></button>
+        </div>
+        </div>
+        <div class="hero-meta">
+          <label for="hero-mosque">Times of</label>
+          <select id="hero-mosque" aria-label="Mosque"></select>
+        </div>
+        <p class="sim-hint">The screen is live. Press the joystick (or click the screen and use the arrow keys and
+          Enter) to open the menu, as on the clock.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-today">
+    <div class="wrap day">
+      <div class="day-head">
+        <h2 id="h-today">Today at <span id="today-name">your mosque</span></h2>
+        <a href="times.html">The whole year, for every mosque</a>
+      </div>
+      <div id="day-ribbon" aria-live="polite"></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-start">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-start">Where would you like to start?</h2></div>
+      <div class="paths">
+        <a class="path" href="setup.html"><span class="tile"><span class="icon">wifi</span></span>
+          <span><h3>Set up a new clock</h3><p>Connect it to your Wi-Fi from a phone, choose your mosque, and it does the rest.</p></span></a>
+        <a class="path" href="use.html"><span class="tile"><span class="icon">touch_app</span></span>
+          <span><h3>Learn the screen and the menu</h3><p>What every mark means, what each key does, and the web page on your phone.</p></span></a>
+        <a class="path gold" href="build.html"><span class="tile"><span class="icon">build</span></span>
+          <span><h3>Build your own</h3><p>The parts and where to buy them, the wiring, the firmware, the board and the printed case.</p></span></a>
+        <a class="path gold" href="times.html#add"><span class="tile"><span class="icon">add_location_alt</span></span>
+          <span><h3>Add your mosque</h3><p>Send its timetable, and it appears on every clock without an update.</p></span></a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-how">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="h-how">How the prayer times reach a clock</h2>
+        <p>Every mosque publishes its times its own way. Rather than teach the clock all of them, the work is split in
+          two: getting each mosque's times right happens here, once, and the clock only has to read one simple file.</p>
+      </div>
+      <div class="flow">
+        <div>
+          <div class="art" aria-hidden="true"><svg viewBox="0 0 120 86"><rect x="6" y="10" width="44" height="58" rx="4" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M14 24h28M14 33h28M14 42h20M14 51h24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><rect x="58" y="22" width="56" height="44" rx="5" fill="none" stroke="var(--teal)" stroke-width="2.5"/><path d="M58 32h56" stroke="var(--teal)" stroke-width="2.5"/><circle cx="64" cy="27" r="1.6" fill="var(--teal)"/><circle cx="70" cy="27" r="1.6" fill="var(--teal)"/><path d="M66 42h40M66 50h28M66 58h34" stroke="var(--teal)" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+          <div class="num">1</div>
+          <h3>Your mosque publishes its timetable</h3>
+          <p>A PDF, a web page, a spreadsheet: whatever it already uses.</p>
+        </div>
+        <div>
+          <div class="art" aria-hidden="true"><svg viewBox="0 0 120 86"><path d="M30 8h44l18 18v52a4 4 0 0 1-4 4H30a4 4 0 0 1-4-4V12a4 4 0 0 1 4-4z" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M74 8v18h18" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="m44 52 9 9 19-21" fill="none" stroke="var(--teal)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><text x="36" y="34" font-family="var(--mono)" font-size="11" fill="currentColor">2027</text></svg></div>
+          <div class="num">2</div>
+          <h3>It becomes one checked file here</h3>
+          <p>Scripts turn the timetable into one file per year, in one format, and check every day of it before it is
+            published on GitHub.</p>
+        </div>
+        <div>
+          <div class="art" aria-hidden="true"><svg viewBox="0 0 120 86"><path d="M34 80V44a26 26 0 0 1 26-28 26 26 0 0 1 26 28v36z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/><rect x="47" y="50" width="26" height="22" rx="2" fill="var(--night)"/><path d="M53 64h14" stroke="var(--teal)" stroke-width="2.5" stroke-linecap="round"/><path d="M60 4v6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/><path d="M92 30c6 4 6 14 0 18M98 24c10 7 10 23 0 30" fill="none" stroke="var(--gold)" stroke-width="2.5" stroke-linecap="round"/></svg></div>
+          <div class="num">3</div>
+          <h3>Every clock downloads its year</h3>
+          <p>Once a year, kept in its own memory. It never contacts the mosque's website, so a site that changes or
+            goes offline can't affect it.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-what">
+    <div class="wrap grid-2" style="align-items:start">
+      <div class="section-head" style="margin:0">
+        <h2 id="h-what">What it does</h2>
+        <p>Plug it in, connect it once, and it runs by itself. Everything below can also be done from a phone, on the
+          clock's own web page.</p>
+        <p><a href="use.html">See the screen and the menu</a></p>
+      </div>
+      <ul class="features">
+        <li><span class="icon">mosque</span><span><b>The athan at every prayer</b><span class="d">A separate Fajr athan, each at its own volume, and each prayer's athan can be switched off on its own.</span></span></li>
+        <li><span class="icon">event</span><span><b>A year of times, offline</b><span class="d">Once it is set, the athan needs no internet. It fetches next year's times by itself in December.</span></span></li>
+        <li><span class="icon">radio</span><span><b>Quran radio</b><span class="d">Ten stations from this project's list, or any stream link of your own.</span></span></li>
+        <li><span class="icon">headphones</span><span><b>Your choice of reciter</b><span class="d">Choose each sound from the project's library, or upload your own MP3.</span></span></li>
+        <li><span class="icon">alarm</span><span><b>Pre-Fajr Tawashih</b><span class="d">25 minutes before Fajr it plays a tawashih and can switch a room light on.</span></span></li>
+        <li><span class="icon">timer</span><span><b>An hourly tick</b><span class="d">During the hours you choose, from Fajr to Isha for example.</span></span></li>
+        <li><span class="icon">smartphone</span><span><b>Set up from a phone</b><span class="d">Over Bluetooth, or through the clock's own Wi-Fi hotspot. Works with Home Assistant too.</span></span></li>
+        <li><span class="icon">system_update</span><span><b>Updates when you choose</b><span class="d">It shows a small mark when new firmware is out, and never installs by itself.</span></span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-see">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="h-see">A case shaped like a mihrab</h2>
+        <p>The speaker plays through a grille of eight-pointed stars in the arch, and "حي على الصلاة" (come to prayer)
+          is engraved under the screen. It prints in three parts, without supports, in the colours you like.</p>
+      </div>
+      <div class="gallery">
+        <figure><img data-repo="hardware/enclosure/images/colours.jpg" alt="The clock in ivory, teal and black, each with a gold knob" width="1527" height="800" loading="lazy"></figure>
+        <figure><img data-repo="images/board_front_back.jpg" alt="The circuit board: the front with the colour screen fitted, and the back" loading="lazy" width="2000" height="744"></figure>
+        <figure><img data-repo="hardware/enclosure/images/exploded.jpg" alt="The case's parts, apart" loading="lazy" width="1200" height="970">
+          <figcaption><a href="build.html#case">Turn it around in 3D</a>, and see what to print.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+</main>
+<footer id="site-footer"></footer>
+
+<script type="module">
+import { loadMosques, chosenMosque, dayTimes, remember, NAMES7, COLOR_VARS, hhmm, esc } from './assets/site.js';
+import { Clock, mountDevice } from './assets/tft.js';
+
+const host = document.getElementById('hero-device');
+const canvas = mountDevice(host, 'ivory');
+const keys = document.getElementById('hero-keys');
+const clock = new Clock(canvas, {
+  onKey: k => { const b = keys.querySelector(`[data-key="${k}"]`); if (b) { b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 140); } },
+  onChange: () => {},
+});
+keys.addEventListener('click', ev => { const b = ev.target.closest('[data-key]'); if (b) clock.key(b.dataset.key); });
+host.querySelector('.knob-hit').addEventListener('click', () => clock.key('select'));
+canvas.addEventListener('click', () => canvas.focus());
+
+const mosques = await loadMosques();
+const sel = document.getElementById('hero-mosque');
+sel.innerHTML = mosques.map(m => `<option value="${esc(m.key)}">${esc(m.label)}</option>`).join('');
+let mosque = chosenMosque(mosques);
+sel.value = mosque.key;
+await clock.init(mosque.key);
+sel.addEventListener('change', () => {
+  mosque = mosques.find(m => m.key === sel.value);
+  remember('athan-mosque', mosque.key);
+  clock.setMosque(mosque.key);
+  ribbon();
+});
+
+// Today's prayers on one line from midnight to midnight, the sky's colours behind them, and now.
+async function ribbon() {
+  document.getElementById('today-name').textContent = mosque.name;
+  const d = await dayTimes(mosque, Date.now());
+  const box = document.getElementById('day-ribbon');
+  if (!d.times) { box.innerHTML = '<p class="muted">No timetable published for this mosque this year yet.</p>'; return; }
+  const W = 1000, X = m => (m / 1440) * W, t = d.times, now = d.parts.h * 60 + d.parts.mi;
+  const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  // the sky behind them (night, dawn, day, sunset, night); the prayers keep their own colours as marks
+  const stops = [[0, '#1d2550'], [Math.max(0, t[0] - 40), '#26306a'], [t[0], '#6a5fb8'], [t[1], '#f0a27a'], [Math.min(t[3], t[2] + 90), '#bfe1ec'],
+    [t[3], '#d4ecf2'], [t[4], '#efd48f'], [t[5], '#e0736a'], [t[6], '#353c78'], [1440, '#1d2550']];
+  let next = t.findIndex(v => v > now); if (next < 0) next = 0;
+  const marks = t.map((m, i) => {
+    const x = X(m), up = i % 2 === 0;
+    const big = i !== 1 && i !== 2;
+    return `<g transform="translate(${x.toFixed(1)} 0)">
+      <line y1="34" y2="70" stroke="${css(COLOR_VARS[i])}" stroke-width="${i === next ? 4 : 2}"/>
+      <circle cy="52" r="${i === next ? 8 : big ? 6 : 4.5}" fill="${css(COLOR_VARS[i])}" stroke="var(--paper-2)" stroke-width="3"/>
+      <text class="dl" y="${up ? 22 : 90}" text-anchor="middle">${NAMES7[i]}</text>
+      <text class="dt" y="${up ? 5 : 108}" text-anchor="middle" style="${i === next ? 'fill:var(--teal)' : ''}">${hhmm(m)}</text></g>`;
+  }).join('');
+  box.innerHTML = `<svg viewBox="-40 -14 ${W + 80} 128" role="img" aria-label="Today's prayer times at ${esc(mosque.name)}">
+    <defs><linearGradient id="sky" x1="0" x2="1">${stops.map(([m, c]) => `<stop offset="${(m / 1440).toFixed(4)}" stop-color="${c}"/>`).join('')}</linearGradient></defs>
+    <rect x="0" y="46" width="${W}" height="12" rx="6" fill="url(#sky)" opacity=".85"/>
+    <text class="dl" x="0" y="76" text-anchor="start">0:00</text><text class="dl" x="${W}" y="76" text-anchor="end">24:00</text>
+    ${marks}
+    <g transform="translate(${X(now).toFixed(1)} 0)"><line y1="36" y2="68" stroke="var(--ink)" stroke-width="2" stroke-dasharray="3 3"/>
+      <rect x="-24" y="60" width="48" height="20" rx="10" fill="var(--ink)"/><text x="0" y="74.5" text-anchor="middle" style="font:700 12px var(--body);fill:var(--paper)">now</text></g>
+  </svg>
+  <div class="today day-cards">${t.map((m, i) => `<div class="t${i === next ? ' next' : ''}" style="--c:var(${COLOR_VARS[i]})"><b>${NAMES7[i]}</b><span>${hhmm(m)}</span></div>`).join('')}</div>
+  <p class="small muted">${d.standin ? 'This year\'s timetable is not published yet: these are last year\'s times for the same date, as the clock uses them. ' : ''}Next: <b style="color:var(--ink)">${NAMES7[next]} at ${hhmm(t[next])}</b>, local time at the mosque.</p>`;
+}
+ribbon();
+document.addEventListener('themechange', ribbon);
+setInterval(ribbon, 60000);
+</script>
+</body>
+</html>

@@ -251,13 +251,13 @@ and assemble it: [hardware/enclosure/README.md](hardware/enclosure/README.md).
 
 | Item | How the case does it |
 |---|---|
-| Board mount | The board clicks into the back: two ledges take its bottom edge, two hooks snap over its top edge, and ribs centre it. Six M3 × 16 countersunk screws from the back add hold: four clamp the board at its M3 holes between the front's posts and the back's tubes, two go into the arch |
+| Board mount | The board clicks into the back: two ledges take its bottom edge, a spring along its top edge (a wall between two posts, with two lips) snaps over it, and ribs centre it. Six M3 × 16 countersunk screws from the back add hold: four clamp the board at its M3 holes between the front's posts and the back's tubes, two go into the arch |
 | Display | Clicks into the front: its glass sits in a pocket behind a bevelled window, its board's bottom edge goes into two grooved stops and two springs catch its sides. A female header on its back plugs onto the board's male header as the case closes, with 0.8 mm to spare, so the case closes on its own seat. There is one front for the OLED and one for the TFT |
 | Closing | The front clicks onto the back. Two long posts in the arch enter sockets in the back, then two pins enter the board's spare display holes, before the headers meet |
 | Power | A 12.6 × 7 mm opening takes USB-C cable plugs, with one back for J1 on the front and one for J1 on the back. No opening for the barrel jack |
 | J6 | Inside, under the TFT: take the front off. No header there with the TFT; flash with the press-in programmer |
-| Terminals | They stand in openings in the face, their screws 4.7 mm below it (2.6 mm with the OLED) |
-| Switch | A printed knob pressed onto the stem, through a 10 mm hole that leaves room to tilt it |
+| Terminals | J5's two screws are reached through 4.4 mm holes in the face, 4.7 mm deep (2.6 mm with the OLED); J3, the speaker's, is under the face |
+| Switch | A printed knob pressed onto the stem, through a 10 mm hole that leaves room to tilt it. Its 9.4 mm cap passes through the hole, so the front comes off over it |
 | LED | A hole over it, with a tube for a light pipe (1.75 mm clear filament) |
 | Speaker | 40 mm, clipped behind a grille of eight-pointed stars in the arch, with a ring that seals it to the face |
 | Antenna | No metal within 17 mm of the module's antenna end: the screws are at the corners and in the arch, and so is the speaker |

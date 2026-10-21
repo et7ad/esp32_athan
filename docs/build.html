@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build a clock | Athan clock</title>
+<meta name="description" content="Build an athan clock: the parts and where to buy them, a breadboard prototype, the firmware, flashing, the circuit board, the 3D-printed case and the acceptance checklist.">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<script type="importmap">{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/" } }</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .route { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .route a { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .route a:hover { border-color: var(--teal); color: var(--ink); }
+  .route .icon { color: var(--teal); font-size: 28px; }
+  .route b { font-family: var(--display); font-weight: 600; font-size: 18px; }
+  .route span.d { color: var(--ink-2); font-size: 15px; }
+  @media (max-width: 760px) { .route { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+  .renders { display: grid; gap: 12px; }
+  .renders img { width: 100%; }
+  .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  @media (max-width: 720px) { .two { grid-template-columns: minmax(0, 1fr); } }
+  .print-table td:last-child { white-space: nowrap; }
+  .stl { display: inline-flex; gap: 6px; align-items: center; font-weight: 700; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 18px; font-size: 15.5px; }
+  .kv dt { font-weight: 700; } .kv dd { margin: 0; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <section class="page-head">
+    <div class="wrap">
+      <h1>Build a clock</h1>
+      <p class="lede">From a breadboard prototype to the finished clock in its printed case. The prototype runs the same
+        firmware, so every part of the clock can be tried before you order a board.</p>
+      <div class="route" aria-label="The route">
+        <a href="#parts"><span class="icon">build</span><b>Parts</b><span class="d">What to buy, and a list to download</span></a>
+        <a href="#prototype"><span class="icon">developer_board</span><b>Prototype</b><span class="d">A DevKitC on a breadboard</span></a>
+        <a href="#firmware"><span class="icon">terminal</span><b>Firmware</b><span class="d">Build it, flash it once</span></a>
+        <a href="#case"><span class="icon">view_in_ar</span><b>Board and case</b><span class="d">Order, solder, print, assemble</span></a>
+      </div>
+    </div>
+  </section>
+
+  <div class="wrap layout-side">
+    <nav class="toc" aria-label="On this page">
+      <b>On this page</b>
+      <a href="#parts"><span class="n">1</span> Parts</a>
+      <a href="#prototype"><span class="n">2</span> Prototype</a>
+      <a href="#firmware"><span class="n">3</span> Firmware</a>
+      <a href="#flash"><span class="n">4</span> Flashing</a>
+      <a href="#board"><span class="n">5</span> The board</a>
+      <a href="#case"><span class="n">6</span> The case</a>
+      <a href="#first"><span class="n">7</span> First power-on</a>
+      <a href="#checklist"><span class="n">8</span> Checklist</a>
+    </nav>
+    <div>
+      <!-- ============================================================ parts -->
+      <section class="chapter" id="parts" aria-labelledby="h-parts">
+        <h2 id="h-parts"><span class="n">1</span>Parts</h2>
+        <p>Every small part on the board is a 1206, a size that is easy to solder by hand, and every part JLCPCB can
+          place has its LCSC number in the schematic. Links go to LCSC for the board's parts, and to a search for the
+          modules sold in many versions.</p>
+        <div class="parts-tools">
+          <div class="seg" role="tablist" aria-label="Which parts" id="part-tabs">
+            <button role="tab" aria-selected="true" data-g="board">On the board</button>
+            <button role="tab" aria-selected="false" data-g="extras">Also needed</button>
+            <button role="tab" aria-selected="false" data-g="prototype">For the prototype</button>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-small" type="button" id="csv"><span class="icon">download</span>Parts list (CSV)</button>
+            <a class="btn btn-ghost btn-small" data-save="hardware/pcb/Bill_of_Material_Goup_By_Description.csv" href="#"><span class="icon">download</span>KiCad BOM</a>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="parts"><thead><tr><th>Ref</th><th>Qty</th><th>Part</th><th>Side</th><th>Buy</th></tr></thead><tbody id="parts-body"></tbody></table></div>
+        <p class="small muted">Quantity 0: fitted only when needed (a different gain, a series resistor, a board used
+          without the case). The design behind each part: <a href="read.html?doc=HARDWARE.md">the board's design</a>.</p>
+      </section>
+
+      <!-- ============================================================ prototype -->
+      <section class="chapter" id="prototype" aria-labelledby="h-proto">
+        <h2 id="h-proto"><span class="n">2</span>A prototype on a breadboard</h2>
+        <p>An ESP32-S3-DevKitC-1 N16R8 (the same module on a development board), the Adafruit MAX98357A breakout, the
+          speaker, a display and the 5-way switch. It uses the same pins and memory layout as the board. Choose a
+          group to see its wires.</p>
+        <div class="seg" role="group" aria-label="Display" id="wire-display">
+          <button aria-pressed="true" data-d="tft">Colour screen</button><button aria-pressed="false" data-d="oled">OLED</button>
+        </div>
+        <div class="wiring" id="wiring">
+          <div id="wire-svg"></div>
+          <div class="wire-list" id="wire-list"></div>
+        </div>
+        <div class="callout warn"><span class="icon">warning</span><p><strong>Wire SD through 4.7 kΩ.</strong> With
+          GPIO15 high the amplifier plays the left channel, with it low it is off. Left unconnected, the breakout mixes
+          both channels and never switches off.</p></div>
+        <p>Flash the DevKitC over either USB port, and read its log on the one marked <b>UART</b>. Other boards that
+          could work, and what they would give up: <a href="read.html?doc=microcontroller_demand.md">which chip, and why</a>.</p>
+      </section>
+
+      <!-- ============================================================ firmware -->
+      <section class="chapter" id="firmware" aria-labelledby="h-fw">
+        <h2 id="h-fw"><span class="n">3</span>Building the firmware</h2>
+        <p>The firmware is built with <a href="https://esphome.io">ESPHome</a> <b>2026.9.1</b>, exactly that version.
+          The easiest way is the script in the repository's root folder (macOS or Linux, Python 3.12 to 3.14): on its
+          first run it installs that ESPHome into its own environment, with no Docker or dashboard.</p>
+        <div class="code"><pre>git clone https://github.com/et7ad/esp32_athan.git
+cd esp32_athan
+./build_firmware.sh --display tft        <span class="c"># or without --display for the OLED</span></pre></div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Command</th><th>What it does</th></tr></thead><tbody>
+          <tr><td><code>./build_firmware.sh</code></td><td>Builds, and writes the factory and update files to <code>firmware/binaries/</code></td></tr>
+          <tr><td><code>./build_firmware.sh flash [PORT]</code></td><td>Builds, then flashes over a serial port: the J6 adapter (<code>/dev/cu.usbserial…</code>) or a DevKitC's USB. Without PORT it lists the ports</td></tr>
+          <tr><td><code>./build_firmware.sh ota [HOST]</code></td><td>Builds, then updates a clock over Wi-Fi (<code>athan.local</code> if no host)</td></tr>
+          <tr><td><code>./build_firmware.sh logs [PORT|HOST]</code></td><td>Shows the clock's log</td></tr>
+          <tr><td><code>./build_firmware.sh check</code></td><td>Checks the configuration only, in a few seconds, for both displays</td></tr>
+        </tbody></table></div>
+        <h3>Before the first build</h3>
+        <ul>
+          <li><b>Your own encryption key</b> (recommended): generate one and put it in both the <code>api:</code> and
+            <code>ota:</code> sections of <code>firmware/athan.yaml</code>. No Wi-Fi details or <code>secrets.yaml</code> are
+            needed: Wi-Fi is set up from a phone.</li>
+        </ul>
+        <div class="code"><pre>openssl rand -base64 32</pre></div>
+        <ul>
+          <li><b>Which display:</b> add <code>--display tft</code> to any command for the colour screen, or set
+            <code>display_type: tft</code> at the top of <code>firmware/athan.yaml</code>. A clock flashed with the
+            other display's build runs with a dark screen.</li>
+          <li><b>Colour screens differ a little.</b> A new one opens on the Wi-Fi setup screen with a teal Wi-Fi icon
+            and an orange "Press Select". Yellow-green and blue instead, or a white background, means changing the
+            panel settings at the top of <code>firmware/displays/tft.yaml</code>.</li>
+          <li><b>An older clock on the same network?</b> Version 2 clocks are also called <code>athan</code>: give one
+            of them another <code>device_name</code> at the top of the yaml.</li>
+        </ul>
+        <p class="small muted">With the ESPHome dashboard instead: copy the contents of <code>firmware/</code> into its
+          config folder and use the <code>esphome/esphome:2026.9.1</code> image. Details:
+          <a href="read.html?doc=guides/building.md#3-building-the-firmware">building the firmware</a>.</p>
+      </section>
+
+      <!-- ============================================================ flash -->
+      <section class="chapter" id="flash" aria-labelledby="h-flash">
+        <h2 id="h-flash"><span class="n">4</span>Flashing it</h2>
+        <p>A DevKitC flashes over its USB port: <code>./build_firmware.sh flash</code>, and it enters download mode by
+          itself. The board's USB-C only supplies power, so its first flash goes through the 6-pin header J6 with a 3.3 V
+          USB-serial adapter. That first flash also writes the bootloader and the memory layout; after it, updates go
+          over Wi-Fi.</p>
+        <div class="pins" role="img" aria-label="J6: pin 1 GND (square pad), 2 IO0, 3 EN, 4 TX, 5 RX, 6 3V3">
+          <div class="p sq"><i></i><b>1 GND</b><small>to the adapter's GND</small></div>
+          <div class="p round"><i></i><b>2 IO0</b><small>jumper to pin 1 at power-up</small></div>
+          <div class="p round"><i></i><b>3 EN</b><small>not wired</small></div>
+          <div class="p round"><i></i><b>4 TX</b><small>to the adapter's RX</small></div>
+          <div class="p round"><i></i><b>5 RX</b><small>to the adapter's TX</small></div>
+          <div class="p round"><i></i><b>6 3V3</b><small>not wired</small></div>
+        </div>
+        <ol class="steps">
+          <li><div class="step-body"><p>Wire the adapter: GND to J6 pin 1, the adapter's RX to pin 4, its TX to pin 5.</p></div></li>
+          <li><div class="step-body"><p>Put the jumper cap on J6 pins 1 and 2 (it holds GPIO0 low), then plug the board's USB-C into a charger.</p></div></li>
+          <li><div class="step-body"><p>Flash, choosing the adapter's port:</p><div class="code"><pre>./build_firmware.sh --display tft flash</pre></div></div></li>
+          <li><div class="step-body"><p>Remove the jumper, then unplug and replug the USB-C.</p></div></li>
+        </ol>
+        <h3>Without a header on J6: the press-in programmer</h3>
+        <div class="grid-2">
+          <div class="read" style="display:grid;gap:10px">
+            <p>With the colour screen, J6 sits under the display and gets no header. A small board with two ordinary
+              headers drops into J6's holes unsoldered and holds GPIO0 low itself:</p>
+            <ol>
+              <li>Wire the adapter to its top pins: GND to GND, 3V3 to 3V3, the adapter's RX to TX, its TX to RX.</li>
+              <li>Unplug the clock's USB-C, and push the programmer into J6, GND to GND (the square pads), tilted a little
+                so the pins press against the holes.</li>
+              <li>Flash as above: the clock powers up from the adapter in download mode. Then take the programmer out and
+                power the clock from its USB-C.</li>
+            </ol>
+            <p class="small muted">3V3 only, never 5 V, and GND to GND. <a href="read.html?doc=hardware/programmer/README.md">The programmer's guide</a>.</p>
+          </div>
+          <figure><img data-repo="hardware/programmer/images/in_use.jpg" alt="The programmer in the clock's J6, with four jumper wires" loading="lazy" width="1200" height="900"></figure>
+        </div>
+        <h3>Later updates</h3>
+        <p>Once the clock is on Wi-Fi: <code>./build_firmware.sh ota</code>. Clocks also update from this project's
+          GitHub Releases when their owners install them. <code>./flash_firmware.sh</code> sends files that already
+          exist, without building (<code>ota</code>, <code>usb</code>, or <code>usb-full</code> for a blank board).</p>
+      </section>
+
+      <!-- ============================================================ board -->
+      <section class="chapter" id="board" aria-labelledby="h-board">
+        <h2 id="h-board"><span class="n">5</span>The circuit board</h2>
+        <p>59.6 × 50 mm, two layers, every part soldered by hand. <b>The front</b>, the side you look at, carries the
+          display's header, the 5-way switch, the LED, the USB-C and the screw terminals. <b>The back</b> carries the
+          ESP32 module (its antenna at the bottom edge, with no copper under it), the amplifier, the regulator and the
+          small parts.</p>
+        <div class="seg" role="group" aria-label="Which side" id="render-tabs">
+          <button aria-pressed="true" data-r="Front_with_3D">Front</button><button aria-pressed="false" data-r="Back_with_3D">Back</button>
+          <button aria-pressed="false" data-r="Front_no_3D">Front, bare</button><button aria-pressed="false" data-r="Back_no_3D">Back, bare</button>
+        </div>
+        <figure class="renders"><img id="render" data-repo="hardware/pcb/generated_imgs_and_3d/Front_with_3D.jpg" alt="The board's front, assembled" loading="lazy" width="1568" height="1320"></figure>
+        <h3>Ordering</h3>
+        <dl class="kv">
+          <dt>The files</dt><dd><code>./generate_fab_files.sh</code> in <code>hardware/pcb/</code> makes everything from the saved project without opening KiCad: the Gerbers and drill files, the parts lists, the 3D model, and the BOM and placement files for JLCPCB</dd>
+          <dt>The board</dt><dd>Two layers, 1.6 mm, lead-free HASL or ENIG (ENIG makes the amplifier's small pads easier)</dd>
+          <dt>Assembly</dt><dd>Suggested: JLCPCB assembles the back only (the module, the amplifier, the USB-C and the small parts), and you solder the front and the through-hole parts</dd>
+        </dl>
+        <p><a href="read.html?doc=guides/jlcpcb_assembly.md">Ordering assembled boards from JLCPCB</a>, step by step.</p>
+        <h3>Soldering</h3>
+        <ol>
+          <li>The back first: the amplifier (its pad underneath needs hot air or a hot plate), the module, the regulator, the small parts.</li>
+          <li>Then the front: the switch, the terminals, the LED and C1 (at most 10.5 mm tall). No barrel jack on a board that goes in the case.</li>
+          <li>The display's header: a male header pushed in from the back at DS2 (colour screen) or DS1 (OLED), soldered on the front, its short ends cut off.</li>
+        </ol>
+        <p class="small muted">The solder jumpers come set for a normal clock: 9 dB gain, the backlight dimmable (JP4),
+          the relay output connected (JP1). <a href="read.html?doc=HARDWARE.md#4-amplifier">Changing the gain</a>.</p>
+      </section>
+
+      <!-- ============================================================ case -->
+      <section class="chapter" id="case" aria-labelledby="h-case">
+        <h2 id="h-case"><span class="n">6</span>The case</h2>
+        <p>Three printed parts shaped like a mihrab. The board clicks into the back, the display into the front, and
+          the front onto the back; as the case closes, the display plugs into the board's header. Drag to turn it,
+          scroll or pinch to zoom, and pull it apart with the slider.</p>
+        <div class="viewer" id="viewer"><div class="v-status">The 3D model loads when you get here.</div><div class="v-label"></div></div>
+        <div class="viewer-tools">
+          <div class="seg" role="group" aria-label="Display" id="v-display"><button aria-pressed="true" data-d="tft">Colour screen</button><button aria-pressed="false" data-d="oled">OLED</button></div>
+          <label>Apart <input type="range" id="v-explode" min="0" max="1" step="0.01" value="0"></label>
+          <div class="seg" role="group" aria-label="Case colour" id="v-colour"><button aria-pressed="true" data-c="ivory">Ivory</button><button aria-pressed="false" data-c="teal">Teal</button><button aria-pressed="false" data-c="black">Black</button></div>
+        </div>
+        <h3>Print</h3>
+        <div class="table-wrap"><table class="print-table">
+          <thead><tr><th>Part</th><th>Pick</th><th>File</th></tr></thead><tbody>
+          <tr><td>Front</td><td>The display you fit</td><td><a class="stl" href="#" data-save="hardware/enclosure/stl/front_tft.stl"><span class="icon">download</span>front_tft.stl</a> or <a class="stl" href="#" data-save="hardware/enclosure/stl/front_oled.stl">front_oled.stl</a></td></tr>
+          <tr><td>Back</td><td>The side the USB-C is soldered on (JLCPCB puts it on the back)</td><td><a class="stl" href="#" data-save="hardware/enclosure/stl/back_usbc_on_back.stl"><span class="icon">download</span>back_usbc_on_back.stl</a> or <a class="stl" href="#" data-save="hardware/enclosure/stl/back_usbc_on_front.stl">back_usbc_on_front.stl</a></td></tr>
+          <tr><td>Knob</td><td>The one for your front</td><td><a class="stl" href="#" data-save="hardware/enclosure/stl/knob_tft.stl"><span class="icon">download</span>knob_tft.stl</a> or <a class="stl" href="#" data-save="hardware/enclosure/stl/knob_oled.stl">knob_oled.stl</a></td></tr>
+          <tr><td>Window test</td><td>Optional: a few minutes, to check your display's fit first</td><td><a class="stl" href="#" data-save="hardware/enclosure/stl/window_test_tft.stl"><span class="icon">download</span>window_test_tft.stl</a> or <a class="stl" href="#" data-save="hardware/enclosure/stl/window_test_oled.stl">window_test_oled.stl</a></td></tr>
+        </tbody></table></div>
+        <ul>
+          <li>PLA or PETG, 0.15 to 0.2 mm layers, 3 walls, 15 to 20 % infill, no supports. The files already lie the way they print.</li>
+          <li>PETG suits the back best: the spring that holds the board bends partly across the layers, where PLA is weakest.</li>
+          <li>Keep the engraved letters open: set Cura's Initial Layer Horizontal Expansion to −0.1 or −0.2 mm.</li>
+        </ul>
+        <div class="two">
+          <figure><img data-repo="hardware/enclosure/images/window_test.jpg" alt="The window tests with their displays clicked in" loading="lazy" width="1695" height="700"><figcaption>The window test: the glass drops into its pocket and the springs snap over the display's board.</figcaption></figure>
+          <figure><img data-repo="hardware/enclosure/images/headers.png" alt="The two headers to scale: the board's male header and the display's female header" loading="lazy" width="1148" height="1288"><figcaption>The headers to scale: they meet in the last 3.6 mm as the case closes.</figcaption></figure>
+        </div>
+        <h3>Putting it together</h3>
+        <ol class="steps">
+          <li><div class="step-body"><p><b>The board's header.</b> Push the male header into the board from the back (DS2 for the colour screen, DS1 for the OLED), solder it on the front, cut the short ends flush.</p></div></li>
+          <li><div class="step-body"><p><b>The display's header.</b> Solder the female header onto the display's back. On an OLED, cut its tails to about 1.3 mm.</p></div></li>
+          <li><div class="step-body"><p><b>The front.</b> Lay it on its face. Press the speaker into the clips inside the arch, cone toward the grille, and push the light pipe into the tube by the LED hole.</p></div></li>
+          <li><div class="step-body"><p><b>The display into the front.</b> Slide its board's bottom edge into the two grooved stops, glass toward the face, then press its top end down until the springs click over it.</p></div></li>
+          <li><div class="step-body"><p><b>The board into the back.</b> Slide its bottom edge under the two ledges, then press its top edge down until the spring clicks over it.</p>
+            <figure><img data-repo="hardware/enclosure/images/inside.jpg" alt="Inside the front, with the display clicked in, and the back, with the board clicked in" loading="lazy" width="1413" height="1000"></figure></div></li>
+          <li><div class="step-body"><p><b>Wires.</b> The speaker to J3 (SPK+, SPK−), with the front off. The relay wires come in through the hole in the right side to J5.</p></div></li>
+          <li><div class="step-body"><p><b>The knob.</b> Press it onto the switch's stem, star point up.</p></div></li>
+          <li><div class="step-body"><p><b>Close it.</b> Put the front straight onto the back and press until the rim clicks all round. The long posts and two pins line everything up before the headers meet.</p></div></li>
+          <li><div class="step-body"><p><b>Screws (optional).</b> Six M3 × 16 countersunk, from the back.</p></div></li>
+        </ol>
+        <p class="small muted">To open it, pull the front straight off: the display comes away with it.
+          <a href="read.html?doc=hardware/enclosure/README.md">The case's own guide</a> has how it fits, the numbers,
+          and how to change it.</p>
+      </section>
+
+      <!-- ============================================================ first power-on -->
+      <section class="chapter" id="first" aria-labelledby="h-first">
+        <h2 id="h-first"><span class="n">7</span>First power-on of a new board</h2>
+        <ol class="steps">
+          <li><div class="step-body"><p>Before you plug it in, check +5V and +3V3 against GND with a meter for shorts.</p></div></li>
+          <li><div class="step-body"><p>Flash it through J6 (chapter 4).</p></div></li>
+          <li><div class="step-body"><p>Read its log on the same adapter (115200 baud). Look for <code>Athan:</code> in the configuration it prints, and <code>Slot athan: (empty)</code> on a new board.</p>
+            <div class="code"><pre>./build_firmware.sh logs /dev/cu.usbserial-…</pre></div></div></li>
+          <li><div class="step-body"><p><a href="setup.html">Set up its Wi-Fi</a>. The default sounds download within minutes. Play one from the menu at 10 %, then raise the volume and listen for distortion: that tells you whether to change the gain.</p></div></li>
+        </ol>
+      </section>
+
+      <!-- ============================================================ checklist -->
+      <section class="chapter" id="checklist" aria-labelledby="h-check">
+        <h2 id="h-check"><span class="n">8</span>Acceptance checklist</h2>
+        <p>Run it on the prototype before ordering boards, and again on the first boards. Your ticks stay in this
+          browser.</p>
+        <div class="progress-line" aria-hidden="true"><i id="check-bar"></i></div>
+        <p class="small muted" id="check-count"></p>
+        <ul class="checklist" id="checks"></ul>
+        <div class="btn-row"><button class="btn btn-ghost btn-small" type="button" onclick="print()"><span class="icon">print</span>Print it</button>
+          <button class="btn btn-ghost btn-small" type="button" id="check-clear"><span class="icon">restart_alt</span>Clear the ticks</button></div>
+        <p class="small muted">Every check in full: <a href="read.html?doc=guides/building.md#7-acceptance-checklist">the acceptance checklist</a>.</p>
+      </section>
+    </div>
+  </div>
+</main>
+<footer id="site-footer"></footer>
+
+<script type="module">
+import { scrollSpy, saveBlob, esc, repo, remember, wireCommon } from './assets/site.js';
+import { PARTS, partLink, partsCSV, GROUPS, wiring, DEVKIT_ORDER, CHECKS } from './assets/parts.js';
+
+scrollSpy();
+
+// ---- parts
+const body = document.getElementById('parts-body');
+function showParts(g) {
+  body.innerHTML = PARTS[g].map(p => {
+    const l = partLink(p);
+    const buy = l ? `<a class="buy" href="${esc(l.href)}"${l.href.startsWith('#') ? '' : ' target="_blank" rel="noopener"'}>${esc(l.label)}</a>` : '';
+    return `<tr><td>${esc(p[0] || '')}</td><td>${esc(p[1])}</td><td><b>${esc(p[2])}</b><br><span class="muted small">${esc(p[3])}</span></td><td class="side">${esc(p[5] || '')}</td><td>${buy}</td></tr>`;
+  }).join('');
+}
+document.getElementById('part-tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-g]'); if (!b) return;
+  document.querySelectorAll('#part-tabs button').forEach(x => x.setAttribute('aria-selected', String(x === b)));
+  showParts(b.dataset.g);
+});
+showParts('board');
+document.getElementById('csv').addEventListener('click', () => saveBlob(new Blob([partsCSV()], { type: 'text/csv' }), 'athan-clock-parts.csv'));
+
+// ---- wiring: the DevKitC's pins on the left, the parts on the right, a wire for every connection
+let display = 'tft', focus = null;
+function drawWiring() {
+  const W = wiring(display);
+  const pins = DEVKIT_ORDER.filter(p => W.some(w => w[0] === p));
+  const parts = [...new Set(W.map(w => w[1]))];
+  const rowH = 26, top = 50;
+  const left = new Map(pins.map((p, i) => [p, top + i * rowH]));
+  let y = top - 4; const right = new Map(), boxes = [];
+  for (const part of parts) {
+    const ps = W.filter(w => w[1] === part).map(w => w[2]);
+    const h = 32 + ps.length * rowH;
+    boxes.push({ part, y, h, ps, g: W.find(w => w[1] === part)[3] });
+    ps.forEach((p, i) => right.set(part + '|' + p, y + 36 + i * rowH));
+    y += h + 14;
+  }
+  const H = Math.max(top + pins.length * rowH, y) + 10, X0 = 158, X1 = 420;
+  const svg = [`<svg viewBox="0 0 660 ${H}" role="img" aria-label="Wiring of the prototype">`];
+  svg.push(`<rect x="24" y="${top - 30}" width="${X0 - 18}" height="${pins.length * rowH + 30}" rx="10" fill="var(--paper-2)" stroke="var(--line-2)"/><text x="${24 + (X0 - 18) / 2}" y="${top - 12}" text-anchor="middle" style="font:700 16px var(--body);fill:var(--ink)">DevKitC</text>`);
+  pins.forEach(p => svg.push(`<g class="pin"><circle cx="${X0}" cy="${left.get(p)}" r="4.5" fill="var(--ink-2)"/><text x="${X0 - 12}" y="${left.get(p) + 5}" text-anchor="end" fill="var(--ink)">${p}</text></g>`));
+  W.forEach(([pin, part, pp, g]) => {
+    const a = left.get(pin), b = right.get(part + '|' + pp), c = GROUPS[g][1];
+    svg.push(`<path class="wire${focus === g ? ' on' : ''}" data-g="${g}" d="M${X0} ${a} C${X0 + 120} ${a}, ${X1 - 120} ${b}, ${X1} ${b}" stroke="${c}"/>`);
+  });
+  boxes.forEach(bx => {
+    svg.push(`<rect x="${X1}" y="${bx.y}" width="220" height="${bx.h}" rx="10" fill="var(--card)" stroke="${GROUPS[bx.g][1]}" stroke-width="1.5"/>`);
+    svg.push(`<text x="${X1 + 12}" y="${bx.y + 20}" style="font:700 16px var(--body);fill:var(--ink)">${esc(bx.part)}</text>`);
+    bx.ps.forEach((p, i) => svg.push(`<g class="pin"><circle cx="${X1}" cy="${bx.y + 36 + i * rowH}" r="4.5" fill="${GROUPS[bx.g][1]}"/><text x="${X1 + 12}" y="${bx.y + 41 + i * rowH}" fill="var(--ink-2)">${esc(p)}</text></g>`));
+  });
+  svg.push('</svg>');
+  document.getElementById('wire-svg').innerHTML = svg.join('');
+  const groups = [...new Set(W.map(w => w[3]))];
+  document.getElementById('wire-list').innerHTML = groups.map(g => `<button type="button" data-g="${g}" aria-pressed="${focus === g}"><span class="dot" style="background:${GROUPS[g][1]}"></span><span><b>${GROUPS[g][0]}</b><small>${esc(GROUPS[g][2])}</small></span></button>`).join('');
+  document.getElementById('wiring').classList.toggle('focus', !!focus);
+}
+document.getElementById('wire-list').addEventListener('click', ev => { const b = ev.target.closest('[data-g]'); if (!b) return; focus = focus === b.dataset.g ? null : b.dataset.g; drawWiring(); });
+document.getElementById('wire-display').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-d]'); if (!b) return;
+  display = b.dataset.d; if (focus === 'oled' || focus === 'tft') focus = display;
+  document.querySelectorAll('#wire-display button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  drawWiring();
+});
+drawWiring();
+
+// ---- board renders
+document.getElementById('render-tabs').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-r]'); if (!b) return;
+  document.querySelectorAll('#render-tabs button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  const img = document.getElementById('render');
+  img.src = repo(`hardware/pcb/generated_imgs_and_3d/${b.dataset.r}.jpg`);
+  img.alt = `The board's ${b.textContent.toLowerCase()}`;
+});
+
+// ---- the checklist
+let ticks = {};
+try { ticks = JSON.parse(remember('athan-checklist') || '{}'); } catch (e) { ticks = {}; }
+const checks = document.getElementById('checks');
+function drawChecks() {
+  checks.innerHTML = CHECKS.map(([t, d], i) => `<li><label><input type="checkbox" data-i="${i}"${ticks[i] ? ' checked' : ''}><span><b>${i + 1}. ${esc(t)}</b><span class="muted small">${esc(d)}</span></span></label></li>`).join('');
+  const n = CHECKS.filter((_, i) => ticks[i]).length;
+  document.getElementById('check-bar').style.width = (n / CHECKS.length * 100) + '%';
+  document.getElementById('check-count').textContent = `${n} of ${CHECKS.length} checked`;
+}
+checks.addEventListener('change', ev => { const i = ev.target.dataset.i; ticks[i] = ev.target.checked; remember('athan-checklist', JSON.stringify(ticks)); drawChecks(); });
+document.getElementById('check-clear').addEventListener('click', () => { ticks = {}; remember('athan-checklist', '{}'); drawChecks(); });
+drawChecks();
+
+// ---- the 3D case, loaded when it comes into view
+const vhost = document.getElementById('viewer');
+let viewer = null;
+const io = new IntersectionObserver(async es => {
+  const e = es[0];
+  if (viewer) { viewer.visible = e.isIntersecting; if (e.isIntersecting) viewer.render(); return; }
+  if (!e.isIntersecting) return;
+  try {
+    const { ClockViewer } = await import('./assets/viewer.js');
+    viewer = new ClockViewer(vhost, {});
+    viewer.visible = true;
+    await viewer.load('tft');
+  } catch (err) { vhost.querySelector('.v-status').textContent = 'The 3D view needs a browser with WebGL.'; }
+}, { rootMargin: '200px' });
+io.observe(vhost);
+document.getElementById('v-display').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-d]'); if (!b || !viewer) return;
+  document.querySelectorAll('#v-display button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  viewer.load(b.dataset.d);
+});
+document.getElementById('v-explode').addEventListener('input', ev => viewer && viewer.setExplode(+ev.target.value));
+document.getElementById('v-colour').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-c]'); if (!b || !viewer) return;
+  document.querySelectorAll('#v-colour button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  viewer.paintCase(b.dataset.c);
+});
+</script>
+</body>
+</html>

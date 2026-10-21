@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prayer times | Athan clock</title>
+<meta name="description" content="The mosques the athan clocks offer, today's times at each one, and the whole year of prayer times on a chart.">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .pin { width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--teal); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,.3); display: grid; place-items: center; }
+  .pin b { transform: rotate(45deg); color: #fff; font: 600 14px var(--display); }
+  .pin.on { background: var(--gold); }
+  :root[data-theme="dark"] .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9); } }
+  .mosque-head { display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: baseline; justify-content: space-between; }
+  .mosque-head h2 { font-size: 30px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 8px 22px; color: var(--ink-2); font-size: 15px; }
+  .facts span { display: inline-flex; gap: 6px; align-items: center; }
+  .chart-tools { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; margin: 18px 0 8px; }
+  .iq { font-size: 12.5px; color: var(--ink-2); }
+</style>
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <section class="page-head">
+    <div class="wrap">
+      <h1>Prayer times</h1>
+      <p class="lede">The mosques the clocks offer, each with its own timetable for the year. A clock downloads its
+        mosque's year once and keeps it; what you see here is exactly what the clocks read.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:8px" aria-label="The mosques">
+    <div class="wrap times-top">
+      <div style="display:grid;gap:12px;align-content:start">
+        <h2 style="font-size:22px">The mosques, as the clock numbers them</h2>
+        <div class="mosque-list" id="mosques"></div>
+        <p class="small muted">Visalia's times are IslamicFinder's for the city, not one mosque's. <a href="#add">Ask for your mosque</a>.</p>
+      </div>
+      <div id="map" role="region" aria-label="Map of the mosques"></div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="m-name">
+    <div class="wrap" style="display:grid;gap:22px">
+      <div class="mosque-head">
+        <h2 id="m-name">Today</h2>
+        <div class="facts" id="m-facts"></div>
+      </div>
+      <div class="today" id="today" aria-live="polite"></div>
+      <p class="small muted" id="today-note"></p>
+      <div>
+        <div class="chart-tools">
+          <div class="seg" id="years" role="group" aria-label="Year"></div>
+          <div class="legend" id="legend" aria-label="Show or hide a prayer"></div>
+        </div>
+        <div class="chart-box card" id="chart" style="padding:14px 10px 6px"></div>
+        <p class="small muted" style="margin-top:10px">Move along the chart (or focus it and use the arrow keys) to read
+          every time of that day. Sudden steps in March and November are daylight saving time.
+          <a id="m-download" href="#" download>Download this year's file (JSON)</a>, the format the clocks read
+          (<a href="read.html?doc=prayertimes_specs.md">its description</a>).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="add" aria-labelledby="h-add">
+    <div class="wrap grid-2" style="align-items:start">
+      <div class="read" style="display:grid;gap:12px">
+        <h2 id="h-add">Add your mosque</h2>
+        <p>Open an issue on GitHub with your mosque's yearly timetable: a link to it, or the file itself (a PDF, a
+          spreadsheet, a photo of the printed one). Once it is added, it appears on every clock's list by itself, with
+          no firmware update.</p>
+        <p>Please include the mosque's name as it should show on the clock, where it is (a map link is perfect), and
+          whether the timetable has iqama times.</p>
+        <div class="btn-row"><a class="btn btn-primary" id="issue" href="https://github.com/et7ad/esp32_athan/issues/new"><span class="icon">add_location_alt</span>Ask for my mosque on GitHub</a></div>
+      </div>
+      <div class="card" style="display:grid;gap:10px">
+        <h3>For whoever adds it</h3>
+        <p class="muted">A mosque is one entry in <code>docs/athantimes/mosques.json</code>, one file per year made by
+          the scripts (they read a PDF, a web page or a table and check every day), and a row in the owners' guide.
+          The checks in <code>firmware/tests/run_tests.sh</code> make sure the three agree.</p>
+        <p><a href="read.html?doc=guides/maintaining.md#adding-a-mosque">How a mosque is added</a></p>
+        <p><a href="read.html?doc=guides/maintaining.md#2-prayer-times">Publishing next year's times</a></p>
+      </div>
+    </div>
+  </section>
+</main>
+<footer id="site-footer"></footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"></script>
+<script type="module">
+import { loadMosques, chosenMosque, remember, yearsOf, loadYear, dayTimes, NAMES7, COLOR_VARS, IQAMA, FIELDS7, hhmm, esc, parseTZ, localParts } from './assets/site.js';
+import { YearChart } from './assets/chart.js';
+
+const mosques = await loadMosques();
+let mosque = (location.hash.length > 1 && mosques.find(m => '#' + m.key === location.hash)) || chosenMosque(mosques);
+const yearsCache = {};
+async function years(m) { if (!yearsCache[m.key]) yearsCache[m.key] = await yearsOf(m.key); return yearsCache[m.key]; }
+
+// the list
+const list = document.getElementById('mosques');
+async function renderList() {
+  const ys = await Promise.all(mosques.map(years));
+  list.innerHTML = mosques.map((m, i) => `<button type="button" data-key="${esc(m.key)}" aria-pressed="${m === mosque}">
+    <span class="num">${m.number}</span><span>${esc(m.name)}<small>${ys[i].length ? `Times for ${ys[i][0]}${ys[i].length > 1 ? '-' + ys[i][ys[i].length - 1] : ''}` : 'No times yet'}</small></span>
+    <span class="icon" style="color:var(--ink-2)">chevron_right</span></button>`).join('');
+}
+list.addEventListener('click', ev => { const b = ev.target.closest('[data-key]'); if (b) choose(mosques.find(m => m.key === b.dataset.key), true); });
+
+// the map
+let map = null, markers = {};
+if (window.L) {
+  map = L.map('map', { scrollWheelZoom: false });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors' }).addTo(map);
+  const pts = [];
+  mosques.forEach(m => {
+    if (typeof m.lat !== 'number') return;
+    const mk = L.marker([m.lat, m.lon], { icon: L.divIcon({ className: '', html: `<div class="pin"><b>${m.number}</b></div>`, iconSize: [30, 30], iconAnchor: [15, 30] }), title: m.name, alt: m.name })
+      .addTo(map).bindTooltip(esc(m.label), { direction: 'top', offset: [0, -30] });
+    mk.on('click', () => choose(m, false));
+    markers[m.key] = mk; pts.push([m.lat, m.lon]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [40, 40] });
+} else document.getElementById('map').innerHTML = '<p class="muted" style="padding:20px">The map could not load.</p>';
+
+// today and the chart
+const chart = new YearChart(document.getElementById('chart'), document.getElementById('legend'));
+let year = null;
+async function choose(m, fly) {
+  mosque = m; remember('athan-mosque', m.key);
+  history.replaceState(null, '', '#' + m.key);
+  renderList();
+  Object.entries(markers).forEach(([k, mk]) => { const el = mk.getElement && mk.getElement(); if (el) el.querySelector('.pin').classList.toggle('on', k === m.key); });
+  if (fly && map && markers[m.key]) map.flyTo([m.lat, m.lon], Math.max(map.getZoom(), 11), { duration: .6 });
+  document.getElementById('m-name').textContent = m.label;
+  const tz = parseTZ(m.tz), p = localParts(tz, Date.now()), ys = await years(m);
+  document.getElementById('m-facts').innerHTML =
+    `<span><span class="icon">location_on</span><a href="https://www.google.com/maps?q=${m.lat},${m.lon}">${m.lat.toFixed(4)}, ${m.lon.toFixed(4)}</a></span>` +
+    `<span><span class="icon">schedule</span>Local time ${hhmm(p.h * 60 + p.mi)}</span>` +
+    `<span><span class="icon">event</span>${ys.length ? 'Published: ' + ys.join(', ') : 'No yearly file yet'}</span>`;
+  const d = await dayTimes(m, Date.now());
+  const cur = p.h * 60 + p.mi;
+  let next = d.times ? d.times.findIndex(v => v > cur) : -1; if (d.times && next < 0) next = 0;
+  document.getElementById('today').innerHTML = d.times ? d.times.map((t, i) => {
+    const iq = IQAMA[FIELDS7[i]] && d.iqama[IQAMA[FIELDS7[i]]];
+    return `<div class="t${i === next ? ' next' : ''}" style="--c:var(${COLOR_VARS[i]})"><b>${NAMES7[i]}</b><span>${hhmm(t)}</span><small>${iq !== undefined && iq !== null ? 'iqama ' + hhmm(iq) : '&nbsp;'}</small></div>`;
+  }).join('') : '<p class="muted">No timetable for this mosque yet.</p>';
+  document.getElementById('today-note').textContent = d.times
+    ? `${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}, at the mosque's local time. ` + (d.standin ? 'This year\'s timetable is not published yet: these are last year\'s times for the same date, converted for daylight saving, as the clock uses them.' : 'The next prayer is outlined.')
+    : '';
+  const yrs = document.getElementById('years');
+  year = ys.includes(p.y) ? p.y : ys[ys.length - 1];
+  yrs.innerHTML = ys.map(y => `<button type="button" data-y="${y}" aria-pressed="${y === year}">${y}</button>`).join('');
+  yrs.onclick = ev => { const b = ev.target.closest('[data-y]'); if (b) { year = +b.dataset.y; yrs.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(+x.dataset.y === year))); draw(); } };
+  draw();
+}
+async function draw() {
+  if (!year) { document.getElementById('chart').querySelector('svg')?.remove(); return; }
+  const f = await loadYear(mosque.key, year);
+  const p = localParts(parseTZ(mosque.tz), Date.now());
+  chart.set(f, p.y === year ? p.doy - 1 : -1);
+  const a = document.getElementById('m-download');
+  a.href = `athantimes/${mosque.key}/${year}.json`; a.download = `${mosque.key}_${year}.json`;
+}
+const issue = document.getElementById('issue');
+issue.href = 'https://github.com/et7ad/esp32_athan/issues/new?title=' + encodeURIComponent('Add a mosque: ') + '&body=' + encodeURIComponent('Name (as it should show on the clock):\nWhere (a map link):\nTimetable (a link, or attach the file):\nDoes it have iqama times?\n');
+choose(mosque, false);
+</script>
+</body>
+</html>

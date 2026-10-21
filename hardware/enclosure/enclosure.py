@@ -4,15 +4,16 @@
 Two shells and a knob:
 
     back shell    the back and most of the walls. The board clicks into it on its own: its bottom edge slides under
-                  two ledges, its top edge snaps under two hooks, and four ribs keep it centred. Openings for the
-                  USB-C and the relay wires; sockets for the front shell's two long posts.
-    front shell   the face (display window, joystick hole, terminal openings, LED, speaker grille, crescent) and the
-                  front of the walls. The display clicks into it: its glass sits in a pocket behind the window, its
-                  board's bottom edge in two grooved stops, its sides under the lips of two springs. The front shell
-                  clicks onto the back, and as it closes the female header on the display's back slides onto a male
-                  header on the board. Two long posts entering their sockets, then two pins entering the board's
-                  spare display holes, line the headers up first.
-    knob          pressed onto the 5-way switch's stem through the face
+                  two ledges, its top edge snaps under the lips of a spring along it, and four ribs keep it centred.
+                  Openings for the USB-C and the relay wires; sockets for the front shell's two long posts.
+    front shell   the face (display window, joystick hole, holes over the relay terminal's screws, LED, speaker
+                  grille, crescent) and the front of the walls. The display clicks into it: its glass sits in a
+                  pocket behind the window, its board's bottom edge in two grooved stops, its sides under the lips
+                  of two springs. The front shell clicks onto the back, and as it closes the female header on the
+                  display's back slides onto a male header on the board. Two long posts entering their sockets, then
+                  two pins entering the board's spare display holes, line the headers up first.
+    knob          pressed onto the 5-way switch's stem; its cap passes through the face's hole, so the front comes
+                  off and goes on over it
 
 Six M3 x 16 countersunk screws from the back add hold: four through the board's corner holes (they clamp the board
 between the shells) and two in the arch.
@@ -64,6 +65,7 @@ STEM_TOP, STEM_SQ, SWITCH_SHOULDER = 10.0, 3.2, 5.8   # 5-way switch (SKQUCAA010
 J1 = dict(x0=-0.65, x1=6.25, y0=20.08, y1=29.12, h=3.27)   # USB-C, front or back
 J3 = dict(x0=51.19, x1=59.09, y0=7.85, y1=18.45, h=10.3)   # speaker terminal, wires enter from the right
 J5 = dict(x0=51.19, x1=59.09, y0=31.55, y1=42.15, h=10.3)  # relay terminal, its wires leave the case
+J5_SCREWS = [(55.24, 34.10), (55.24, 39.10)]               # its screws, over its pins: reached through the face
 C1 = dict(x0=0.9, x1=9.2, y0=31.75, y1=41.25, h=10.5)      # 470 uF capacitor, at most 10.5 mm tall with its base
 J6 = dict(x0=29.93, x1=45.17, y0=8.38, y1=10.92)           # programming holes: no header (the programmer presses in)
 
@@ -122,15 +124,17 @@ SCREW_PILOT, SCREW_CLEAR, CSK_D = 2.7, 3.4, 6.4     # M3 self-tapping into PLA, 
 POST_D, TUBE_D = 6.0, 6.5
 ARCH_SCREWS = [(2.0, 10.0), (2 * DISPLAY_X - 2.0, 10.0)]   # case X, Y: the arch's lower corners
 
-KNOB_D, KNOB_HEAD_D, KNOB_HOLE_D = 8.0, 11.0, 10.0
-KNOB_FIT = 0.35      # the knob's square hole is this much wider than the stem (printed holes come out small)
-# The board clicks into the back shell: its bottom edge slides under two ledges, its top edge snaps under two hooks
-BOARD_PLAY = 0.15                     # above the board's front surface, under the ledges' and hooks' lips
-HOOKS_X = (DISPLAY_X - 6.3, DISPLAY_X + 6.3)   # top edge: clear of the posts and the display headers' pads
-HOOK_W, HOOK_T, HOOK_LIP = 7.0, (1.2, 0.8), 0.5   # width, spring thickness (root, top: tapered), lip over
-                                              # the board; the spring bends across the print's layers
-HOOK_ROOT, HOOK_TOP = 1.4, 3.0                # how deep the spring starts in the back plate; its top, above the
-                                              # board (the ramp runs up to it, and it is the tab to push back)
+KNOB_D, KNOB_HEAD_D, KNOB_HOLE_D = 8.0, 9.4, 10.0   # shaft, cap, hole in the face: the cap passes through the hole,
+                                                    # so the front comes off and goes on over the knob
+KNOB_FIT = 0.25      # the knob's square hole is this much wider than the stem: a press fit that holds
+# The board clicks into the back shell: its bottom edge slides under two ledges, its top edge snaps under the two
+# lips of a spring along it, a wall held by a post at each end whose middle bends outward
+BOARD_PLAY = 0.15                     # above the board's front surface, under the ledges' and the lips' undersides
+HOOK_SPAN = (12.0, 2 * DISPLAY_X - 12.0)       # the wall's ends (case X), posts included
+HOOK_T, HOOK_POST, HOOK_POST_T = (1.3, 1.1), 3.0, 1.0   # the wall (root, top: tapered); posts: length, extra thickness
+HOOKS_X, HOOK_W, HOOK_LIP = (DISPLAY_X - 6.3, DISPLAY_X + 6.3), 7.0, 0.5   # the lips: centres, width, over the board
+HOOK_ROOT, HOOK_TOP = 1.4, 3.0                # how deep the wall starts in the back plate; its top, above the
+                                              # board (the lips' ramps run up to it, and it is where to push it back)
 LEDGES_X = ((DISPLAY_X - 9.5, DISPLAY_X - 2.5), (DISPLAY_X + 2.5, DISPLAY_X + 9.5))   # bottom edge, clear of posts
 LEDGE_LIP = 0.7
 RIBS_Y, RIB_T, RIB_GAP = (-4.0, -44.0), 1.2, 0.2   # side ribs that keep the board centred (case Y), clear of the
@@ -153,7 +157,9 @@ TOP_GAP, TOP_W = 1.3, 17.2   # the top stopper: above the board's top edge, its 
 GUIDE_TOP, GUIDE_CLEAR, GUIDE_WALL = 3.0, 0.15, 1.3
 LOCATE_TIP = -5.5     # the pins' tips, through the board
 FACE_TEXT = 'حي على الصلاة'   # engraved under the display ("come to prayer", from the athan); '' for none
-FACE_TEXT_FONT, FACE_TEXT_SIZE = 'Arial', 6.8   # a font with Arabic presentation forms (Arial, Tahoma, Geeza Pro)
+FACE_TEXT_FONT, FACE_TEXT_SIZE = 'Arial', 8.4   # a font with Arabic presentation forms (Arial, Tahoma, Geeza Pro)
+FACE_TEXT_DEPTH = 1.2  # into the 2 mm face: deep enough to read by its shadows
+TERMINAL_HOLE_D = 4.4  # holes in the face over J5's screws
 STEP_ORIGIN = (100.0, -100.0, 1.59)  # where the board's STEP (from KiCad) puts the case's origin
 LIGHT_PIPE_D = 2.0    # hole for a light pipe (a piece of 1.75 mm clear filament) over the LED
 
@@ -356,7 +362,7 @@ def crescent(zf):
 
 
 def face_text(display):
-    """The Arabic text engraved under the display, centred between the window and the engraved line."""
+    """The Arabic text engraved under the display, its letters centred between the window and the engraved line."""
     if not FACE_TEXT:
         return None
     try:
@@ -369,14 +375,15 @@ def face_text(display):
     g = display_geometry(display)
     _, ay, _, ah = g['active']
     top = ay - ah / 2 - WINDOW_MARGIN - WINDOW_BEVEL
-    y = (top + Y_BOT + 3.0) / 2
+    y = (top + Y_BOT + 3.8) / 2
     plane = cq.Plane(origin=(DISPLAY_X, y, face_z(display) + FACE), xDir=(1, 0, 0), normal=(0, 0, 1))
-    glyphs = cq.Workplane(plane).text(visual, FACE_TEXT_SIZE, -0.6, font=FACE_TEXT_FONT, kind='bold',
+    glyphs = cq.Workplane(plane).text(visual, FACE_TEXT_SIZE, -FACE_TEXT_DEPTH, font=FACE_TEXT_FONT, kind='bold',
                                       halign='center', valign='center', combine=False).solids().vals()
     text = glyphs[0]
     for g_ in glyphs[1:]:            # joined letters overlap: one solid, or the cut goes wrong
         text = text.fuse(g_)
-    return cq.Workplane('XY').newObject([text.clean()])
+    bb = text.BoundingBox()          # the letters' own middle, not the font's line box
+    return cq.Workplane('XY').newObject([text.clean().translate(cq.Vector(0, y - (bb.ymin + bb.ymax) / 2, 0))])
 
 
 def front_shell(display, text=True):
@@ -434,16 +441,18 @@ def front_shell(display, text=True):
     shell = shell.cut(box(DISPLAY_X - span / 2 - 1.6, DISPLAY_X + span / 2 + 1.6,
                           -g['pins_y'] - 1.6, -g['pins_y'] + 1.6, zf - 1, zf + TAIL_GROOVE))
 
-    # knob, LED, grille, the terminals (their screws reached through the face)
+    # knob (its hole led in from both sides: the knob's cap passes through it as the front goes on), LED, grille,
+    # J5's two screws (J3, the speaker's terminal, stays under the face)
     kx, ky = xy(*SWITCH)
     shell = shell.cut(cyl(kx, ky, KNOB_HOLE_D / 2, zf - 1, z_out + 1))
-    shell = shell.cut(cq.Workplane('XY').workplane(offset=z_out - 0.4).circle(KNOB_HOLE_D / 2)
-                      .workplane(offset=0.41).circle(KNOB_HOLE_D / 2 + 0.41).loft().translate((kx, ky, 0)))
+    shell = shell.cut(cone(kx, ky, KNOB_HOLE_D / 2, KNOB_HOLE_D / 2 + 0.41, z_out - 0.4, z_out + 0.01))
+    shell = shell.cut(cone(kx, ky, KNOB_HOLE_D / 2 + 0.31, KNOB_HOLE_D / 2, zf - 0.01, zf + 0.3))
     shell = shell.cut(cyl(lx, ly, LIGHT_PIPE_D / 2, 1.0, z_out + 1))
     shell = shell.cut(stars(grille(), zf - 1, z_out + 1))
-    for j in (J3, J5):
-        shell = shell.cut(rounded_box((j['x0'] + j['x1']) / 2, -(j['y0'] + j['y1']) / 2, j['x1'] - j['x0'] + 0.6,
-                                      j['y1'] - j['y0'] + 0.6, 0.8, zf - 1, z_out + 1))
+    for bx, by in J5_SCREWS:
+        x, y = xy(bx, by)
+        shell = shell.cut(cyl(x, y, TERMINAL_HOLE_D / 2, zf - 1, z_out + 1))
+        shell = shell.cut(cone(x, y, TERMINAL_HOLE_D / 2, TERMINAL_HOLE_D / 2 + 0.41, z_out - 0.4, z_out + 0.01))
     # screw holes
     for bx, by in HOLES:
         x, y = xy(bx, by)
@@ -488,22 +497,25 @@ def detents(radius, length):
 
 
 def board_clips():
-    """Two hooks at the board's top edge, two ledges at its bottom edge and four ribs at its sides, on the back shell."""
+    """The spring along the board's top edge, two ledges at its bottom edge and four ribs at its sides, on the back
+    shell."""
     z_lip = BOARD_PLAY                              # the lips' undersides, just above the board's front surface
     z_root, z_top = ZB - HOOK_ROOT, HOOK_TOP
     t0, t1 = HOOK_T
-    parts, pockets = None, None
-    for hx in HOOKS_X:
-        y0 = BOARD_PLAY                             # the spring stands just above the board's top edge (Y = 0)
-        # the spring tapers from the root to the lip: the same snap with less strain at the root
-        hook = (cq.Workplane('YZ').polyline([(y0, z_root), (y0 + t0, z_root), (y0 + t1, z_top), (y0, z_top),
-                                             (-HOOK_LIP, z_lip + 0.6), (-HOOK_LIP, z_lip),
-                                             (y0, z_lip)]).close()
-                .extrude(HOOK_W).translate((hx - HOOK_W / 2, 0, 0)))
-        parts = hook if parts is None else parts.union(hook)
-        # a pocket in the plate round the spring's root makes it longer (less strain as it bends), unseen outside
-        pocket = box(hx - HOOK_W / 2 - 0.6, hx + HOOK_W / 2 + 0.6, y0 - 0.6, y0 + t0 + 0.6, z_root, ZB + 0.1)
-        pockets = pocket if pockets is None else pockets.union(pocket)
+    y0 = BOARD_PLAY                                 # the wall stands just above the board's top edge (Y = 0)
+    xa, xb = HOOK_SPAN
+    # the wall tapers from its root to its top; the posts hold its ends, so its middle bends along its length (along
+    # the print's layers) as well as from the plate
+    parts = (cq.Workplane('YZ').polyline([(y0, z_root), (y0 + t0, z_root), (y0 + t1, z_top), (y0, z_top)]).close()
+             .extrude(xb - xa).translate((xa, 0, 0)))
+    for px in (xa, xb - HOOK_POST):
+        parts = parts.union(box(px, px + HOOK_POST, y0, y0 + t0 + HOOK_POST_T, ZB - 0.01, z_top))
+    for hx in HOOKS_X:                              # the lips: a ramp the board's edge pushes, a catch over its front
+        parts = parts.union(cq.Workplane('YZ').polyline([(y0 + 0.01, z_lip), (-HOOK_LIP, z_lip),
+                                                         (-HOOK_LIP, z_lip + 0.6), (y0 + 0.01, z_top)]).close()
+                            .extrude(HOOK_W).translate((hx - HOOK_W / 2, 0, 0)))
+    # a slot in the plate under the wall, between the posts, makes its free height longer, unseen outside
+    pockets = box(xa + HOOK_POST, xb - HOOK_POST, y0 - 0.6, y0 + t0 + 0.6, z_root, ZB + 0.1)
     yw = Y_BOT + WALL                               # inside of the bottom wall
     for x0, x1 in LEDGES_X:
         ledge = (cq.Workplane('YZ').polyline([(yw - 0.01, z_lip), (-BOARD_H + LEDGE_LIP, z_lip),
@@ -591,17 +603,18 @@ def back_shell(usbc, clips=True):
 # ---------------------------------------------------------------- knob
 
 def knob(display):
-    """Pressed onto the switch's square stem through the face; its head covers the hole."""
+    """Pressed onto the switch's square stem. Its cap is narrower than the face's hole, so the front comes off and
+    goes on over it; an eight-pointed star is engraved on the cap, one point up."""
     z0 = STEM_TOP - 3.5                      # bottom, 0.7 mm above the switch's round base
     z_face = face_z(display) + FACE
-    zh = z_face + 0.5                        # the head starts 0.5 mm above the face
-    r, rh = KNOB_D / 2, KNOB_HEAD_D / 2
-    shaft = cq.Workplane('XY').circle(r).extrude(zh - z0).translate((0, 0, z0))
-    cone_ = (cq.Workplane('XY').workplane(offset=zh).circle(r)
-             .workplane(offset=rh - r).circle(rh).loft())
-    top = cq.Workplane('XY').workplane(offset=zh + rh - r).circle(rh).extrude(1.2)
-    k = shaft.union(cone_).union(top)
-    k = k.faces('>Z').edges().fillet(0.9)
+    zc = z_face + 0.6                        # the cap starts 0.6 mm above the face
+    r, rc = KNOB_D / 2, KNOB_HEAD_D / 2
+    shaft = cq.Workplane('XY').circle(r).extrude(zc - z0).translate((0, 0, z0))
+    flare = cone(0, 0, r, rc, zc, zc + rc - r)
+    top = zc + rc - r + 1.0
+    k = shaft.union(flare).union(cyl(0, 0, rc, zc + rc - r, top))
+    k = k.faces('>Z').edges().fillet(0.6)
+    k = k.cut(cq.Workplane('XY').polyline(star_points(0, 0, 3.0)).close().extrude(0.5).translate((0, 0, top - 0.4)))
     sq = STEM_SQ + KNOB_FIT
     k = k.cut(cq.Workplane("XY").rect(sq, sq).extrude(3.52).translate((0, 0, z0 - 0.01)))
     k = k.cut(cq.Workplane('XY').rect(sq + 0.8, sq + 0.8).workplane(offset=0.4).rect(sq, sq).loft()

@@ -3,8 +3,7 @@
 ![The clock in its case, with the colour screen](images/case.jpg)
 
 A 3D-printed case shaped like a mihrab: a rectangle that holds the board, with a pointed arch on top. The display
-sits behind a bevelled window, with the joystick knob to its right between the two terminal openings and the status
-LED above it. The speaker plays through a grille of eight-pointed stars in the arch, and "حي على الصلاة" is engraved
+sits behind a bevelled window, with the joystick knob to its right and the status LED above it. The speaker plays through a grille of eight-pointed stars in the arch, and "حي على الصلاة" is engraved
 under the display. The case measures 69 × 114 × 23 mm with the colour screen (21 mm with the OLED), crescent
 included. It stands on a shelf or hangs on a wall from the keyhole in its back.
 
@@ -24,7 +23,10 @@ closes, the display plugs into a header on the board. Six screws add hold.
 
 - PLA or PETG, 0.15 to 0.2 mm layers, 3 walls, 15 to 20 % infill, no supports. The files are already turned the
   way they print: the front lies on its face, the back on its back, and the knob stands on its shaft.
-- PETG suits the back best: the hooks that hold the board bend across the print's layers, where PLA is weakest.
+- PETG suits the back best: the spring that holds the board bends partly across the print's layers, where PLA is
+  weakest.
+- The engraved text is on the face, the side that lies on the bed. To keep its letters open, set Cura's Initial Layer
+  Horizontal Expansion to −0.1 or −0.2 mm: it stops the first layer spreading into them.
 - Two or three colours look good: the front and the back in different colours, the knob in a third.
 
 ![The case in ivory, teal and black, with a gold knob](images/colours.jpg)
@@ -77,26 +79,28 @@ If yours differs, change its numbers in `DISPLAYS` at the top of `enclosure.py` 
    the bottom of the window, glass toward the face. Then press its top end down into the pocket, past the stopper at
    its top edge, until the springs at both sides click over the board. Flexing the springs out a little helps.
 5. **The board into the back.** Slide the board's bottom edge under the two ledges by the bottom wall, then press its
-   top edge down until both hooks click. Ribs at the sides keep it centred.
-6. **Wires.** Connect the speaker to J3 (SPK+, SPK−). Lead the relay wires in through the hole in the right side and
-   into J5.
-7. **Close it.** Put the front straight onto the back:
+   top edge down until the spring along it clicks over it. Ribs at the sides keep it centred.
+6. **Wires.** Connect the speaker to J3 (SPK+, SPK−); the face covers J3, so this is done with the front off. Lead the
+   relay wires in through the hole in the right side and into J5.
+7. **The knob.** Press the knob onto the switch's stem, star point up. It then tilts four ways and presses in.
+   - It stays on: its cap is narrower than the hole in the face, so the front goes on and comes off over it.
+   - A knob that is too tight goes on after the square hole is opened a little with a file; a loose one takes a drop
+     of glue. To print the hole wider or narrower, change `KNOB_FIT` at the top of `enclosure.py`.
+8. **Close it.** Put the front straight onto the back:
    - the two long posts in the arch enter their sockets first, 8.8 mm before the case closes;
    - then two pins go through the board's spare display holes and line the board up with the front;
-   - only then, in the last 3.6 mm, does the display's header slide onto the board's.
+   - only then, in the last 3.6 mm, does the display's header slide onto the board's;
+   - the knob comes up through its hole.
 
    Press until the rim clicks all round.
-8. **Screws (optional).** Drive the six screws in from the back. The four at the corners clamp the board between the
+9. **Screws (optional).** Drive the six screws in from the back. The four at the corners clamp the board between the
    front's posts and the back's tubes; the two in the arch go into the long posts.
-9. **The knob.** Press the knob onto the switch's stem through the round hole. It then tilts four ways and presses
-   in. A knob that is too tight goes on after the square hole is opened a little with a file; a loose one takes a
-   drop of glue. To print the hole wider or narrower, change `KNOB_FIT` at the top of `enclosure.py`.
 
 **Opening it.** Take out the screws, if fitted, and pull the front straight off: the display comes away with it.
 
 - **The display:** to take it out of the front, push the two springs outward, lift its top end, and draw its
   bottom edge out of the grooves.
-- **The board:** to take it out of the back, push the two hooks at its top edge back by their tops, and lift that edge.
+- **The board:** to take it out of the back, push the spring at its top edge back at the middle, and lift that edge.
 
 ![Inside the front, with the display clicked in, and the back, with the board clicked in](images/inside.jpg)
 
@@ -126,7 +130,8 @@ If yours differs, change its numbers in `DISPLAYS` at the top of `enclosure.py` 
     speaker's ring, carried down.
 - **The board in the back:**
   - Two ledges hold its bottom edge.
-  - Two hooks snap over its top edge, 0.5 mm. Their springs taper from 1.2 to 0.8 mm and are 7 mm wide.
+  - A spring runs along its top edge: a wall 1.3 mm thick at the plate and 1.1 mm at the top, 35.6 mm long, held by a
+    post at each end, so its middle bends outward. Two lips on it, 7 mm wide, snap 0.5 mm over the board.
   - Four ribs stop 0.2 mm from its sides.
   - It rests on the four screw tubes.
 - **The front on the back:**
@@ -134,8 +139,11 @@ If yours differs, change its numbers in `DISPLAYS` at the top of `enclosure.py` 
   - The seam is flush outside, with a 0.15 mm gap.
 - **Height:** the face is 13 mm in front of the board (10.9 mm with the OLED), set by the display on its headers.
   - Under the face the tallest part is C1.
-  - The terminals stand in openings in the face. Their screws are 4.7 mm below its surface (2.6 mm with the OLED),
-    with 3 mm beside them for the wires.
+  - The relay terminal J5's two screws are reached through two 4.4 mm holes in the face, 4.7 mm deep (2.6 mm with
+    the OLED). The speaker terminal J3 stays under the face. Both have 3 mm beside them for the wires.
+- **Knob:** a 9.4 mm cap with an eight-pointed star engraved on it, on an 8 mm shaft, in a 10 mm hole. The shaft has
+  1 mm all round to tilt, and the cap passes through the hole.
+- **Text:** engraved 1.2 mm deep into the 2 mm face, 8.3 mm tall.
 - **Connectors:** the USB-C opening is 12.6 × 7 mm, room for common cable plugs.
 - **Antenna:** nothing metal comes within 17 mm of the ESP32's antenna at the bottom edge. The screws are at the
   corners and in the arch, and so is the speaker.

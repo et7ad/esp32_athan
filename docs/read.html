@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guides | Athan clock</title>
+<meta name="description" content="The athan clock's full written guides: using it, building it, keeping the data up to date, the board's design and the firmware.">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .library { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 14px; }
+  .library h3 { font-size: 15px; color: var(--ink-2); font-family: var(--body); font-weight: 700; grid-column: 1 / -1; margin-top: 18px; }
+  .library .path { grid-template-columns: 48px minmax(0, 1fr); padding: 18px; }
+  .library .path .tile { width: 48px; height: 58px; font-size: 24px; border-radius: 24px 24px 8px 8px / 22px 22px 8px 8px; padding-top: 8px; }
+  .library .path .tile .icon { font-size: 24px; }
+  .library .path h4 { font-size: 18px; margin: 2px 0 4px; }
+  .library .path p { font-size: 15px; }
+  .prose a.anchor { color: var(--line-2); text-decoration: none; margin-left: 8px; font-size: .8em; opacity: 0; }
+  .prose h2:hover a.anchor, .prose h3:hover a.anchor { opacity: 1; }
+</style>
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <div id="library-view" hidden>
+    <section class="page-head"><div class="wrap">
+      <h1>Guides</h1>
+      <p class="lede">The project's full written guides, as they are in the repository. The other pages of this site
+        show the same things with pictures and the clock to try; these have every detail.</p>
+    </div></section>
+    <section class="section" style="padding-top:8px"><div class="wrap library" id="library"></div></section>
+  </div>
+  <div id="doc-view" hidden>
+    <section class="page-head" style="padding-bottom:6px"><div class="wrap">
+      <p class="crumb"><a href="read.html">Guides</a> <span aria-hidden="true">/</span> <span id="crumb"></span></p>
+    </div></section>
+    <div class="wrap layout-side" style="padding-bottom:40px">
+      <nav class="toc" id="toc" aria-label="In this guide"></nav>
+      <div>
+        <div class="reader-tools">
+          <a class="btn btn-ghost btn-small" id="on-github" href="#"><span class="icon">open_in_new</span>On GitHub</a>
+        </div>
+        <article class="prose" id="doc" aria-live="polite"><p class="muted">Loading...</p></article>
+      </div>
+    </div>
+  </div>
+</main>
+<footer id="site-footer"></footer>
+
+<script type="module">
+import { marked } from 'https://cdn.jsdelivr.net/npm/marked@12.0.2/lib/marked.esm.js';
+import { repo, blob, tree, esc, scrollSpy } from './assets/site.js';
+
+// The guides this reader shows: [path, title, what it is, icon, group]
+const DOCS = [
+  ['guides/using.md', 'Using the clock', 'Setup, the screen, the keys and menu, the web page, sounds, radio, prayer times, updates', 'touch_app', 'For owners'],
+  ['guides/building.md', 'Building a clock', 'The prototype, the firmware, flashing, the circuit board, the acceptance checklist', 'build', 'For builders'],
+  ['guides/jlcpcb_assembly.md', 'Ordering assembled boards', 'The files JLCPCB needs, the service, what to check in its preview', 'developer_board', 'For builders'],
+  ['hardware/enclosure/README.md', 'The case', 'What to print, what else it needs, putting it together, how it fits', 'view_in_ar', 'For builders'],
+  ['hardware/programmer/README.md', 'The programmer', 'Flashing the clock through J6 without soldering a header', 'usb', 'For builders'],
+  ['HARDWARE.md', 'The circuit board', 'Power, the pin map, the amplifier, the switch, the parts list, the layout', 'memory', 'The design'],
+  ['max98357a_amplifier.md', 'The amplifier', 'The MAX98357A circuit, gain, and its checks', 'speaker', 'The design'],
+  ['microcontroller_demand.md', 'Which chip, and why', 'What each feature needs from the chip, and which boards could work', 'developer_board', 'The design'],
+  ['guides/maintaining.md', 'Maintaining the data', 'Prayer times, sounds, radio stations, firmware releases', 'tune', 'For maintainers'],
+  ['prayertimes_specs.md', 'The yearly file format', 'What a clock reads for a year of prayer times', 'event', 'For maintainers'],
+  ['DEVELOPER.md', 'How the firmware works', 'The component, threading, stored sounds, lists, radio, prayer times, the web page', 'terminal', 'For developers'],
+  ['firmware_rules.md', 'Firmware rules', 'What the firmware depends on, each rule with its reason', 'lightbulb', 'For developers'],
+  ['README.md', 'The project\'s README', 'The landing page on GitHub', 'menu_book', 'For developers'],
+];
+const KNOWN = new Set(DOCS.map(d => d[0]));
+const slug = t => t.trim().toLowerCase().replace(/<[^>]+>/g, '').replace(/[^\p{L}\p{N}\- _]/gu, '').replace(/ /g, '-');
+function resolve(base, rel) {   // a path relative to a file in the repository -> a path from the repository's root
+  const parts = base.split('/').slice(0, -1);
+  for (const p of rel.split('/')) { if (p === '..') parts.pop(); else if (p && p !== '.') parts.push(p); }
+  return parts.join('/');
+}
+
+const params = new URLSearchParams(location.search), doc = params.get('doc');
+if (!doc || !KNOWN.has(doc)) {
+  document.getElementById('library-view').hidden = false;
+  let html = '', group = '';
+  for (const [p, t, d, ic, g] of DOCS) {
+    if (g !== group) { html += `<h3>${esc(g)}</h3>`; group = g; }
+    html += `<a class="path${g === 'For builders' || g === 'The design' ? ' gold' : ''}" href="read.html?doc=${encodeURIComponent(p)}"><span class="tile"><span class="icon">${ic}</span></span><span><h4>${esc(t)}</h4><p>${esc(d)}</p></span></a>`;
+  }
+  document.getElementById('library').innerHTML = html;
+} else {
+  document.getElementById('doc-view').hidden = false;
+  const meta = DOCS.find(d => d[0] === doc);
+  document.title = `${meta[1]} | Athan clock`;
+  document.getElementById('crumb').textContent = meta[1];
+  document.getElementById('on-github').href = blob(doc);
+  const art = document.getElementById('doc');
+  let text;
+  try { const r = await fetch(repo(doc)); if (!r.ok) throw new Error(r.status); text = await r.text(); }
+  catch (e) { art.innerHTML = `<p>This guide could not load here. <a href="${blob(doc)}">Read it on GitHub</a>.</p>`; }
+  if (text) {
+    marked.use({ gfm: true });
+    art.innerHTML = marked.parse(text);
+    // headings: GitHub's anchors, so links into a section work
+    const toc = ['<b>In this guide</b>'];
+    art.querySelectorAll('h1, h2, h3').forEach(h => {
+      h.id = slug(h.textContent);
+      if (h.tagName !== 'H1') {
+        h.insertAdjacentHTML('beforeend', `<a class="anchor" href="#${h.id}" aria-label="Link to this section">#</a>`);
+        if (h.tagName === 'H2') toc.push(`<a href="#${h.id}">${esc(h.textContent.replace(/#$/, ''))}</a>`);
+      }
+    });
+    document.getElementById('toc').innerHTML = toc.join('');
+    // links and pictures: other guides stay here, pictures come from the repository, everything else opens on GitHub
+    art.querySelectorAll('a[href]').forEach(a => {
+      const h = a.getAttribute('href');
+      if (/^(https?:|mailto:|#)/.test(h)) { if (/^https?:/.test(h)) { a.target = '_blank'; a.rel = 'noopener'; } return; }
+      const [path, hash] = h.split('#'), full = resolve(doc, path);
+      if (KNOWN.has(full)) a.href = `read.html?doc=${encodeURIComponent(full)}${hash ? '#' + hash : ''}`;
+      else if (!/\.[a-z0-9]+$/i.test(full)) a.href = tree(full);
+      else a.href = blob(full) + (hash ? '#' + hash : '');
+    });
+    art.querySelectorAll('img[src]').forEach(img => {
+      const s = img.getAttribute('src');
+      if (!/^(https?:|data:)/.test(s)) img.src = repo(resolve(doc, s));
+      img.loading = 'lazy';
+    });
+    art.querySelectorAll('table').forEach(t => { const w = document.createElement('div'); w.className = 'table-wrap'; t.replaceWith(w); w.appendChild(t); });
+    if (location.hash) { const el = document.getElementById(decodeURIComponent(location.hash.slice(1))); if (el) el.scrollIntoView(); }
+    scrollSpy('#toc');
+  }
+}
+</script>
+</body>
+</html>

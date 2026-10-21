@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page not found | Athan clock</title>
+<meta name="robots" content="noindex">
+<style>
+  /* Self-contained: GitHub Pages shows this page at any missing address, where relative links would point elsewhere. */
+  :root { --paper: #f3f5f1; --ink: #17201e; --ink-2: #47534f; --teal: #0b7d72; --gold: #a96f0c; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --paper: #0d1220; --ink: #e8eeea; --ink-2: #a8b3b6; --teal: #3fd2c1; --gold: #f2b544; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--paper); color: var(--ink);
+    font: 18px/1.6 "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px; box-sizing: border-box; }
+  main { max-width: 34rem; text-align: center; display: grid; gap: 14px; justify-items: center; }
+  svg { width: 64px; height: 84px; }
+  h1 { margin: 0; font-size: 32px; }
+  p { margin: 0; color: var(--ink-2); }
+  nav { display: flex; flex-wrap: wrap; gap: 10px 18px; justify-content: center; margin-top: 8px; }
+  a { color: var(--teal); font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 26 34" aria-hidden="true"><path d="M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z" fill="none" stroke="var(--teal)" stroke-width="2.2" stroke-linejoin="round"/><path d="m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z" fill="var(--gold)"/></svg>
+  <h1>This page isn't here</h1>
+  <p>The address may have a typo, or the page has moved. Everything about the athan clock starts from its home page.</p>
+  <nav id="links">
+    <a href="index.html">Home</a><a href="setup.html">Set up a clock</a><a href="use.html">Use it</a><a href="times.html">Prayer times</a><a href="build.html">Build one</a>
+  </nav>
+</main>
+<script>
+  // on GitHub Pages the site lives under /<repository>/: make the links start there
+  const m = location.hostname.endsWith('github.io') && location.pathname.match(/^\/[^/]+\//);
+  if (m) document.querySelectorAll('#links a').forEach(a => { a.href = m[0] + a.getAttribute('href'); });
+</script>
+</body>
+</html>

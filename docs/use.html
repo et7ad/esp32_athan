@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Using the clock | Athan clock</title>
+<meta name="description" content="Try the athan clock in your browser: its screen, its joystick and its menu, the web page on your phone, and updates.">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .marks { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .marks li { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; margin: 0; }
+  .marks .mk { width: 40px; height: 40px; border-radius: 10px; background: #000; display: grid; place-items: center; color: #2cc7b6; }
+  .marks .mk .icon { font-size: 22px; width: auto; }
+  .rows td:first-child { white-space: nowrap; }
+  .rows button.row-show { border: 1px solid var(--line-2); background: var(--card); color: var(--teal); border-radius: 8px; padding: 3px 9px; font: 700 14px var(--body); cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+  .rows button.row-show .icon { font-size: 17px; width: auto; }
+  .oled-diagram { background: #050607; color: #eaf6ff; border-radius: 12px; padding: 16px 18px; font: 14px/1.5 var(--mono); overflow-x: auto; white-space: pre; }
+  .sim-tools { display: grid; gap: 14px; }
+  .sim-tools .group { display: grid; gap: 8px; }
+  .sim-tools .group > span { font-size: 14px; font-weight: 700; color: var(--ink-2); }
+  .swatches { display: flex; gap: 8px; }
+  .swatches button { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-2); background: var(--sw); cursor: pointer; }
+  .swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink); }
+</style>
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <section class="page-head">
+    <div class="wrap">
+      <h1>Using the clock</h1>
+      <p class="lede">One joystick, one screen and a web page on your phone. Try them here first: the clock below runs
+        the same screens and the same menu as a real one, with your mosque's times.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:12px" aria-labelledby="h-try" id="try">
+    <div class="wrap">
+      <h2 id="h-try" class="vh">Try the clock</h2>
+      <div class="sim">
+        <div>
+          <div class="tft-frame"><canvas id="sim" width="240" height="240" aria-label="The clock's screen"></canvas></div>
+          <div class="joystick" id="sim-keys" aria-label="The clock's joystick">
+            <button class="j-up" data-key="up" aria-label="Up"><span class="icon">keyboard_arrow_up</span></button>
+            <button class="j-left" data-key="left" aria-label="Left"><span class="icon">keyboard_arrow_left</span></button>
+            <button class="j-sel" data-key="select" aria-label="Select (push in)"><span class="icon">radio_button_checked</span></button>
+            <button class="j-right" data-key="right" aria-label="Right"><span class="icon">keyboard_arrow_right</span></button>
+            <button class="j-down" data-key="down" aria-label="Down"><span class="icon">keyboard_arrow_down</span></button>
+          </div>
+          <p class="sim-hint">Or click the screen and use the arrow keys, with Enter for Select.</p>
+        </div>
+        <div class="sim-side">
+          <div class="sim-now" aria-live="polite"><h3 id="sim-where">The clock screen</h3><div class="keys" id="sim-keys-now"></div></div>
+          <div class="sim-tools">
+            <div class="group"><span>Show me</span>
+              <div class="chips" id="moments">
+                <button class="chip" data-moment="now"><span class="icon">schedule</span>Now</button>
+                <button class="chip" data-moment="lastminute"><span class="icon">timer</span>The last minute before an athan</button>
+                <button class="chip" data-moment="athan"><span class="icon">volume_up</span>The athan</button>
+              </div></div>
+            <div class="group"><span>Marks on the screen</span>
+              <div class="chips" id="toggles">
+                <button class="chip" data-toggle="radio" aria-pressed="false"><span class="icon">radio</span>Radio on</button>
+                <button class="chip" data-toggle="update" aria-pressed="false"><span class="icon">upgrade</span>Update ready</button>
+                <button class="chip" data-toggle="locked" aria-pressed="false"><span class="icon">lock</span>Buttons locked</button>
+                <button class="chip" data-toggle="wifi" aria-pressed="false"><span class="icon">wifi_off</span>No Wi-Fi</button>
+                <button class="chip" data-toggle="standin" aria-pressed="false"><span class="icon">history</span>Estimated times</button>
+                <button class="chip" data-toggle="dark" aria-pressed="false"><span class="icon">dark_mode</span>Dark at night</button>
+              </div></div>
+            <div class="group"><span>Mosque</span><select id="sim-mosque" aria-label="Mosque"></select></div>
+            <div class="group"><span>Screen colour</span><div class="swatches" id="sim-colours"></div></div>
+            <div class="group"><span>Sound</span>
+              <div><button class="chip" id="sim-sound" aria-pressed="false"><span class="icon">volume_off</span>Off: switch on to hear previews, the radio and the athan</button></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-screen" id="screen">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-screen">The screen</h2>
+        <p>Clocks come with one of two screens, a 1.54" colour screen or a small one-colour OLED. Both show the same things.</p></div>
+      <div class="grid-2">
+        <div class="read" style="display:grid;gap:14px">
+          <h3>The colour screen</h3>
+          <ul>
+            <li><b>At the top:</b> the time with its seconds, and the date. Under the date, the marks below.</li>
+            <li><b>In the middle:</b> a ring that fills from the last prayer to the next one. Inside it: the next
+              prayer, the time left ("1h 29m", "37m", and in the last minute the seconds, "45s") and its time.</li>
+            <li><b>At the bottom:</b> the five prayers. The next one sits in a filled box, easy to find from across a
+              room. When Sunrise or Doha comes first, Dhuhr is only framed. Prayers that have passed are dimmed.</li>
+            <li><b>An athan switched off</b> shows a mute icon above that prayer's name.</li>
+            <li><b>In the last minute before an athan</b> the ring flashes, half a second on and half off, while the
+              time left counts down the seconds. <b>During the athan</b> the ring and the prayer's box turn the athan
+              colour.</li>
+            <li><b>Colours:</b> Gold, Teal (the default), Green, Blue or White, with Screen Colour.</li>
+          </ul>
+          <ul class="marks" aria-label="The marks under the date">
+            <li><span class="mk"><span class="icon">radio</span></span><span><b>Radio playing</b>, with its slot number (1 to 10). Up stops it.</span></li>
+            <li><span class="mk"><span class="icon">upgrade</span></span><span><b>A firmware update</b> is ready to install (see Updates below).</span></li>
+            <li><span class="mk"><span class="icon" style="color:#a2a8ae">lock</span></span><span><b>The buttons are locked.</b></span></li>
+            <li><span class="mk"><span class="icon" style="color:#f2685c">wifi_off</span></span><span><b>No Wi-Fi.</b> The athan keeps working from the stored times.</span></li>
+            <li><span class="mk"><span class="icon" style="color:#f0a040">history</span></span><span><b>Estimated times:</b> this year's timetable is not published yet, so the clock uses last year's for the same date, converted for daylight saving (at most about a minute off). It goes away when the real timetable arrives.</span></li>
+          </ul>
+        </div>
+        <div style="display:grid;gap:14px;align-content:start">
+          <h3>The one-colour screen</h3>
+          <div class="oled-diagram" role="img" aria-label="The one-colour screen's layout">15:42        ▸ 8 🔒 THU
+               8 Oct
+ Fajr Dhuhr [Asr] Magh  Isha
+05:57 12:58 [16:09] 18:40 19:53
+╭ Asr                       ╮
+╰ 16:09         in 27 min   ╯</div>
+          <p class="muted">The time, the marks and the weekday; the date; the five prayers with the next one
+            highlighted; then the next prayer and the time left. A prayer struck through has its athan switched off. A
+            small hollow square at the top right means estimated times, a triangle with a number the radio, an up
+            arrow over a line an update. During the athan the bottom box turns white and says ATHAN TIME.</p>
+          <figure><img data-repo="hardware/enclosure/images/fronts.jpg" alt="The clock's front with the colour screen and with the one-colour screen" loading="lazy" width="1420" height="1000"></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-keys" id="keys">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-keys">The joystick</h2>
+        <p>Up, Down, Left, Right, and Select: push it straight in.</p></div>
+      <div class="grid-2">
+        <div class="table-wrap"><table>
+          <thead><tr><th>Key</th><th>On the clock screen</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Select</kbd></td><td>Opens the menu</td></tr>
+            <tr><td><kbd>Up</kbd></td><td>Radio on or off. It plays the station you chose last (its number shows beside the play mark)</td></tr>
+            <tr><td><kbd>Down</kbd></td><td>Relay output on or off</td></tr>
+            <tr><td><kbd>Left</kbd> <kbd>Right</kbd></td><td>Volume down or up by 10 %, shown for 2 seconds, of whatever is playing (the Fajr volume during the Fajr athan or the tawashih). They stop at 10 %: to go silent, use the menu or the web page</td></tr>
+          </tbody></table></div>
+        <div class="read" style="display:grid;gap:12px">
+          <p><b>While the athan, the tawashih, the tick or a preview plays,</b> Up, Down and Select stop it instead. The
+            radio keeps playing. If you stop the athan, the radio it paused stays off.</p>
+          <p><b>A dark screen</b> (Brightness at 0 %, or Screen at Night: Turned off): the first press of any key only
+            lights it, dimly. It stays lit for 2 minutes after your last press, with the seconds counting down in a
+            corner. The athan and the Pre-Fajr Tawashih light it too.</p>
+          <p><b>Locked buttons</b> (the menu's Lock Buttons row, handy when children can reach the clock): any key only
+            stops what is playing. To unlock, switch off <b>Buttons Locked</b> on the web page, or unplug the clock and
+            plug it back in while holding Up, Down, Left or Right.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-menu" id="menu">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-menu">The menu</h2>
+        <p>Up and Down move through the rows, and the list goes round. Left and Right move through the row's choices.
+          Select takes the choice shown; where there is nothing to take, it closes the menu. Exit returns to the clock,
+          and so does a minute without a press. Press <b>Show</b> to open any row on the clock above.</p></div>
+      <div class="table-wrap"><table class="rows">
+        <thead><tr><th>Row</th><th>Left and Right</th><th>Select</th></tr></thead>
+        <tbody id="rows"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-web" id="web">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-web">The web page</h2>
+        <p>On a phone or computer on the same Wi-Fi, open <a href="http://athan.local">athan.local</a>. If it doesn't
+          open (some phones, Android in particular, can't open <code>.local</code> addresses), use the clock's IP
+          address from the menu's <b>Info</b> row.</p></div>
+      <div class="grid-2">
+        <div class="read" style="display:grid;gap:12px">
+          <p>Everything the menu and the keys do can also be done here, except forgetting the Wi-Fi. A change takes
+            effect at once, and the page always shows what the clock is doing. It is grouped:</p>
+          <ul>
+            <li><b>Now:</b> Stop Audio, Athan Playing, Next Prayer, Today's Times, Buttons Locked, 12-hour Clock.</li>
+            <li><b>Athan:</b> Volume, Fajr Volume, Pre-Fajr Tawashih, Hourly Tick and its window.</li>
+            <li><b>Athan On/Off per Prayer:</b> a switch for each prayer.</li>
+            <li><b>Sounds:</b> the sounds in use and the link to the sounds page, <a href="http://athan.local/audio">athan.local/audio</a>.</li>
+            <li><b>Radio</b> and <b>Radio Stations:</b> the ten slots (<a href="sounds.html#radio">radio</a>).</li>
+            <li><b>Location and Prayer Times:</b> your mosque, Refresh Prayer Times, and which years are stored.</li>
+            <li><b>Screen:</b> brightness, Screen at Night and its hours, and Screen Colour.</li>
+            <li><b>System:</b> firmware and updates, Restart, the relay, the IP address, the Wi-Fi signal and drops.</li>
+          </ul>
+          <p>Home Assistant finds the clock through its ESPHome integration, with the same controls. The encryption key
+            it asks for is <code>/A5YakHWYfXLiBWI5Z92v0FWiaMsWbCUCWD41zlLPYk=</code>.</p>
+        </div>
+        <figure><img data-repo="images/radio_own_link.png" alt="Part of the clock's web page: the Radio Stations group with its switches and link boxes" loading="lazy" width="900" height="150">
+          <figcaption>Part of the web page: the Radio Stations group.</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-up" id="updates">
+    <div class="wrap grid-2" style="align-items:center">
+      <div class="read" style="display:grid;gap:12px">
+        <h2 id="h-up">Updates</h2>
+        <p>The clock looks for new firmware when it starts and every day at 3:00. It never installs an update by
+          itself. When a new version is out, a small up arrow appears at the top right of the screen and stays there
+          until you install it.</p>
+        <p>Install it with <b>Firmware</b> on the web page, the menu's <b>Update</b> row (it shows <b>Install
+          3.x.y</b>), or Home Assistant, at a time when no prayer is due in the next few minutes: the clock stands
+          still while it downloads, then restarts with the new version. Your settings, sounds and prayer times stay.</p>
+      </div>
+      <figure><img data-repo="images/update_mark.png" alt="The update mark, a small up arrow at the top right, on the colour screen and on the one-colour screen" loading="lazy" width="1096" height="542"></figure>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-good" id="good">
+    <div class="wrap read" style="display:grid;gap:12px">
+      <h2 id="h-good">Good to know</h2>
+      <ul>
+        <li><b>Power cuts:</b> the clock keeps its Wi-Fi, settings, sounds and times. Without internet afterwards it
+          has no time until the internet comes back, then carries on by itself.</li>
+        <li><b>Another Wi-Fi network:</b> unplug the clock, hold Select, and plug it back in. It forgets its network
+          and <a href="setup.html">setup</a> starts again.</li>
+        <li><b>Your mosque corrected its timetable:</b> press <b>Refresh Prayer Times</b> on the web page.</li>
+        <li><b>The router keeps dropping the clock:</b> <b>Wi-Fi Drops</b> on the web page lists when and why. Keep the
+          clock a metre or two away from the router, give the 2.4 GHz band its own network name on a fixed channel
+          (1, 6 or 11), and use WPA2 (AES) only. The <a href="read.html?doc=guides/using.md#if-the-router-keeps-dropping-the-clock">full list</a> is in the guide.</li>
+      </ul>
+      <p class="small muted">Everything on this page, in full: <a href="read.html?doc=guides/using.md">Using the clock</a>.</p>
+    </div>
+  </section>
+</main>
+<footer id="site-footer"></footer>
+
+<script type="module">
+import { loadMosques, chosenMosque, remember, esc } from './assets/site.js';
+import { Clock, PALETTES } from './assets/tft.js';
+
+const canvas = document.getElementById('sim'), keys = document.getElementById('sim-keys');
+const where = document.getElementById('sim-where'), now = document.getElementById('sim-keys-now');
+function side(c) {
+  const d = c.describe();
+  where.textContent = d.where;
+  now.innerHTML = d.keys.map(([k, t]) => `<kbd>${esc(k)}</kbd><span>${esc(t)}</span>`).join('');
+  const s = c.s;
+  const on = { radio: s.radio >= 0, update: !!s.update, locked: s.locked, wifi: !s.wifi, standin: s.standinForced, dark: s.night === 2 };
+  document.querySelectorAll('[data-toggle]').forEach(b => b.setAttribute('aria-pressed', String(!!on[b.dataset.toggle])));
+  document.querySelectorAll('#sim-colours button').forEach((b, i) => b.setAttribute('aria-pressed', String(i === s.palette)));
+}
+const clock = new Clock(canvas, {
+  onKey: k => { const b = keys.querySelector(`[data-key="${k}"]`); if (b) { b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 140); } },
+  onChange: side,
+});
+const mosques = await loadMosques();
+const sel = document.getElementById('sim-mosque');
+sel.innerHTML = mosques.map(m => `<option value="${esc(m.key)}">${esc(m.label)}</option>`).join('');
+sel.value = chosenMosque(mosques).key;
+await clock.init(sel.value);
+side(clock);
+sel.addEventListener('change', () => clock.setMosque(sel.value));
+keys.addEventListener('click', ev => { const b = ev.target.closest('[data-key]'); if (b) clock.key(b.dataset.key); });
+canvas.addEventListener('click', () => canvas.focus());
+
+document.getElementById('moments').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-moment]'); if (!b) return;
+  clock.menu.close(); clock.scenario(b.dataset.moment);
+});
+document.getElementById('toggles').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-toggle]'); if (!b) return;
+  const s = clock.s, t = b.dataset.toggle;
+  if (t === 'radio') { if (s.radio >= 0) clock.radioOff(); else clock.radioStart(s.radioSlot); }
+  if (t === 'update') s.update = s.update ? null : '3.0.1';
+  if (t === 'locked') s.locked = !s.locked;
+  if (t === 'wifi') s.wifi = !s.wifi;
+  if (t === 'standin') s.standinForced = !s.standinForced;
+  if (t === 'dark') {
+    if (s.night === 2) { s.night = 0; }
+    else { const h = clock.local().h; s.night = 2; s.nightFrom = h; s.nightUntil = (h + 3) % 24; s.woken = -1e9; }
+  }
+  clock.menu.close(); clock.changed();
+});
+const sw = document.getElementById('sim-colours');
+sw.innerHTML = PALETTES.map((p, i) => `<button type="button" style="--sw:${p.accent}" aria-label="${p.name}" title="${p.name}"></button>`).join('');
+sw.addEventListener('click', ev => { const i = [...sw.children].indexOf(ev.target.closest('button')); if (i >= 0) { clock.s.palette = i; clock.changed(); } });
+const snd = document.getElementById('sim-sound');
+snd.addEventListener('click', () => {
+  clock.speaker.on = !clock.speaker.on;
+  if (!clock.speaker.on) clock.speaker.stop();
+  else if (!clock.durations) clock.measure();
+  snd.setAttribute('aria-pressed', String(clock.speaker.on));
+  snd.innerHTML = clock.speaker.on ? '<span class="icon">volume_up</span>On: previews, the radio and the athan play here' : '<span class="icon">volume_off</span>Off: switch on to hear previews, the radio and the athan';
+});
+
+// the menu's rows (guides/using.md section 3), each one opens on the clock
+const ROWS = [
+  ['Radio', 'The ten radio slots', 'Plays the slot shown (or stops it if it is playing) and returns to the clock'],
+  ['Athan', 'The suggested athans, numbered ("1. Athan 1", "2. Abdul Basit"), with Custom first if you uploaded one. Rest on one for half a second and it plays a preview', 'Downloads the athan shown and makes it the athan. Progress shows under it; your current athan stays until the new one has passed every check'],
+  ['Fajr Athan', 'The same, for Fajr. Previews play at the Fajr volume', 'The same'],
+  ['Tawashih', 'Random first (the default: a different one from the list every day, streamed), then the list', 'Random takes effect at once. A list entry is downloaded as for the athan and replaces Random'],
+  ['Pre-Fajr', 'Off, On', 'Takes it: 25 minutes before Fajr the relay switches on and a tawashih plays'],
+  ['Hourly Tick', 'The ticks, with Off first', 'Takes it; choosing a tick switches the hourly tick on'],
+  ['Tick From', 'Fajr, Dhuhr, or an hour. A prayer moves with the prayer times every day', 'Takes it. The line under it shows the result ("until Isha, 14 h")'],
+  ['Tick Until', 'Maghrib, Isha, or an hour. The same From and Until means all day', 'Takes it'],
+  ['Athan On/Off', 'Each prayer, with all five by their first letter under it, filled when on', 'Switches the prayer shown'],
+  ['Volume', '0 to 100 %, applied at once', 'Closes'],
+  ['Fajr Volume', '0 to 100 %, for the Fajr athan and the tawashih', 'Closes'],
+  ['Location', 'The mosques this project offers, numbered and by name. The colour screen shows each one\'s coordinates under it', 'Takes it; the clock downloads its prayer times'],
+  ['Clock', '24-hour, 12-hour', 'Takes it'],
+  ['Brightness', '0 to 100 %. At 0 % the screen goes dark, by day too', 'Closes'],
+  ['Screen at Night', 'Normal (as by day), Dim, or Turned off, between Night From and Night Until', 'Takes it'],
+  ['Night From', 'Maghrib, Isha, or an hour', 'Takes it'],
+  ['Night Until', 'Fajr, Dhuhr, or an hour', 'Takes it'],
+  ['Screen Colour', 'Gold, Teal, Green, Blue, White (colour screen only)', 'Takes it'],
+  ['Update', 'Install 3.x.y when an update is ready, otherwise Check now', 'Installs it, or checks GitHub now'],
+  ['Lock Buttons', '', 'Locks the buttons and returns to the clock'],
+  ['Info', 'The clock\'s IP address, athan.local and the firmware version', 'Closes'],
+  ['Exit', '', 'Returns to the clock (so do Left and Right)'],
+];
+document.getElementById('rows').innerHTML = ROWS.map(([t, lr, s]) =>
+  `<tr><td><b>${t}</b><br><button class="row-show" type="button" data-row="${t}"><span class="icon">touch_app</span>Show</button></td><td>${lr}</td><td>${s}</td></tr>`).join('');
+document.getElementById('rows').addEventListener('click', ev => {
+  const b = ev.target.closest('[data-row]'); if (!b) return;
+  clock.openRow(b.dataset.row);
+  document.getElementById('try').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+</script>
+</body>
+</html>

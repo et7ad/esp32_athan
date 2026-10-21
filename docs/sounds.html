@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sounds and radio | Athan clock</title>
+<meta name="description" content="Listen to every athan, Fajr athan, tawashih and hourly tick the clock offers, and the ten Quran radio stations. Make your own sound file, or add your own station.">
+<meta name="theme-color" content="#0b7d72">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 34'%3E%3Cpath d='M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z' fill='%230b7d72'/%3E%3Cpath d='m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z' fill='%23f2b544'/%3E%3C/svg%3E">
+<script>try { const t = localStorage.getItem('athan-theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Reem+Kufi:wght@400..700&family=Roboto:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=add_location_alt,alarm,android,arrow_back,arrow_upward,bedtime,bluetooth,bolt,brightness_6,build,check,check_circle,chevron_left,chevron_right,close,computer,content_copy,contrast,dark_mode,deployed_code,developer_board,download,event,expand_more,explore,graphic_eq,headphones,help,history,info,keyboard_arrow_down,keyboard_arrow_left,keyboard_arrow_right,keyboard_arrow_up,language,light_mode,lightbulb,location_on,lock,map,memory,menu,menu_book,mosque,nest_clock_farsight_analog,open_in_new,palette,pause,phone_iphone,play_arrow,power_settings_new,print,queue_music,radio,radio_button_checked,restart_alt,router,schedule,schedule_send,smartphone,speaker,stop,system_update,task_alt,terminal,timer,toggle_on,touch_app,tune,upgrade,usb,view_in_ar,volume_off,volume_up,warning,wb_twilight,wifi,wifi_off,wifi_tethering&display=block">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header id="site-header"></header>
+<main>
+  <section class="page-head">
+    <div class="wrap">
+      <h1>Sounds and radio</h1>
+      <p class="lede">Every sound the clock offers, ready to listen to here. On the clock, choose one in the menu or on
+        its sounds page (<a href="http://athan.local/audio">athan.local/audio</a>): it downloads it once and plays it
+        from its own memory.</p>
+    </div>
+  </section>
+
+  <section class="section" style="padding-top:8px" aria-labelledby="h-lib" id="library">
+    <div class="wrap">
+      <h2 id="h-lib" class="vh">The library</h2>
+      <div class="sound-lists" id="lists"></div>
+      <p class="small muted" style="margin-top:16px">Number 1 of each list is what a new clock downloads. The tawashih
+        is <b>Random</b> by default: a different one from the list every day, streamed when it plays, so nothing is
+        stored. The clock plays only the left channel; every file here is mono.</p>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="h-own" id="own">
+    <div class="wrap grid-2" style="align-items:start">
+      <div class="read" style="display:grid;gap:14px">
+        <h2 id="h-own">A sound of your own</h2>
+        <p>On the clock's sounds page, pick an MP3 file under <b>Upload your own</b> and press <b>Upload</b>. It then
+          shows as <b>Custom</b> in the list and in the clock's menu. A file that is too big, too long or not an MP3
+          never replaces the sound in use; the page says why.</p>
+        <div class="table-wrap"><table style="min-width:0">
+          <thead><tr><th>Sound</th><th>Largest file</th><th>Longest</th></tr></thead>
+          <tbody><tr><td>Athan, Fajr athan, tawashih</td><td>3 MB</td><td>5 minutes</td></tr>
+            <tr><td>Hourly tick</td><td>0.4 MB</td><td>1 minute</td></tr></tbody></table></div>
+        <div class="callout"><span class="icon">headphones</span>
+          <p><strong>Make it mono.</strong> The clock plays only the left channel, so anything only on the right of a
+            stereo recording is lost. A mono file always plays in full.</p></div>
+      </div>
+      <div style="display:grid;gap:14px">
+        <h3>The quick way: an online converter</h3>
+        <ol class="steps">
+          <li><div class="step-body"><p>Open <a href="https://audio.online-convert.com/convert-to-mp3">online-convert.com's MP3 converter</a> and choose your file (it also takes WAV, M4A or a video).</p></div></li>
+          <li><div class="step-body"><p>In the optional settings: <b>Change audio channels</b> to <b>Mono</b>, <b>sample rate</b> to <b>44100 Hz</b>, and the bitrate to <b>64 kbps</b> (48 kbps for a tick).</p></div></li>
+          <li><div class="step-body"><p>Convert, download the result, and upload it on the clock's sounds page.</p></div></li>
+        </ol>
+        <h3>Or with ffmpeg, on your computer</h3>
+        <p class="muted small">Your file stays on your computer. Add <code>-t 300</code> (5 minutes) before
+          <code>out.mp3</code> to cut a long recording.</p>
+        <div class="code"><pre>ffmpeg -i in.mp3 -map 0:a -map_metadata -1 -ac 1 -ar 44100 -b:a 64k out.mp3</pre></div>
+        <p class="small"><a href="read.html?doc=guides/using.md#5-sounds">More on sound files</a> in the guide.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-radio" id="radio">
+    <div class="wrap">
+      <div class="section-head"><h2 id="h-radio">Radio</h2>
+        <p>Ten slots that follow this project's list, so a station that moves is fixed here once for every clock.
+          Press Up on the clock to play the slot you chose last.</p></div>
+      <div class="grid-2" style="align-items:start">
+        <div class="sound-list" id="stations"><h3><span class="icon">radio</span>The ten stations</h3></div>
+        <div class="read" style="display:grid;gap:14px">
+          <h3>A station of your own</h3>
+          <p><a href="https://www.mp3quran.net/eng/radios">mp3quran.net</a> has over 170 Quran stations by reciter,
+            and the clock plays all of them. To put one on a slot:</p>
+          <ol class="steps">
+            <li><div class="step-body"><p>Search for the reciter, press <b>•••</b> on the station, then <b>Copy Link</b>.</p>
+              <figure><img data-repo="images/radio_mp3quran_copy_link.png" alt="mp3quran.net: the station's ••• button and its Copy Link button" loading="lazy" width="1100" height="400"></figure></div></li>
+            <li><div class="step-body"><p>On the clock's web page, under <b>Radio Stations</b>, switch <b>Radio 10 follows project list</b> off and paste the link into <b>Radio 10 own link</b>.</p>
+              <figure><img data-repo="images/radio_own_link.png" alt="The clock's page: Radio 10 follows project list switched off, the link pasted in Radio 10 own link" loading="lazy" width="900" height="150"></figure></div></li>
+            <li><div class="step-body"><p>Under <b>Radio</b>, choose <b>Radio 10 (own link)</b> and press <b>Play Radio</b>.</p>
+              <figure><img data-repo="images/radio_play_own_link.png" alt="The clock's page: Radio 10 chosen, Play Radio pressed, Radio Status showing it" loading="lazy" width="900" height="264"></figure></div></li>
+          </ol>
+          <p class="small muted">The link must be the stream itself (MP3 is safest; Opus, FLAC and WAV work too), not a
+            web page with a player or a playlist file, and at most 255 characters.
+            <a href="read.html?doc=guides/using.md#your-own-station">What makes a link work</a>, and how to
+            <a href="read.html?doc=guides/using.md#playing-your-computers-audio">play your computer's audio</a> on the clock.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<footer id="site-footer"></footer>
+
+<script type="module">
+import { getJSON, esc } from './assets/site.js';
+
+const audio = new Audio();
+let playing = null;   // the row element playing
+function stop() { audio.pause(); audio.removeAttribute('src'); audio.load(); if (playing) { playing.classList.remove('on'); playing.querySelector('.play .icon').textContent = 'play_arrow'; playing.querySelector('.bar i').style.width = '0'; } playing = null; }
+audio.addEventListener('timeupdate', () => { if (playing && audio.duration && isFinite(audio.duration)) playing.querySelector('.bar i').style.width = (audio.currentTime / audio.duration * 100) + '%'; });
+audio.addEventListener('ended', stop);
+audio.addEventListener('error', () => { if (playing) { playing.querySelector('small').textContent = 'Could not play this one here'; stop(); } });
+function row(name, sub, url, live) {
+  return `<div class="sound-row" data-url="${esc(url)}"${live ? ' data-live="1"' : ''}>
+    <button class="play" type="button" aria-label="Play ${esc(name)}"><span class="icon">play_arrow</span></button>
+    <span class="meta"><span>${esc(name)}</span><small>${esc(sub)}</small><span class="bar"><i></i></span></span>
+    <span class="len"></span></div>`;
+}
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('.sound-row .play'); if (!b) return;
+  const r = b.closest('.sound-row');
+  if (playing === r) { stop(); return; }
+  stop();
+  playing = r; r.classList.add('on'); b.querySelector('.icon').textContent = r.dataset.live ? 'stop' : 'pause';
+  audio.src = r.dataset.url; audio.play().catch(() => { r.querySelector('small').textContent = 'Could not play this one here'; stop(); });
+});
+
+const cat = await getJSON('audio/catalog.json');
+const LISTS = [['athan', 'Athan', 'mosque', 'Dhuhr, Asr, Maghrib and Isha'], ['fajr', 'Fajr athan', 'wb_twilight', 'At Fajr, at its own volume'],
+  ['tawashih', 'Tawashih', 'queue_music', 'Before Fajr, when Pre-Fajr is on'], ['tick', 'Hourly tick', 'timer', 'On the hour, during the hours you choose']];
+document.getElementById('lists').innerHTML = LISTS.map(([k, title, icon, when]) => `<div class="sound-list"><h3><span class="icon">${icon}</span>${title}<small class="muted" style="font:15px var(--body);margin-left:auto">${when}</small></h3>
+  ${(cat && cat[k] || []).map((e, i) => row(`${i + 1}. ${e.name}`, i === 0 ? (k === 'tawashih' ? 'Played by Random like the others' : 'What a new clock downloads') : '', 'audio/' + e.url)).join('')}</div>`).join('');
+// lengths, as the clock's sounds page shows them
+document.querySelectorAll('#lists .sound-row').forEach(r => {
+  const a = new Audio(); a.preload = 'metadata';
+  a.onloadedmetadata = () => { const s = Math.round(a.duration); r.querySelector('.len').textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  a.src = r.dataset.url;
+});
+
+const st = await getJSON('radio/stations.json');
+document.getElementById('stations').insertAdjacentHTML('beforeend', (st && st.stations || []).map((s, i) =>
+  s.url ? row(`${i + 1} ${s.name}`, 'Live stream', s.url, true) : `<div class="sound-row"><span></span><span class="meta"><span>${i + 1} (empty)</span></span><span></span></div>`).join(''));
+</script>
+</body>
+</html>

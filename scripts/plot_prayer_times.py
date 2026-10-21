@@ -301,7 +301,7 @@ def build_figure(masjid, year, data):
 
 
 # ---------------------------------------------------------------------------
-# Landing page (docs/index.html)
+# Landing page (docs/athantimes/charts.html)
 # ---------------------------------------------------------------------------
 
 INDEX_HTML_TEMPLATE = """<!DOCTYPE html>
@@ -443,12 +443,12 @@ __CARDS__
 
 
 def write_landing_index(out_dir, plots, base_dir_name):
-    """Write a small landing page at out_dir/index.html linking to every plot.
+    """Write a small landing page at out_dir/charts.html linking to every plot.
 
     `plots` is a list of (masjid_key, year) tuples; `base_dir_name` is the
     folder name that holds masjid subdirs (e.g. "athantimes"), so links are
     "<base_dir_name>/<masjid>/prayers_plots_<year>.html" -- relative to the
-    index, which keeps them working both on disk and on GitHub Pages.
+    landing page, which keeps them working on disk.
     """
     from collections import defaultdict
     by_masjid = defaultdict(list)
@@ -477,7 +477,7 @@ def write_landing_index(out_dir, plots, base_dir_name):
         )
 
     html = INDEX_HTML_TEMPLATE.replace("__CARDS__", "\n".join(cards))
-    out_path = out_dir / "index.html"
+    out_path = out_dir / "charts.html"
     out_path.write_text(html, encoding="utf-8")
     return out_path
 
@@ -538,10 +538,10 @@ def process_base(base):
               file=sys.stderr)
         return 1
 
-    # Landing page lives one level above the base dir, so when base is
-    # docs/athantimes, this writes docs/index.html -- which is the root
-    # served by GitHub Pages when Pages source is the /docs folder.
-    index_path = write_landing_index(base.parent, plots, base.name)
+    # The landing page goes in the base dir itself (docs/athantimes/charts.html), never docs/index.html: that is
+    # the project website's home page (GitHub Pages serves docs/), whose Prayer times page draws the same charts
+    # from the yearly files directly.
+    index_path = write_landing_index(base, plots, ".")
     print(f"wrote landing page {index_path}")
 
     print(f"done. wrote {written} plot file(s) + 1 index.")

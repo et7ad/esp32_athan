@@ -1,5 +1,9 @@
 # Athan clock
 
+> **The website: [et7ad.github.io/esp32_athan](https://et7ad.github.io/esp32_athan/).** Try the clock in your browser
+> (its screen, joystick and menu), set one up step by step, listen to every athan and radio station, see your mosque's
+> times for the whole year, and build your own with the parts list, the wiring and the case in 3D.
+
 A small Wi-Fi clock that calls the athan at your mosque's prayer times. It shows the time and the next prayer,
 plays Quran radio, and can switch a relay before Fajr (one controlling a room light, for example). It runs on an
 ESP32-S3 with a small amplifier, and keeps its sounds and a whole year of prayer times in its own memory, so the
@@ -146,10 +150,11 @@ firmware/
   components/athan/        the custom component: stored sounds, lists, radio, prayer years, the sounds page
   sounds/                  click.wav and volume.wav, the two menu tones
   tests/                   tests and checks that run on a computer
-docs/                      everything the clocks download
+docs/                      everything the clocks download, and the website (GitHub Pages)
   athantimes/              mosques.json (the mosques) and a folder per mosque, a file per year
   audio/                   catalog.json and the sounds (athan/ fajr/ tawashih/ tick/)
   radio/stations.json      the project's ten radio stations
+  *.html, assets/          the website's pages, scripts, pictures and 3D models
 guides/                    using.md, building.md, maintaining.md
 scripts/                   prayer-time converters, the sound library builder, the release manifest
 hardware/pcb/              the KiCad project
