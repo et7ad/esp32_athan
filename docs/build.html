@@ -18,7 +18,7 @@
 <link rel="stylesheet" href="assets/site.css">
 <style>
   .route { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-  .route a { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); text-decoration: none; }
+  .route a { display: grid; gap: 6px; align-content: start; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); text-decoration: none; }
   .route a:hover { border-color: var(--teal); color: var(--ink); }
   .route .icon { color: var(--teal); font-size: 28px; }
   .route b { font-family: var(--display); font-weight: 600; font-size: 18px; }
@@ -51,9 +51,40 @@
     </div>
   </section>
 
+  <section class="section band" id="files" aria-labelledby="h-files" style="padding-block:40px">
+    <div class="wrap" style="display:grid;gap:20px">
+      <div class="section-head" style="margin:0">
+        <h2 id="h-files">Every file is yours</h2>
+        <p>Everything that makes this clock is in the project on GitHub, free to use, change and share under the MIT
+          license: the firmware, the circuit board, the case, the programmer, the data and the scripts.</p>
+      </div>
+      <div class="route" aria-label="The project's files">
+        <a data-tree="firmware" href="#"><span class="icon">terminal</span><b>Firmware</b><span class="d">The ESPHome configuration and its C++ component (firmware/)</span></a>
+        <a href="https://github.com/et7ad/esp32_athan/releases"><span class="icon">download</span><b>Ready-made firmware</b><span class="d">Files to flash, on the Releases page</span></a>
+        <a data-tree="hardware/pcb" href="#"><span class="icon">developer_board</span><b>Circuit board</b><span class="d">The KiCad project, the parts lists and the script for the factory files (hardware/pcb/)</span></a>
+        <a data-tree="hardware/enclosure" href="#"><span class="icon">view_in_ar</span><b>Case</b><span class="d">STL to print, STEP to open in CAD, the CadQuery script (hardware/enclosure/)</span></a>
+        <a data-tree="hardware/programmer" href="#"><span class="icon">usb</span><b>Programmer</b><span class="d">The press-in board for J6 (hardware/programmer/)</span></a>
+        <a data-tree="docs" href="#"><span class="icon">event</span><b>Data</b><span class="d">Mosques, prayer times, sounds and stations (docs/)</span></a>
+        <a data-tree="scripts" href="#"><span class="icon">tune</span><b>Scripts</b><span class="d">Timetable converters, the sound library, releases (scripts/)</span></a>
+        <a href="https://github.com/et7ad/esp32_athan/archive/refs/heads/main.zip"><span class="icon">download</span><b>Everything at once</b><span class="d">The whole project as one ZIP file</span></a>
+      </div>
+      <div class="grid-2" style="align-items:center">
+        <figure><img class="shot" src="assets/img/github-file.png" alt="A file on GitHub: the case's front shown in 3D, with the download button at the top right of the file" width="1280" height="785" loading="lazy"></figure>
+        <div class="read" style="display:grid;gap:10px">
+          <h3>Downloading a file from GitHub</h3>
+          <p>Open a folder above, then the file. GitHub shows it (an STL even in 3D, to turn around), and the
+            <b>download</b> button at the top right of the file saves it. On this page, the download links in the
+            case's table do the same in one click.</p>
+          <p>For everything at once: <b>Code</b>, then <b>Download ZIP</b>, on the project's main page.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <div class="wrap layout-side">
     <nav class="toc" aria-label="On this page">
       <b>On this page</b>
+      <a href="#files"><span class="n">·</span> Every file</a>
       <a href="#parts"><span class="n">1</span> Parts</a>
       <a href="#prototype"><span class="n">2</span> Prototype</a>
       <a href="#firmware"><span class="n">3</span> Firmware</a>
@@ -140,6 +171,10 @@ cd esp32_athan
           <li><b>An older clock on the same network?</b> Version 2 clocks are also called <code>athan</code>: give one
             of them another <code>device_name</code> at the top of the yaml.</li>
         </ul>
+        <p>The firmware's files are all in <a data-tree="firmware" href="#">firmware/</a>: <code>athan.yaml</code> (what
+          the clock does), <code>displays/</code> (one file per screen), <code>components/athan/</code> (the C++ part)
+          and <code>partitions.csv</code> (the memory layout). No need to build it to try it: a release's ready-made file
+          flashes from the browser (next chapter).</p>
         <p class="small muted">With the ESPHome dashboard instead: copy the contents of <code>firmware/</code> into its
           config folder and use the <code>esphome/esphome:2026.9.1</code> image. Details:
           <a href="read.html?doc=guides/building.md#3-building-the-firmware">building the firmware</a>.</p>
@@ -166,6 +201,31 @@ cd esp32_athan
           <li><div class="step-body"><p>Flash, choosing the adapter's port:</p><div class="code"><pre>./build_firmware.sh --display tft flash</pre></div></div></li>
           <li><div class="step-body"><p>Remove the jumper, then unplug and replug the USB-C.</p></div></li>
         </ol>
+        <h3 id="web-flash">Without building: from a release, in your browser</h3>
+        <div class="grid-2" style="align-items:start">
+          <div class="read" style="display:grid;gap:10px">
+            <p>Each release on GitHub carries ready-made firmware files. <a href="https://esphome.io">ESPHome</a>'s own
+              page, <a href="https://web.esphome.io">web.esphome.io</a>, flashes one straight from Chrome or Edge on a
+              computer, with nothing to install.</p>
+            <ol class="steps">
+              <li><div class="step-body"><p>On the <a href="https://github.com/et7ad/esp32_athan/releases">Releases page</a>,
+                download the <b>factory</b> file for your screen: <code>athan-v3-tft-3.x.y.factory.bin</code> for the colour
+                screen, <code>athan-v3-3.x.y.factory.bin</code> for the OLED.</p></div></li>
+              <li><div class="step-body"><p>Connect the clock as for any first flash: the USB-serial adapter on J6 with the
+                jumper on pins 1 and 2 (or the press-in programmer), or a DevKitC's USB.</p></div></li>
+              <li><div class="step-body"><p>Open <a href="https://web.esphome.io">web.esphome.io</a>, press <b>Connect</b>,
+                and choose the adapter's port in the list the browser shows.</p></div></li>
+              <li><div class="step-body"><p>Choose <b>Install</b>, pick the factory file you downloaded, and install it.
+                When it is done, remove the jumper and power the clock from its USB-C.</p></div></li>
+            </ol>
+            <p class="small muted">The factory file writes the whole memory, so a clock flashed this way starts afresh
+              (Wi-Fi and settings too). A clock that already runs this firmware updates itself instead: the
+              <a href="use.html#updates">update mark</a>.</p>
+          </div>
+          <figure><img class="shot" src="assets/img/esphome-web.png" alt="ESPHome Web: the ESP Device card with its Connect button" width="1000" height="370" loading="lazy">
+            <figcaption>ESPHome Web: <b>Connect</b>, then the port, then <b>Install</b>. It runs in the browser; the
+              file never leaves your computer.</figcaption></figure>
+        </div>
         <h3>Without a header on J6: the press-in programmer</h3>
         <div class="grid-2">
           <div class="read" style="display:grid;gap:10px">
@@ -206,7 +266,9 @@ cd esp32_athan
           <dt>The board</dt><dd>Two layers, 1.6 mm, lead-free HASL or ENIG (ENIG makes the amplifier's small pads easier)</dd>
           <dt>Assembly</dt><dd>Suggested: JLCPCB assembles the back only (the module, the amplifier, the USB-C and the small parts), and you solder the front and the through-hole parts</dd>
         </dl>
-        <p><a href="read.html?doc=guides/jlcpcb_assembly.md">Ordering assembled boards from JLCPCB</a>, step by step.</p>
+        <p><a href="read.html?doc=guides/jlcpcb_assembly.md">Ordering assembled boards from JLCPCB</a>, step by step.
+          The whole KiCad project, the schematic, the layout and the parts lists are in
+          <a data-tree="hardware/pcb" href="#">hardware/pcb/</a>.</p>
         <h3>Soldering</h3>
         <ol>
           <li>The back first: the amplifier (its pad underneath needs hot air or a hot plate), the module, the regulator, the small parts.</li>
@@ -229,6 +291,9 @@ cd esp32_athan
           <label>Apart <input type="range" id="v-explode" min="0" max="1" step="0.01" value="0"></label>
           <div class="seg" role="group" aria-label="Case colour" id="v-colour"><button aria-pressed="true" data-c="ivory">Ivory</button><button aria-pressed="false" data-c="teal">Teal</button><button aria-pressed="false" data-c="black">Black</button></div>
         </div>
+        <p>All the case's files are in <a data-tree="hardware/enclosure" href="#">hardware/enclosure/</a>: the STL files to
+          print, the STEP files to open in any CAD program (each part, and the whole clock assembled), and
+          <code>enclosure.py</code>, the CadQuery script that makes them all, to change the case.</p>
         <h3>Print</h3>
         <div class="table-wrap"><table class="print-table">
           <thead><tr><th>Part</th><th>Pick</th><th>File</th></tr></thead><tbody>

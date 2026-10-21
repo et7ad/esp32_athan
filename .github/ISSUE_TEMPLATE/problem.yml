@@ -1,0 +1,38 @@
+name: Something isn't working
+description: A clock, the website or a script doing something wrong
+title: "Problem: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead. A photo of the screen or a screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to see it again
+      description: What you did just before, step by step, if you know.
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Which clock?
+      options:
+        - Colour screen (version 3)
+        - One-colour OLED (version 3)
+        - Older clock (version 2, ESP8266)
+        - Not about a clock (the website, a script, the data)
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: On the clock's web page under System, Firmware Version.
+      placeholder: "3.0.0"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: If you can, the output of ./build_firmware.sh logs athan.local while it happens.
+      render: text

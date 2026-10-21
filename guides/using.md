@@ -28,7 +28,8 @@ and 5 GHz under one network name works; a network that is 5 GHz only does not.
    offers to set it up.
 2. When the screen shows **BT: press Select**, press **Select** on the clock (push the joystick straight in). This
    proves you are standing next to it. The permission lasts one minute.
-3. Choose your network and type its password. The clock joins, and Bluetooth turns off.
+3. Type your Wi-Fi network's name (its SSID, exactly as your phone shows it) and its password: the page has no list
+   to choose from. The clock joins, and Bluetooth turns off.
 
 ### Way 2: the clock's own hotspot (every phone, including iPhone)
 

@@ -30,6 +30,7 @@ const PAGES = [
   ['times.html', 'Prayer times', 'The mosques and their yearly timetables'],
   ['build.html', 'Build', 'Parts, wiring, firmware, the board and the case'],
   ['read.html', 'Guides', 'The full written guides'],
+  ['help.html', 'Help', 'Ask the maintainer on GitHub'],
 ];
 
 const BRAND_SVG = `<svg viewBox="0 0 26 34" aria-hidden="true"><path d="M2 32V17.5A11 11 0 0 1 13 4a11 11 0 0 1 11 13.5V32z" fill="none" stroke="var(--teal)" stroke-width="2.2" stroke-linejoin="round"/><path d="M13 1.2v2.6" stroke="var(--teal)" stroke-width="2" stroke-linecap="round"/><path d="m13 14.2 1.3 2.4 2.6-.5-.5 2.6 2.4 1.3-2.4 1.3.5 2.6-2.6-.5-1.3 2.4-1.3-2.4-2.6.5.5-2.6-2.4-1.3 2.4-1.3-.5-2.6 2.6.5z" fill="var(--gold)"/></svg>`;
@@ -75,9 +76,9 @@ export function renderChrome() {
       <div><span class="ar" lang="ar">حي على الصلاة</span><b>Athan clock</b>
         <p>An open prayer clock: an ESP32-S3, a small amplifier and a screen, with each mosque's times published here
         on GitHub. Older clocks (version 2, ESP8266) live in <a style="display:inline" href="https://github.com/et7ad/esp_athan">et7ad/esp_athan</a>.</p></div>
-      <div><b>Owners</b><a href="setup.html">Set up a clock</a><a href="use.html">Use it</a><a href="sounds.html">Sounds and radio</a><a href="times.html">Prayer times</a></div>
-      <div><b>Builders</b><a href="build.html#parts">Parts list</a><a href="build.html#prototype">Prototype</a><a href="build.html#firmware">Firmware</a><a href="build.html#case">The case</a></div>
-      <div><b>Project</b><a href="read.html">Guides</a><a href="${GITHUB}">Source on GitHub</a><a href="${GITHUB}/issues">Ask for your mosque</a><a href="${blob('LICENSE')}">License</a></div>
+      <div><b>Owners</b><a href="setup.html">Set up a clock</a><a href="use.html">Use it</a><a href="sounds.html">Sounds and radio</a><a href="times.html">Prayer times</a><a href="help.html">Get help</a></div>
+      <div><b>Builders</b><a href="build.html#files">Every file</a><a href="build.html#parts">Parts list</a><a href="build.html#web-flash">Flash from the browser</a><a href="build.html#case">The case</a><a href="own-data.html">Your own mosque data</a></div>
+      <div><b>Project</b><a href="read.html">Guides</a><a href="${GITHUB}">The project on GitHub</a><a href="${GITHUB}/releases">Firmware releases</a><a href="${GITHUB}/issues/new?template=mosque.yml">Ask for your mosque</a><a href="${blob('LICENSE')}">MIT license</a></div>
     </div>`;
   }
 }

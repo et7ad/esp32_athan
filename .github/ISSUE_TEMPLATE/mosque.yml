@@ -1,0 +1,44 @@
+name: Add a mosque
+description: Ask for your mosque's prayer times on every clock
+title: "Add a mosque: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Once a mosque is added here, it appears in every clock's Location list by itself, with no firmware update.
+  - type: input
+    id: name
+    attributes:
+      label: The mosque's name, as it should show on the clock
+      description: Plain letters, at most 40 characters.
+      placeholder: "Islamic Center of Davis"
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where it is
+      description: A Google Maps (or any map) link, or the address.
+    validations:
+      required: true
+  - type: textarea
+    id: timetable
+    attributes:
+      label: The yearly timetable
+      description: A link to it, or attach the file here (a PDF, a spreadsheet, or a photo of the printed one).
+    validations:
+      required: true
+  - type: dropdown
+    id: iqama
+    attributes:
+      label: Does the timetable have iqama times?
+      options:
+        - "Yes"
+        - "No"
+        - I don't know
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: For example, who publishes the times each year, or when the new year usually comes out.

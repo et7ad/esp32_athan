@@ -1,0 +1,46 @@
+name: Ask for help
+description: Setting up a clock, using it, building one, flashing it, or hosting your own data
+title: "Help: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about the athan clock. Many answers are already on the website: https://et7ad.github.io/esp32_athan/
+  - type: dropdown
+    id: topic
+    attributes:
+      label: What is it about?
+      options:
+        - Setting up a clock (Wi-Fi, choosing the mosque)
+        - Using it (the screen, the menu, the web page, sounds, radio)
+        - Building one (parts, the board, soldering)
+        - Flashing the firmware
+        - The printed case
+        - Hosting my own mosque data
+        - Something else
+    validations:
+      required: true
+  - type: dropdown
+    id: screen
+    attributes:
+      label: Which clock?
+      options:
+        - Colour screen (version 3)
+        - One-colour OLED (version 3)
+        - Older clock (version 2, ESP8266)
+        - Not built yet
+        - I don't know
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: What are you trying to do, and where are you stuck? A photo of the clock's screen or a screenshot helps a lot (drag it in here).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version (if you have a clock)
+      description: On the clock's web page under System, Firmware Version, or the menu's Info row.
+      placeholder: "3.0.0"

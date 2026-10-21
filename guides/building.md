@@ -168,6 +168,21 @@ the adapter's 3.3 V: [hardware/programmer/README.md](../hardware/programmer/READ
 
 The log comes out on the same adapter (UART0, J6 pins 4 and 5): `./build_firmware.sh logs /dev/cu.usbserial-…`.
 
+### Without building: a release, flashed from the browser
+
+Each GitHub Release carries a ready-made factory file for each screen: `athan-v3-tft-<version>.factory.bin` for the
+colour screen and `athan-v3-<version>.factory.bin` for the OLED. [ESPHome Web](https://web.esphome.io) flashes one
+from Chrome or Edge on a computer, with nothing to install:
+
+1. Download the factory file for your screen from the
+   [Releases page](https://github.com/et7ad/esp32_athan/releases).
+2. Connect the clock as for the first flash above: the adapter on J6 with the jumper on pins 1 and 2 (or the press-in
+   programmer), or a DevKitC's USB.
+3. Open <https://web.esphome.io>, press **Connect**, and choose the adapter's port.
+4. Choose **Install** and pick the factory file. When it is done, remove the jumper and power the clock from its USB-C.
+
+The factory file writes the whole flash, so the clock starts afresh, Wi-Fi and settings included.
+
 ### Later updates
 
 Once the clock is on Wi-Fi, flash it over the network with `./build_firmware.sh ota`. Clocks also update themselves

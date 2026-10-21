@@ -149,6 +149,9 @@ relay; the radiojar link, written with `http://`, is the fallback if the relay g
 4. For colour-screen clocks, also run `./build_firmware.sh --display tft` and attach its two files,
    `athan-v3-tft.ota.bin` and `manifest-tft.json`, to the same release. TFT clocks read only `manifest-tft.json`,
    so a release without those files leaves them on their current version.
+5. Attach the two factory files as well, `athan-v3-3.0.1.factory.bin` and `athan-v3-tft-3.0.1.factory.bin` (also in
+   `firmware/binaries/`). Clocks never read them; they are for flashing a new board from the browser with ESPHome
+   Web, without building ([building.md](building.md) section 4).
 
 A change to `firmware/partitions.csv` cannot be delivered as an update: every clock then needs a full flash over
 USB ([building.md](building.md) section 4).
@@ -172,6 +175,10 @@ the branch `main` and the folder `/docs`. A push to `main` updates the site with
   When the firmware's screen, menu rows or keys change, change it there too.
 - **The parts and the checklist** on the build page are `docs/assets/parts.js`, from HARDWARE.md section 7 and
   building.md sections 1, 2 and 7: keep them in step.
+- **Hosting your own data** (`own-data.html`) quotes the firmware's `data_url`, `update_manifest` and default
+  mosque lines and the data files' formats: change it with them.
+- **Questions** come in through the issue forms in `.github/ISSUE_TEMPLATE/` (help, a mosque, a problem), which the
+  site's Help page opens.
 - **The 3D models** (`docs/assets/models/`) are made from the case's assembly files. After
   `hardware/enclosure/enclosure.py --assembly`, run
   `uv run --python 3.12 --with cadquery python scripts/make_site_models.py` (it needs Node.js for gltfpack).

@@ -90,6 +90,7 @@
           The checks in <code>firmware/tests/run_tests.sh</code> make sure the three agree.</p>
         <p><a href="read.html?doc=guides/maintaining.md#adding-a-mosque">How a mosque is added</a></p>
         <p><a href="read.html?doc=guides/maintaining.md#2-prayer-times">Publishing next year's times</a></p>
+        <p><a href="own-data.html">Hosting a list of your own</a>, for clocks that read only your mosques</p>
       </div>
     </div>
   </section>
@@ -172,7 +173,7 @@ async function draw() {
   a.href = `athantimes/${mosque.key}/${year}.json`; a.download = `${mosque.key}_${year}.json`;
 }
 const issue = document.getElementById('issue');
-issue.href = 'https://github.com/et7ad/esp32_athan/issues/new?title=' + encodeURIComponent('Add a mosque: ') + '&body=' + encodeURIComponent('Name (as it should show on the clock):\nWhere (a map link):\nTimetable (a link, or attach the file):\nDoes it have iqama times?\n');
+issue.href = 'https://github.com/et7ad/esp32_athan/issues/new?template=mosque.yml';
 choose(mosque, false);
 </script>
 </body>

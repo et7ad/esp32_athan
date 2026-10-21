@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: The website and its guides
+    url: https://et7ad.github.io/esp32_athan/
+    about: Setting up, using and building the clock, with the clock to try in your browser.
