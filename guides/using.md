@@ -464,8 +464,13 @@ Mosques available now:
 | Masjid Al-Noor, Santa Clara | [37.3502, -121.9554](https://www.google.com/maps?q=37.350219,-121.955360) | 2025-2026 |
 | Woodland Mosque | [38.6738, -121.7644](https://www.google.com/maps?q=38.673842,-121.764437) | 2026-2027 |
 | Visalia, California | [36.3302, -119.2921](https://www.google.com/maps?q=36.330228,-119.292058) | 2026-2027 |
+| Cairo, Egypt | [30.0444, 31.2357](https://www.google.com/maps?q=30.044420,31.235712) | 2026-2028 |
+| Damietta, Egypt | [31.4166, 31.8133](https://www.google.com/maps?q=31.416569,31.813316) | 2026-2028 |
+| Alexandria, Egypt | [31.2001, 29.9187](https://www.google.com/maps?q=31.200092,29.918739) | 2026-2028 |
 
-Visalia's times are IslamicFinder's for the city, not one mosque's.
+Visalia's times are IslamicFinder's for the city, not one mosque's. The Egyptian cities' times are the official
+Egyptian General Authority of Survey calculation, as published by [Dar al-Ifta](https://www.dar-alifta.org/ar/prayer),
+not one mosque's.
 
 To add your mosque, open an issue on GitHub with its yearly timetable. [maintaining.md](maintaining.md) section 2
 shows how a mosque is added.

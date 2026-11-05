@@ -69,7 +69,9 @@ Make those with that repository's own scripts and commit them there; the scripts
 2. Make its yearly file or files with one of the scripts above.
 3. Add it to the table in [using.md](using.md) section 7: its name, its map link and its years.
 4. If version 2 clocks there need it too, add it to the version 2 repository as well: its own Location list, daily
-   files and time zone file.
+   files and time zone file. Version 2 clocks have their list of keys built in, so there a new mosque takes a free
+   placeholder key such as `masjid7`, which they already offer. Give that key as `v2_key` in the mosque's entry
+   here, and `make_yearly_json.py` reads its daily files from there.
 
 No firmware update is needed. Clocks read the list of mosques from mosques.json when they start, every 6 hours, and
 when an owner opens the menu's Location row if their copy is more than 2 hours old (a restart loads it at once); they

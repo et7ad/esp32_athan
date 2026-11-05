@@ -3,7 +3,9 @@
 
 The V2 repository (et7ad/esp_athan) keeps one JSON per day, docs/athantimes/<key>/<year>/<DDD>.json, because
 deployed V2 devices read them there. This script reads those days and writes ONE positional file per year into
-this repository: docs/athantimes/<key>/<year>.json (format: prayertimes_specs.md).
+this repository: docs/athantimes/<key>/<year>.json (format: prayertimes_specs.md). The key is the same in both
+repositories unless mosques.json gives the V2 one as v2_key: V2 clocks have their keys built in, so the V2
+repository can keep a mosque under a placeholder key (masjid7) that is called by its name here (damietta).
 
 Use it for years that only exist in the V2 repository. New timetables go straight to a yearly file with
 source_to_yearly.py, parse_Islamicfinder/parse_islamicfinder_yearly.py or santaclara_prayer_times_parser.py.
@@ -26,7 +28,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from athan_yearly import (DataError, OUT_ROOT, REPO, day_from_times, mosque, write_year)  # noqa: E402
+from athan_yearly import (DataError, OUT_ROOT, REPO, day_from_times, mosque, mosques, write_year)  # noqa: E402
 
 
 def read_daily_year(year_dir: pathlib.Path, key: str, year: int, warnings: list) -> list:
@@ -59,8 +61,9 @@ def main() -> int:
 
     failed = 0
     done = set()  # (key, year) found in the V2 data and converted (or tried)
+    here = {m["v2_key"]: k for k, m in mosques().items() if m.get("v2_key")}   # V2 folder -> key in this repository
     for key_dir in sorted(p for p in daily_root.iterdir() if p.is_dir()):
-        key = key_dir.name
+        key = here.get(key_dir.name, key_dir.name)
         if a.key and key not in a.key:
             continue
         years = sorted(int(p.name) for p in key_dir.iterdir() if p.is_dir() and p.name.isdigit())
